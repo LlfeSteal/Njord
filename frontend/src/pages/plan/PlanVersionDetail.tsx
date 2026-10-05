@@ -1,21 +1,22 @@
 // Détail d'une version de plan de charge (§7.3) : en-tête, filtres, table paginée, totaux, export, alias.
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
-  Alert,
-  Badge,
-  Button,
-  Center,
+  Banner,
+  Card,
   Group,
-  Loader,
+  Link,
+  LoadingBlock,
   Pagination,
-  Paper,
   Select,
+  SkeletonRows,
+  Spinner,
   Stack,
+  Tag,
   Text,
   Title,
-} from '@mantine/core';
-import { IconArchive, IconArrowLeft, IconTrash } from '@tabler/icons-react';
+} from '../../ui';
+import { IconArrowLeft } from '../../ui/Icons';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { planApi, versionsApi } from '../../api/client';
 import type { PlanLine } from '../../api/types';
@@ -71,21 +72,17 @@ export default function PlanVersionDetail() {
   };
 
   const back = (
-    <Button component={Link} to="/plan" variant="subtle" leftSection={<IconArrowLeft size={16} />} px={0}>
-      Plans de charge
-    </Button>
+    <Link to="/plan">
+      <Group gap={4} wrap={false}>
+        <IconArrowLeft size={14} /> Plans de charge
+      </Group>
+    </Link>
   );
 
-  if (version.isLoading) {
-    return (
-      <Center py="xl">
-        <Loader />
-      </Center>
-    );
-  }
+  if (version.isLoading) return <LoadingBlock />;
   if (version.error || !v) {
     return (
-      <Stack align="flex-start">
+      <Stack gap={12} align="start">
         {back}
         <ErrorAlert error={version.error ?? 'Version introuvable'} title="Version introuvable" />
       </Stack>
@@ -93,62 +90,43 @@ export default function PlanVersionDetail() {
   }
 
   return (
-    <Stack gap="md">
-      <div>
+    <Stack gap={12}>
+      <Stack gap={4}>
         {back}
-        <Group gap="sm" mt={4} wrap="wrap">
+        <Group gap={8} mt={4}>
           <Title order={2}>{v.intitule}</Title>
           <StatusBadge statut={v.statut} />
-          {v.layout && (
-            <Badge variant="outline" color="gray">
-              Layout {v.layout}
-            </Badge>
-          )}
         </Group>
-        <Group gap="lg" mt={6} wrap="wrap">
-          <Text size="sm">
-            <Text span c="dimmed">
-              Période :{' '}
-            </Text>
-            {fmtPeriod(v.periode_debut, v.periode_fin)}
-          </Text>
-          <Text size="sm">
-            <Text span c="dimmed">
-              Importée le{' '}
-            </Text>
-            {fmtDateTime(v.importee_le)}
-            {v.importeur ? ` par ${v.importeur}` : ''}
-          </Text>
-          {v.filename && (
-            <Text size="sm" c="dimmed">
-              {v.filename}
-            </Text>
-          )}
-        </Group>
-        <Group gap="xs" mt={8}>
-          <Badge variant="light" color="indigo">
+        <Text size="sm" tone="secondary">
+          Période : {fmtPeriod(v.periode_debut, v.periode_fin)} · Importée le {fmtDateTime(v.importee_le)}
+          {v.importeur ? ` par ${v.importeur}` : ''}
+          {v.filename ? ` · ${v.filename}` : ''}
+          {v.layout ? ` · Layout ${v.layout}` : ''}
+        </Text>
+        <Group gap={16} mt={4}>
+          <Text as="span" tabular>
             {fmtNumber(v.nb_lignes)} lignes
-          </Badge>
-          <Badge variant="light" color="yellow">
+          </Text>
+          <Tag tone="warning" glyph="warning">
             {fmtNumber(v.nb_warn)} warn
-          </Badge>
-          <Badge variant="light" color="red">
+          </Tag>
+          <Tag tone="danger" glyph="danger">
             {fmtNumber(v.nb_drop)} drop
-          </Badge>
+          </Tag>
         </Group>
-      </div>
+      </Stack>
 
       {v.statut === 'archivee' && (
-        <Alert color="gray" variant="light" icon={<IconArchive size={18} />}>
+        <Banner tone="info">
           Version archivée{v.archivee_le ? ` le ${fmtDateTime(v.archivee_le)}` : ''} — consultable et exportable. Elle
           n'est plus utilisée par défaut par l'onglet Analyse.
-        </Alert>
+        </Banner>
       )}
       {purged && (
-        <Alert color="red" variant="light" icon={<IconTrash size={18} />}>
+        <Banner tone="warning">
           Version purgée{v.purgee_le ? ` le ${fmtDateTime(v.purgee_le)}` : ''} : ses lignes ont été définitivement
           supprimées.
-        </Alert>
+        </Banner>
       )}
 
       {!purged && (
@@ -167,9 +145,7 @@ export default function PlanVersionDetail() {
           <ErrorAlert error={lines.error} title="Chargement des lignes impossible" />
 
           {lines.isLoading ? (
-            <Center py="xl">
-              <Loader />
-            </Center>
+            <SkeletonRows rows={10} />
           ) : (
             lines.data && (
               <PlanLinesTable
@@ -185,54 +161,44 @@ export default function PlanVersionDetail() {
           )}
 
           {lines.data && (
-            <Paper
-              withBorder
-              shadow="sm"
-              p="sm"
+            <Card
+              padding={12}
               style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
               aria-label="Totaux sur le filtre courant"
             >
-              <Group justify="space-between" gap="sm" wrap="wrap">
-                <Group gap="lg" wrap="wrap">
-                  <Text size="sm">
-                    <b>{fmtNumber(total)}</b> ligne{total > 1 ? 's' : ''}
+              <Group justify="between" gap={8}>
+                <Group gap={16}>
+                  <Text as="span" tabular>
+                    <strong>{fmtNumber(total)}</strong> ligne{total > 1 ? 's' : ''}
                   </Text>
-                  <Text size="sm">
-                    Σ charge totale : <b>{fmtHours(lines.data.totals.charge_totale)}</b>
+                  <Text as="span" tabular>
+                    Σ charge totale : <strong>{fmtHours(lines.data.totals.charge_totale)}</strong>
                   </Text>
-                  <Text size="sm">
-                    Σ PPS : <b>{fmtEur(lines.data.totals.pps)}</b>
+                  <Text as="span" tabular>
+                    Σ PPS : <strong>{fmtEur(lines.data.totals.pps)}</strong>
                   </Text>
-                  {lines.isFetching && <Loader size="xs" />}
-                  <Text size="xs" c="dimmed">
+                  {lines.isFetching && <Spinner />}
+                  <Text as="span" size="sm" tone="secondary">
                     {activeCount > 0 ? 'sur toutes les lignes filtrées' : 'sur toute la version'}
                   </Text>
                 </Group>
-                <Group gap="sm" wrap="wrap">
+                <Group gap={8}>
                   <Select
                     aria-label="Lignes par page"
-                    size="xs"
-                    w={110}
-                    allowDeselect={false}
                     data={PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} / page` }))}
                     value={String(limit)}
                     onChange={(val) => val && update({ limit: val })}
                   />
                   {totalPages > 1 && (
                     <Pagination
-                      size="sm"
+                      page={Math.min(page, totalPages)}
                       total={totalPages}
-                      value={Math.min(page, totalPages)}
                       onChange={(p) => update({ page: String(p) })}
-                      getControlProps={(control) => ({
-                        'aria-label':
-                          control === 'next' ? 'Page suivante' : control === 'previous' ? 'Page précédente' : control,
-                      })}
                     />
                   )}
                 </Group>
               </Group>
-            </Paper>
+            </Card>
           )}
         </>
       )}

@@ -1,19 +1,17 @@
 // Barre de filtres du détail d'une version de plan (§7.3) + export CSV.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Badge,
   Button,
+  DateInput,
   Group,
-  Input,
-  Loader,
-  Paper,
+  SearchField,
   SegmentedControl,
   Select,
-  SimpleGrid,
-  TextInput,
-} from '@mantine/core';
-import { useDebouncedValue } from '@mantine/hooks';
-import { IconDownload, IconFilterOff, IconSearch } from '@tabler/icons-react';
+  Spinner,
+  Text,
+  useDebouncedValue,
+} from '../../ui';
+import { IconDownload, IconFilterOff } from '../../ui/Icons';
 import type { Facets } from '../../api/types';
 import type { Filters, FiltersPatch, FilterKey } from './useLineFilters';
 
@@ -34,6 +32,7 @@ interface Props {
   csvHref: string;
 }
 
+/** Pop-up button de filtre sur une facette (le titre du bouton est le nom du filtre). */
 function FacetSelect({
   label,
   name,
@@ -41,7 +40,6 @@ function FacetSelect({
   filters,
   update,
   render,
-  loading,
 }: {
   label: string;
   name: FilterKey;
@@ -49,7 +47,6 @@ function FacetSelect({
   filters: Filters;
   update: (patch: FiltersPatch) => void;
   render?: (v: string) => string;
-  loading?: boolean;
 }) {
   const current = filters[name];
   const data = useMemo(() => {
@@ -59,16 +56,15 @@ function FacetSelect({
   }, [values, current, render]);
   return (
     <Select
-      label={label}
-      placeholder="Tous"
+      aria-label={label}
+      placeholder={label}
       data={data}
       value={current || null}
       onChange={(v) => update({ [name]: v ?? '' })}
       searchable
       clearable
-      limit={200}
-      nothingFoundMessage="Aucun résultat"
-      rightSection={loading ? <Loader size="xs" /> : undefined}
+      menuWidth={290}
+      nothingFound="Aucun résultat"
     />
   );
 }
@@ -103,17 +99,24 @@ export default function PlanLinesFilters({
     filters.date_from && filters.date_to && filters.date_to < filters.date_from
       ? 'Date de fin antérieure au début'
       : undefined;
-  const common = { filters, update, loading: facetsLoading };
+  const common = { filters, update };
+
+  // Téléchargement du CSV (le kit n'expose pas de bouton-lien externe avec `download`).
+  const downloadCsv = () => {
+    const a = document.createElement('a');
+    a.href = csvHref;
+    a.download = '';
+    a.click();
+  };
 
   return (
-    <Paper withBorder p="sm">
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }} spacing="sm" verticalSpacing="xs">
-        <TextInput
-          label="Recherche"
+    <Group justify="between" align="start" gap={8}>
+      <Group gap={8}>
+        <SearchField
+          aria-label="Recherche"
           placeholder="Libellé, CT, ressource…"
-          leftSection={<IconSearch size={16} />}
           value={qInput}
-          onChange={(e) => setQInput(e.currentTarget.value)}
+          onChange={setQInput}
         />
         <FacetSelect label="CT" name="ct" values={facets?.ct} {...common} />
         <FacetSelect label="Ressource" name="ressource" values={facets?.ressource} {...common} />
@@ -126,65 +129,59 @@ export default function PlanLinesFilters({
           {...common}
         />
         <FacetSelect label="Squad" name="squad_id" values={facets?.squad_id} render={squadLabel} {...common} />
-        <Input.Wrapper label="Ressources [inactif]">
-          <SegmentedControl
-            fullWidth
-            value={inactiveValue}
-            onChange={(v) => update({ inactive: v === 'all' ? '' : v })}
-            data={[
-              { value: 'all', label: 'Toutes' },
-              { value: 'false', label: 'Actives' },
-              { value: 'true', label: 'Inactives' },
-            ]}
-          />
-        </Input.Wrapper>
-        <Group grow gap="xs" align="flex-start">
-          <TextInput
-            type="date"
-            label="Période du"
+        <SegmentedControl
+          aria-label="Ressources [inactif]"
+          equal={false}
+          value={inactiveValue}
+          onChange={(v) => update({ inactive: v === 'all' ? '' : v })}
+          data={[
+            { value: 'all', label: 'Toutes' },
+            { value: 'false', label: 'Actives' },
+            { value: 'true', label: 'Inactives' },
+          ]}
+        />
+        <Group gap={6} align="start" wrap={false}>
+          <Text as="span" size="sm" tone="secondary" style={{ lineHeight: '28px' }}>
+            Période du
+          </Text>
+          <DateInput
+            aria-label="Période du"
+            width={150}
             value={filters.date_from}
-            onChange={(e) => update({ date_from: e.currentTarget.value })}
+            onChange={(v) => update({ date_from: v })}
           />
-          <TextInput
-            type="date"
-            label="au"
+          <Text as="span" size="sm" tone="secondary" style={{ lineHeight: '28px' }}>
+            au
+          </Text>
+          <DateInput
+            aria-label="au"
+            width={150}
             value={filters.date_to}
             error={dateError}
-            onChange={(e) => update({ date_to: e.currentTarget.value })}
+            onChange={(v) => update({ date_to: v })}
           />
         </Group>
-      </SimpleGrid>
-      <Group justify="space-between" mt="sm">
-        <Group gap="xs">
-          <Button
-            variant="subtle"
-            size="xs"
-            leftSection={<IconFilterOff size={16} />}
-            disabled={activeCount === 0}
-            onClick={() => {
-              setQInput('');
-              reset();
-            }}
-          >
-            Réinitialiser les filtres
-          </Button>
-          {activeCount > 0 && (
-            <Badge variant="light" size="sm">
-              {activeCount} filtre{activeCount > 1 ? 's' : ''} actif{activeCount > 1 ? 's' : ''}
-            </Badge>
-          )}
-        </Group>
+        {facetsLoading && <Spinner label="Chargement des filtres" />}
         <Button
-          component="a"
-          href={csvHref}
-          download
-          variant="light"
-          size="xs"
-          leftSection={<IconDownload size={16} />}
+          variant="plain"
+          icon={<IconFilterOff size={15} />}
+          disabled={activeCount === 0}
+          onClick={() => {
+            setQInput('');
+            reset();
+          }}
         >
-          Export CSV (lignes filtrées)
+          Réinitialiser
         </Button>
+        {activeCount > 0 && (
+          <Text as="span" size="sm" tone="secondary" tabular>
+            {activeCount} filtre{activeCount > 1 ? 's' : ''} actif{activeCount > 1 ? 's' : ''}
+          </Text>
+        )}
       </Group>
-    </Paper>
+      <Button icon={<IconDownload size={15} />} onClick={downloadCsv}>
+        Export CSV (lignes filtrées)
+      </Button>
+    </Group>
   );
 }

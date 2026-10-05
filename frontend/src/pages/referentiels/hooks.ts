@@ -1,20 +1,20 @@
 // Hooks et utilitaires des référentiels (personnes, squads), réutilisés par l'onglet Plan de charge.
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { notifications } from '@mantine/notifications';
 import { referentielApi } from '../../api/client';
 import type { Personne, Squad } from '../../api/types';
 import { qk } from '../../lib/queryKeys';
+import { toast } from '../../ui';
 
 /** Clé d'une fiche personne (sous ['personnes'] pour être invalidée avec la liste). */
 export const personneKey = (id: string) => ['personnes', 'id', id] as const;
 
 export function notifyError(e: unknown, title = 'Erreur') {
-  notifications.show({ color: 'red', title, message: e instanceof Error ? e.message : String(e) });
+  toast({ tone: 'error', title, message: e instanceof Error ? e.message : String(e) });
 }
 
 export function notifySuccess(message: string) {
-  notifications.show({ color: 'green', message });
+  toast({ tone: 'success', title: message });
 }
 
 /** Après toute mutation de référentiel : la liste des personnes et l'analyse (correspondances) sont obsolètes. */

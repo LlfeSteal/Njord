@@ -1,23 +1,20 @@
-// Fiche personne (drawer) : identité, matricules, alias, fusion vers une fiche existante (§6.2).
+// Fiche personne (panneau latéral) : identité, matricules, alias, fusion vers une fiche existante (§6.2).
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  ActionIcon,
-  Alert,
+  Banner,
   Button,
-  Center,
-  Divider,
-  Drawer,
   Group,
-  Loader,
+  IconButton,
+  LoadingBlock,
   Modal,
   Select,
+  Sheet,
   Stack,
   Text,
   TextInput,
   Title,
-  Tooltip,
-} from '@mantine/core';
-import { IconGitMerge, IconPlus, IconTrash } from '@tabler/icons-react';
+} from '../../ui';
+import { IconMerge, IconPlus, IconTrash } from '../../ui/Icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { referentielApi } from '../../api/client';
 import type { Personne } from '../../api/types';
@@ -48,15 +45,14 @@ export default function PersonneDrawer({ personneId, onClose, onSwitch }: Props)
   });
   const p = q.data;
   return (
-    <Drawer
+    <Sheet
       opened={!!personneId}
       onClose={onClose}
-      position="right"
-      size="lg"
+      width={560}
       title={
         p ? (
-          <Group gap="xs">
-            <Title order={4}>{p.display_name}</Title>
+          <Group gap={8} wrap={false}>
+            <span>{p.display_name}</span>
             <PersonneStatutBadge statut={p.statut} />
           </Group>
         ) : (
@@ -64,21 +60,17 @@ export default function PersonneDrawer({ personneId, onClose, onSwitch }: Props)
         )
       }
     >
-      {q.isLoading && (
-        <Center py="xl">
-          <Loader />
-        </Center>
-      )}
+      {q.isLoading && <LoadingBlock />}
       <ErrorAlert error={q.error} title="Fiche introuvable" />
       {p && <PersonneDetail key={p.id} personne={p} onSwitch={onSwitch} />}
-    </Drawer>
+    </Sheet>
   );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Stack gap="xs">
-      <Divider label={title} labelPosition="left" />
+    <Stack gap={8}>
+      <Title order={4}>{title}</Title>
       {children}
     </Stack>
   );
@@ -87,10 +79,13 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 function PersonneDetail({ personne: p, onSwitch }: { personne: Personne; onSwitch: (id: string) => void }) {
   const squads = useSquadIndex();
   return (
-    <Stack gap="lg">
-      <Text size="xs" c="dimmed">
-        Nom normalisé : <span style={{ fontFamily: 'monospace' }}>{p.nom_normalise || '—'}</span> · créée le{' '}
-        {fmtDateTime(p.created_at)}
+    <Stack gap={24}>
+      <Text size="sm" tone="secondary">
+        Nom normalisé :{' '}
+        <Text as="span" mono>
+          {p.nom_normalise || '—'}
+        </Text>{' '}
+        · créée le {fmtDateTime(p.created_at)}
       </Text>
       <Section title="Identité">
         <IdentityForm personne={p} squadOptions={squads.options} />
@@ -145,24 +140,23 @@ function IdentityForm({
 
   return (
     <form onSubmit={submit}>
-      <Stack gap="xs">
+      <Stack gap={8}>
         <TextInput
           label="Nom affiché"
           value={name}
-          onChange={(e) => setName(e.currentTarget.value)}
+          onChange={setName}
           required
           error={!name.trim() ? 'Nom requis' : undefined}
         />
-        <Group grow align="flex-start">
-          <Select
+        <Group grow align="start" gap={8}>
+          <Select<Personne['statut']>
             label="Statut"
-            allowDeselect={false}
             data={[
               { value: 'brouillon', label: 'Brouillon' },
               { value: 'validee', label: 'Validée' },
             ]}
             value={statut}
-            onChange={(v) => v && setStatut(v as Personne['statut'])}
+            onChange={(v) => v && setStatut(v)}
           />
           <Select
             label="Squad"
@@ -172,13 +166,11 @@ function IdentityForm({
             onChange={setSquadId}
             searchable
             clearable
-            nothingFoundMessage="Aucune squad"
+            nothingFound="Aucune squad"
           />
         </Group>
-        <Group justify="flex-end">
+        <Group justify="end" gap={8}>
           <Button
-            variant="default"
-            size="xs"
             disabled={!dirty}
             onClick={() => {
               setName(p.display_name);
@@ -188,7 +180,7 @@ function IdentityForm({
           >
             Annuler
           </Button>
-          <Button type="submit" size="xs" disabled={!dirty || !name.trim()} loading={save.isPending}>
+          <Button type="submit" variant="primary" disabled={!dirty || !name.trim()} loading={save.isPending}>
             Enregistrer
           </Button>
         </Group>
@@ -212,19 +204,19 @@ function MatriculesSection({ personne: p }: { personne: Personne }) {
     if (m) add.mutate(m);
   };
   return (
-    <Stack gap="xs">
+    <Stack gap={8}>
       <MatriculesList matricules={p.matricules} />
       <form onSubmit={submit}>
-        <Group gap="xs" align="flex-end">
-          <TextInput
-            style={{ flex: 1 }}
-            size="xs"
-            aria-label="Nouveau matricule"
-            placeholder="Code ressource PDC (R_001) ou matricule Réalisé (A12345)"
-            value={value}
-            onChange={(e) => setValue(e.currentTarget.value)}
-          />
-          <Button type="submit" size="xs" leftSection={<IconPlus size={14} />} disabled={!value.trim()} loading={add.isPending}>
+        <Group gap={8} align="end" wrap={false}>
+          <div style={{ flex: 1 }}>
+            <TextInput
+              aria-label="Nouveau matricule"
+              placeholder="Code ressource PDC (R_001) ou matricule Réalisé (A12345)"
+              value={value}
+              onChange={setValue}
+            />
+          </div>
+          <Button type="submit" icon={<IconPlus size={15} />} disabled={!value.trim()} loading={add.isPending}>
             Ajouter
           </Button>
         </Group>
@@ -252,35 +244,32 @@ function AliasSection({ personne: p }: { personne: Personne }) {
     if (a) add.mutate(a);
   };
   return (
-    <Stack gap="xs">
+    <Stack gap={8}>
       <AliasTable
         personne={p}
         actions={(a) => (
-          <Tooltip label="Supprimer l'alias" withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              size="sm"
-              aria-label={`Supprimer l'alias ${a.alias}`}
-              loading={remove.isPending && remove.variables === a.id}
-              onClick={() => remove.mutate(a.id)}
-            >
-              <IconTrash size={14} />
-            </ActionIcon>
-          </Tooltip>
+          <IconButton
+            destructive
+            size="sm"
+            label={`Supprimer l'alias ${a.alias}`}
+            loading={remove.isPending && remove.variables === a.id}
+            onClick={() => remove.mutate(a.id)}
+          >
+            <IconTrash size={15} />
+          </IconButton>
         )}
       />
       <form onSubmit={submit}>
-        <Group gap="xs" align="flex-end">
-          <TextInput
-            style={{ flex: 1 }}
-            size="xs"
-            aria-label="Nouvel alias"
-            placeholder="Variante de nom (ex. telle qu'écrite dans le Réalisé)"
-            value={value}
-            onChange={(e) => setValue(e.currentTarget.value)}
-          />
-          <Button type="submit" size="xs" leftSection={<IconPlus size={14} />} disabled={!value.trim()} loading={add.isPending}>
+        <Group gap={8} align="end" wrap={false}>
+          <div style={{ flex: 1 }}>
+            <TextInput
+              aria-label="Nouvel alias"
+              placeholder="Variante de nom (ex. telle qu'écrite dans le Réalisé)"
+              value={value}
+              onChange={setValue}
+            />
+          </div>
+          <Button type="submit" icon={<IconPlus size={15} />} disabled={!value.trim()} loading={add.isPending}>
             Ajouter
           </Button>
         </Group>
@@ -332,33 +321,28 @@ function MergeSection({ personne: p, onMerged }: { personne: Personne; onMerged:
   });
 
   return (
-    <Stack gap="xs">
-      <Text size="sm" c="dimmed">
+    <Stack gap={8}>
+      <Text size="sm" tone="secondary">
         Si cette fiche est un doublon d'une personne existante, rattachez-la : ses matricules, alias et lignes de plan
         sont transférés vers la fiche choisie, puis cette fiche est supprimée.
       </Text>
       <ErrorAlert error={all.error} />
-      <Group gap="xs" align="flex-end">
-        <Select
-          style={{ flex: 1 }}
-          size="xs"
-          aria-label="Fiche cible"
-          placeholder={all.isLoading ? 'Chargement…' : 'Choisir la fiche existante'}
-          data={options}
-          value={targetId}
-          onChange={setTargetId}
-          searchable
-          clearable
-          limit={100}
-          nothingFoundMessage="Aucune personne"
-        />
-        <Button
-          size="xs"
-          color="orange"
-          leftSection={<IconGitMerge size={14} />}
-          disabled={!targetId}
-          onClick={() => setConfirmOpen(true)}
-        >
+      <Group gap={8} align="end" wrap={false}>
+        <div style={{ flex: 1 }}>
+          <Select
+            width="100%"
+            aria-label="Fiche cible"
+            placeholder={all.isLoading ? 'Chargement…' : 'Choisir la fiche existante'}
+            data={options}
+            value={targetId}
+            onChange={setTargetId}
+            searchable
+            clearable
+            menuWidth={290}
+            nothingFound="Aucune personne"
+          />
+        </div>
+        <Button icon={<IconMerge size={15} />} disabled={!targetId} onClick={() => setConfirmOpen(true)}>
           Rattacher…
         </Button>
       </Group>
@@ -367,25 +351,30 @@ function MergeSection({ personne: p, onMerged }: { personne: Personne; onMerged:
         opened={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title="Confirmer le rattachement"
-        zIndex={400}
-        centered
-      >
-        <Stack gap="sm">
-          <Text size="sm">
-            La fiche <b>{p.display_name}</b> va être fusionnée dans <b>{target?.display_name ?? targetId}</b>.
-          </Text>
-          <Alert color="orange" variant="light">
-            Matricules, alias et lignes de plan seront transférés vers la fiche cible, puis « {p.display_name} » sera
-            supprimée. Cette opération est irréversible.
-          </Alert>
-          <Group justify="flex-end">
-            <Button variant="default" onClick={() => setConfirmOpen(false)}>
-              Annuler
-            </Button>
-            <Button color="orange" loading={merge.isPending} onClick={() => targetId && merge.mutate(targetId)}>
+        size="sm"
+        footer={
+          <>
+            <Button onClick={() => setConfirmOpen(false)}>Annuler</Button>
+            <Button
+              variant="primary"
+              destructive
+              loading={merge.isPending}
+              onClick={() => targetId && merge.mutate(targetId)}
+            >
               Rattacher
             </Button>
-          </Group>
+          </>
+        }
+      >
+        <Stack gap={12}>
+          <Text>
+            La fiche <strong>{p.display_name}</strong> va être fusionnée dans{' '}
+            <strong>{target?.display_name ?? targetId}</strong>.
+          </Text>
+          <Banner tone="warning" compact>
+            Matricules, alias et lignes de plan seront transférés vers la fiche cible, puis « {p.display_name} » sera
+            supprimée. Cette opération est irréversible.
+          </Banner>
         </Stack>
       </Modal>
     </Stack>

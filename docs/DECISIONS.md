@@ -7,6 +7,8 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 2. **Pas de rôles** : tout le monde peut tout faire (purge comprise). Restent : purge si archivée depuis ≥ `purge_delai_jours` + saisie exacte de l'intitulé. Masquage des colonnes sensibles = toggle d'affichage (paramètre `mask_sensitive`). Jamais de donnée sensible dans les logs.
 3. **Heures MO** : `heures = QUANTITE` seulement si `TYPE ∈ mo_types` **et** `CATEGORIE = "MAIN D'OEUVRE"` ; sinon `heures = 0, eur = TOTAL EN €`. (Dans la démo, des lignes `CAPACITE SUR SITE` de catégorie `PRESTATION` portent des montants dans `Quantité`.) Les lignes MO ont `eur = 0` (spec §3.1, évite le double comptage) ; leur coût est exposé à titre informatif (`BudgetCT.cout_mo_eur`).
 
+4. **Refonte visuelle** (2026-10-05) : le front suit le guide `docs/STYLE.md` (HIG Apple transposées au web, adapté du guide Nornir). **Mantine et `@tabler/icons-react` sont retirés** au profit d'un kit maison `src/ui/` (CSS natif + tokens, thème Automatique / Clair / Sombre). Les flags et statuts n'utilisent plus d'emoji : glyphes dont la forme porte le sens, couleurs à sens unique (vert conforme, orange hors plan, rouge sur-imputation, violet sous-imputation, gris absence).
+
 ## Format démo — Plan de charge
 - Onglet `Style par défaut`, en-tête ligne 3, 16 colonnes (12 de la spec + `Quantité affectée`, `Taux fixe`, `Depuis`, `Pendant`). Les colonnes en plus ne font pas échouer le contrôle d'en-tête : la règle « 12 colonnes conformes » = les 12 colonnes attendues présentes **dans l'ordre** en tête de ligne.
 - Lignes ignorées (non comptées) : lignes vides, **lignes de groupe** (seule la 1re cellule remplie, ex. `Squad Alpha — Plateforme`), **lignes `Somme`**.

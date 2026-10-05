@@ -1,28 +1,28 @@
 // Assistant d'import en 2 temps (preview → confirmation), commun plan / réalisé.
 // CONTRAT FIGÉ (props) — implémentation : agent « FE partagé ».
-// Étapes : dépôt .xlsx (Dropzone) + intitulé optionnel + importeur optionnel → versionsApi.preview
+// Étapes : dépôt .xlsx (FileDrop) + intitulé optionnel + importeur optionnel → versionsApi.preview
 // → affichage du bilan (ImportReport : totaux ok/warn/drop, période, layout & % inactifs &
 //   nouvelles personnes/squads pour le plan, montant total pour le réalisé, motifs, issues)
 // → si report.active_version : case « Archiver la version active « X » ? » (cochée par défaut)
 // → versionsApi.commit → notification, invalidation ['versions'] et ['analyse'], onImported.
 // Les erreurs bloquantes (422 : onglet introuvable, en-tête non conforme) s'affichent dans l'assistant.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert,
+  Banner,
   Button,
+  Card,
   Checkbox,
+  FileDrop,
   Group,
   Modal,
-  Paper,
   Stack,
-  Stepper,
+  Steps,
   Text,
   TextInput,
-} from '@mantine/core';
-import { Dropzone, type FileRejection } from '@mantine/dropzone';
-import { notifications } from '@mantine/notifications';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { IconFileSpreadsheet, IconUpload, IconX } from '@tabler/icons-react';
+  toast,
+} from '../ui';
+import { IconFileSpreadsheet } from '../ui/Icons';
 import { ApiError, versionsApi } from '../api/client';
 import type { ImportReport, ImportResult, Kind } from '../api/types';
 import { fmtDateTime, fmtNumber } from '../lib/format';
@@ -37,7 +37,6 @@ export interface ImportWizardProps {
   onImported?: (r: ImportResult) => void;
 }
 
-const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const MAX_SIZE = 50 * 1024 * 1024;
 const KIND_LABEL: Record<Kind, string> = { plan: 'plan de charge', realise: 'réalisé' };
 
@@ -55,12 +54,18 @@ function fmtSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} Mo`;
 }
 
-function rejectionMessage(rej: FileRejection[]): string {
-  const codes = rej.flatMap((r) => r.errors.map((e) => e.code));
-  if (codes.includes('file-too-large')) return 'Fichier trop volumineux (50 Mo maximum).';
-  if (codes.includes('file-invalid-type')) return 'Format non accepté : déposez un fichier Excel .xlsx.';
-  if (codes.includes('too-many-files')) return 'Un seul fichier à la fois.';
-  return rej[0]?.errors[0]?.message ?? 'Fichier refusé.';
+const STEPS = [
+  { label: 'Fichier', description: 'Dépôt et analyse' },
+  { label: 'Bilan', description: 'Contrôle du parsing' },
+  { label: 'Import', description: 'Confirmation' },
+];
+
+/** Reformule le motif de refus du FileDrop avec les messages métier de l'assistant. */
+function rejectionMessage(reason: string): string {
+  if (/volumineux/i.test(reason)) return 'Fichier trop volumineux (50 Mo maximum).';
+  if (/format/i.test(reason)) return 'Format non accepté : déposez un fichier Excel .xlsx.';
+  if (/un seul/i.test(reason)) return 'Un seul fichier à la fois.';
+  return reason || 'Fichier refusé.';
 }
 
 export default function ImportWizard({ kind, opened, onClose, onImported }: ImportWizardProps) {
@@ -92,8 +97,8 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
     onSuccess: (res) => {
       saveOperateur(importeur);
       invalidateLifecycle(qc, true);
-      notifications.show({
-        color: 'green',
+      toast({
+        tone: 'success',
         title: 'Import réussi',
         message: `Version « ${res.version.intitule} » créée (${fmtNumber(res.version.nb_lignes)} lignes, statut ${
           res.version.statut === 'active' ? 'active' : 'archivée'
@@ -127,9 +132,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
     commit.reset();
   };
 
-  const onDrop = (files: File[]) => {
-    const f = files[0];
-    if (!f) return;
+  const onDrop = (f: File) => {
     setFile(f);
     setRejectMsg(null);
     invalidatePreview();
@@ -146,223 +149,209 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
   const blocking = previewErr instanceof ApiError && previewErr.status === 422;
   const active = report?.active_version ?? null;
 
+  // Contenu et actions de pied propres à chaque étape.
+  let content: ReactNode = null;
+  let footer: ReactNode = null;
+
+  if (step === 0) {
+    // ---------------------------------------------------------------- 1. Fichier
+    content = (
+      <Stack gap={8}>
+        {!file ? (
+          <FileDrop
+            onFile={onDrop}
+            onReject={(reason) => setRejectMsg(rejectionMessage(reason))}
+            accept={['.xlsx']}
+            maxSize={MAX_SIZE}
+          >
+            <Stack gap={4} align="center">
+              <IconFileSpreadsheet size={40} />
+              <Text weight={500}>Glissez un fichier .xlsx ici ou cliquez pour le sélectionner</Text>
+              <Text size="sm" tone="secondary">
+                Un seul fichier Excel, 50 Mo maximum.
+              </Text>
+            </Stack>
+          </FileDrop>
+        ) : (
+          <Card padding={12}>
+            <Group justify="between" wrap={false}>
+              <Group gap={8} wrap={false} style={{ minWidth: 0 }}>
+                <IconFileSpreadsheet size={20} />
+                <div style={{ minWidth: 0 }}>
+                  <Text weight={500} truncate>
+                    {file.name}
+                  </Text>
+                  <Text size="sm" tone="secondary" tabular>
+                    {fmtSize(file.size)}
+                  </Text>
+                </div>
+              </Group>
+              <Button variant="plain" size="sm" onClick={changeFile} disabled={busy}>
+                Changer de fichier
+              </Button>
+            </Group>
+          </Card>
+        )}
+
+        {rejectMsg && (
+          <Banner tone="error" title="Fichier refusé">
+            {rejectMsg}
+          </Banner>
+        )}
+
+        {previewErr &&
+          (blocking ? (
+            <Banner
+              tone="error"
+              title={`Import impossible — ${BLOCKING_TITLES[(previewErr as ApiError).code] ?? 'erreur bloquante'}`}
+            >
+              <Text as="span" style={{ display: 'block' }}>
+                {errMessage(previewErr)}
+              </Text>
+              <Text as="span" mt={6} style={{ display: 'block' }}>
+                Aucune donnée n'a été écrite. Vérifiez le fichier puis <b>changez de fichier</b>.
+              </Text>
+            </Banner>
+          ) : (
+            <ErrorAlert error={previewErr} title="Analyse impossible" />
+          ))}
+
+        <TextInput
+          label="Intitulé de la version"
+          description="Facultatif : par défaut, le nom du fichier sans extension."
+          placeholder={file ? stripExt(file.name) : 'ex. Plan S40'}
+          value={intitule}
+          onChange={setIntitule}
+          disabled={busy}
+        />
+        <TextInput
+          label="Importeur"
+          description="Facultatif, mémorisé sur ce poste."
+          placeholder="Votre nom"
+          value={importeur}
+          onChange={setImporteur}
+          onBlur={() => saveOperateur(importeur)}
+          disabled={busy}
+        />
+      </Stack>
+    );
+    footer = (
+      <>
+        <Button onClick={onClose} disabled={busy}>
+          Annuler
+        </Button>
+        {report ? (
+          <Button variant="primary" onClick={() => setStep(1)}>
+            Voir le bilan
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            onClick={() => file && preview.mutate(file)}
+            disabled={!file}
+            loading={preview.isPending}
+          >
+            Analyser
+          </Button>
+        )}
+      </>
+    );
+  } else if (step === 1 && report) {
+    // ---------------------------------------------------------------- 2. Bilan
+    content = (
+      <Stack gap={12}>
+        <ImportReportView report={report} />
+
+        {active ? (
+          <Card padding={12}>
+            <Checkbox
+              checked={archiveActive}
+              onChange={setArchiveActive}
+              label={`Archiver la version active « ${active.intitule} » (importée le ${fmtDateTime(
+                active.importee_le,
+              )})`}
+            />
+            {!archiveActive && (
+              <Banner tone="warning" compact mt={8}>
+                La version active est conservée : la nouvelle version sera créée en statut archivée.
+              </Banner>
+            )}
+          </Card>
+        ) : (
+          <Text tone="secondary">Aucune version active : la nouvelle version deviendra la version active.</Text>
+        )}
+
+        {report.ok + report.warn === 0 && (
+          <Banner tone="warning" compact>
+            Aucune ligne exploitable (toutes les lignes sont en drop).
+          </Banner>
+        )}
+      </Stack>
+    );
+    footer = (
+      <>
+        <Button onClick={() => setStep(0)}>Retour</Button>
+        <Button variant="primary" onClick={() => setStep(2)}>
+          Continuer
+        </Button>
+      </>
+    );
+  } else if (step === 2 && report && file) {
+    // ---------------------------------------------------------------- 3. Confirmation
+    content = (
+      <Stack gap={12}>
+        <Card padding={12}>
+          <Stack gap={4}>
+            <Text>
+              Fichier : <b>{file.name}</b>
+            </Text>
+            <Text>
+              Intitulé : <b>{intitule.trim() || stripExt(file.name)}</b>
+            </Text>
+            <Text>
+              Importeur : <b>{importeur.trim() || '—'}</b>
+            </Text>
+            <Text tabular>
+              Lignes : <b>{fmtNumber(report.total)}</b> (ok {fmtNumber(report.ok)}, warn {fmtNumber(report.warn)},
+              drop {fmtNumber(report.drop)})
+            </Text>
+            <Text>
+              Statut de la nouvelle version : <b>{!active || archiveActive ? 'active' : 'archivée'}</b>
+              {active && archiveActive && <> — « {active.intitule} » sera archivée</>}
+            </Text>
+          </Stack>
+        </Card>
+
+        {commit.error && <ErrorAlert error={commit.error} title="Échec de l'import" />}
+      </Stack>
+    );
+    footer = (
+      <>
+        <Button onClick={() => setStep(1)} disabled={commit.isPending}>
+          Retour
+        </Button>
+        <Button variant="primary" onClick={() => commit.mutate(file)} loading={commit.isPending}>
+          Importer
+        </Button>
+      </>
+    );
+  }
+
   return (
     <Modal
       opened={opened}
       onClose={() => {
         if (!commit.isPending) onClose();
       }}
-      size="xl"
-      title={<Text fw={600}>Importer un fichier — {KIND_LABEL[kind]}</Text>}
-      closeOnClickOutside={!busy}
-      closeOnEscape={!busy}
+      size="lg"
+      title={`Importer un fichier — ${KIND_LABEL[kind]}`}
+      dismissable={!busy}
+      footer={footer}
     >
-      <Stepper
-        active={step}
-        onStepClick={(s) => {
-          if (!busy && s < step) setStep(s);
-        }}
-        allowNextStepsSelect={false}
-        size="sm"
-        mb="md"
-      >
-        {/* ---------------------------------------------------------------- 1. Fichier */}
-        <Stepper.Step label="Fichier" description="Dépôt et analyse">
-          <Stack gap="sm" mt="md">
-            {!file ? (
-              <Dropzone
-                onDrop={onDrop}
-                onReject={(rej) => setRejectMsg(rejectionMessage(rej))}
-                accept={{ [XLSX_MIME]: ['.xlsx'] }}
-                maxSize={MAX_SIZE}
-                maxFiles={1}
-                multiple={false}
-                aria-label="Déposer un fichier Excel .xlsx"
-              >
-                <Group justify="center" gap="md" mih={120} style={{ pointerEvents: 'none' }}>
-                  <Dropzone.Accept>
-                    <IconUpload size={40} stroke={1.5} aria-hidden />
-                  </Dropzone.Accept>
-                  <Dropzone.Reject>
-                    <IconX size={40} stroke={1.5} aria-hidden />
-                  </Dropzone.Reject>
-                  <Dropzone.Idle>
-                    <IconFileSpreadsheet size={40} stroke={1.5} aria-hidden />
-                  </Dropzone.Idle>
-                  <div>
-                    <Text size="lg">Glissez un fichier .xlsx ici ou cliquez pour le sélectionner</Text>
-                    <Text size="sm" c="dimmed">
-                      Un seul fichier Excel, 50 Mo maximum.
-                    </Text>
-                  </div>
-                </Group>
-              </Dropzone>
-            ) : (
-              <Paper withBorder p="sm" radius="sm">
-                <Group justify="space-between" wrap="nowrap">
-                  <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                    <IconFileSpreadsheet size={28} stroke={1.5} aria-hidden />
-                    <div style={{ minWidth: 0 }}>
-                      <Text fw={500} truncate>
-                        {file.name}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {fmtSize(file.size)}
-                      </Text>
-                    </div>
-                  </Group>
-                  <Button variant="subtle" size="xs" onClick={changeFile} disabled={busy}>
-                    Changer de fichier
-                  </Button>
-                </Group>
-              </Paper>
-            )}
-
-            {rejectMsg && (
-              <Alert color="red" variant="light" title="Fichier refusé">
-                {rejectMsg}
-              </Alert>
-            )}
-
-            {previewErr &&
-              (blocking ? (
-                <Alert
-                  color="red"
-                  variant="light"
-                  title={`Import impossible — ${BLOCKING_TITLES[(previewErr as ApiError).code] ?? 'erreur bloquante'}`}
-                >
-                  <Text size="sm">{errMessage(previewErr)}</Text>
-                  <Text size="sm" mt={6}>
-                    Aucune donnée n'a été écrite. Vérifiez le fichier puis{' '}
-                    <Text span inherit fw={600}>
-                      changez de fichier
-                    </Text>
-                    .
-                  </Text>
-                </Alert>
-              ) : (
-                <ErrorAlert error={previewErr} title="Analyse impossible" />
-              ))}
-
-            <TextInput
-              label="Intitulé de la version"
-              description="Facultatif : par défaut, le nom du fichier sans extension."
-              placeholder={file ? stripExt(file.name) : 'ex. Plan S40'}
-              value={intitule}
-              onChange={(e) => {
-                setIntitule(e.currentTarget.value);
-              }}
-              disabled={busy}
-            />
-            <TextInput
-              label="Importeur"
-              description="Facultatif, mémorisé sur ce poste."
-              placeholder="Votre nom"
-              value={importeur}
-              onChange={(e) => setImporteur(e.currentTarget.value)}
-              onBlur={() => saveOperateur(importeur)}
-              disabled={busy}
-            />
-
-            <Group justify="flex-end" mt="xs">
-              <Button variant="default" onClick={onClose} disabled={busy}>
-                Annuler
-              </Button>
-              {report ? (
-                <Button onClick={() => setStep(1)}>Voir le bilan</Button>
-              ) : (
-                <Button onClick={() => file && preview.mutate(file)} disabled={!file} loading={preview.isPending}>
-                  Analyser
-                </Button>
-              )}
-            </Group>
-          </Stack>
-        </Stepper.Step>
-
-        {/* ---------------------------------------------------------------- 2. Bilan */}
-        <Stepper.Step label="Bilan" description="Contrôle du parsing">
-          {report && (
-            <Stack gap="md" mt="md">
-              <ImportReportView report={report} />
-
-              {active ? (
-                <Paper withBorder p="sm" radius="sm">
-                  <Checkbox
-                    checked={archiveActive}
-                    onChange={(e) => setArchiveActive(e.currentTarget.checked)}
-                    label={`Archiver la version active « ${active.intitule} » (importée le ${fmtDateTime(
-                      active.importee_le,
-                    )})`}
-                  />
-                  {!archiveActive && (
-                    <Alert color="yellow" variant="light" mt="sm">
-                      La version active est conservée : la nouvelle version sera créée en statut archivée.
-                    </Alert>
-                  )}
-                </Paper>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  Aucune version active : la nouvelle version deviendra la version active.
-                </Text>
-              )}
-
-              {report.ok + report.warn === 0 && (
-                <Alert color="orange" variant="light">
-                  Aucune ligne exploitable (toutes les lignes sont en drop).
-                </Alert>
-              )}
-
-              <Group justify="space-between">
-                <Button variant="default" onClick={() => setStep(0)}>
-                  Retour
-                </Button>
-                <Button onClick={() => setStep(2)}>Continuer</Button>
-              </Group>
-            </Stack>
-          )}
-        </Stepper.Step>
-
-        {/* ---------------------------------------------------------------- 3. Confirmation */}
-        <Stepper.Step label="Import" description="Confirmation">
-          {report && file && (
-            <Stack gap="md" mt="md">
-              <Paper withBorder p="sm" radius="sm">
-                <Stack gap={4}>
-                  <Text size="sm">
-                    Fichier : <b>{file.name}</b>
-                  </Text>
-                  <Text size="sm">
-                    Intitulé : <b>{intitule.trim() || stripExt(file.name)}</b>
-                  </Text>
-                  <Text size="sm">
-                    Importeur : <b>{importeur.trim() || '—'}</b>
-                  </Text>
-                  <Text size="sm">
-                    Lignes : <b>{fmtNumber(report.total)}</b> (ok {fmtNumber(report.ok)}, warn{' '}
-                    {fmtNumber(report.warn)}, drop {fmtNumber(report.drop)})
-                  </Text>
-                  <Text size="sm">
-                    Statut de la nouvelle version :{' '}
-                    <b>{!active || archiveActive ? 'active' : 'archivée'}</b>
-                    {active && archiveActive && <> — « {active.intitule} » sera archivée</>}
-                  </Text>
-                </Stack>
-              </Paper>
-
-              {commit.error && <ErrorAlert error={commit.error} title="Échec de l'import" />}
-
-              <Group justify="space-between">
-                <Button variant="default" onClick={() => setStep(1)} disabled={commit.isPending}>
-                  Retour
-                </Button>
-                <Button onClick={() => commit.mutate(file)} loading={commit.isPending}>
-                  Importer
-                </Button>
-              </Group>
-            </Stack>
-          )}
-        </Stepper.Step>
-      </Stepper>
+      <Stack gap={16}>
+        <Steps active={step} steps={STEPS} />
+        {content}
+      </Stack>
     </Modal>
   );
 }

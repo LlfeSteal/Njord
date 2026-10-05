@@ -1,64 +1,67 @@
-// Badges partagés : statut de version, statut de parsing, flag d'analyse, inactif.
-import { Badge, Tooltip } from '@mantine/core';
+// Statuts partagés : statut de version, statut de parsing, flag d'analyse, inactif.
+// Tags sobres (glyphe dont la forme porte le sens + libellé) — cf. docs/STYLE.md §8.
+import { StatusGlyph, Tag, Tooltip, type GlyphKind } from '../ui';
 import type { Flag, ParsingStatut, VersionStatut } from '../api/types';
 
-const STATUT: Record<VersionStatut, { label: string; color: string }> = {
-  active: { label: 'Active', color: 'green' },
-  archivee: { label: 'Archivée', color: 'gray' },
-  purgee: { label: 'Purgée', color: 'red' },
+const STATUT: Record<VersionStatut, { label: string; glyph: GlyphKind }> = {
+  active: { label: 'Active', glyph: 'dot' },
+  archivee: { label: 'Archivée', glyph: 'dot' },
+  purgee: { label: 'Purgée', glyph: 'ring' },
 };
 
 export function StatusBadge({ statut }: { statut: VersionStatut }) {
   const s = STATUT[statut];
   return (
-    <Badge color={s.color} variant="light">
+    <Tag tone={statut} glyph={s.glyph} strike={statut === 'purgee'}>
       {s.label}
-    </Badge>
+    </Tag>
   );
 }
 
 export function ParsingBadge({ statut, motif }: { statut: ParsingStatut; motif?: string }) {
   if (statut === 'ok') return null;
-  const badge =
+  const tag =
     statut === 'warn' ? (
-      <Badge color="yellow" variant="light">
+      <Tag tone="warning" glyph="warning">
         warn
-      </Badge>
+      </Tag>
     ) : (
-      <Badge color="red" variant="light" style={{ textDecoration: 'line-through' }}>
+      <Tag tone="danger" glyph="danger" strike>
         drop
-      </Badge>
+      </Tag>
     );
-  return motif ? (
-    <Tooltip label={motif} multiline maw={360} withArrow>
-      {badge}
-    </Tooltip>
-  ) : (
-    badge
-  );
+  return motif ? <Tooltip label={motif}>{tag}</Tooltip> : tag;
 }
 
-export const FLAG_META: Record<Flag, { emoji: string; label: string; color: string }> = {
-  absence: { emoji: '⚫', label: 'Absence totale', color: 'dark' },
-  hors_plan: { emoji: '🟠', label: 'Hors plan', color: 'orange' },
-  sur_imputation: { emoji: '🔴', label: 'Sur-imputation', color: 'red' },
-  sous_imputation: { emoji: '🟣', label: 'Sous-imputation', color: 'grape' },
-  conforme: { emoji: '🟢', label: 'Conforme', color: 'green' },
+/** Libellé et glyphe de chaque flag ; la couleur vient du token --flag-<flag> (via `tone`). */
+export const FLAG_META: Record<Flag, { label: string; glyph: GlyphKind }> = {
+  absence: { label: 'Absence totale', glyph: 'none' },
+  hors_plan: { label: 'Hors plan', glyph: 'warning' },
+  sur_imputation: { label: 'Sur-imputation', glyph: 'danger' },
+  sous_imputation: { label: 'Sous-imputation', glyph: 'attention' },
+  conforme: { label: 'Conforme', glyph: 'success' },
 };
+
+/** Glyphe seul d'un flag (15 px), avec libellé accessible. */
+export function FlagGlyph({ flag, size }: { flag: Flag; size?: number }) {
+  const m = FLAG_META[flag];
+  return <StatusGlyph kind={m.glyph} tone={flag} size={size} label={m.label} />;
+}
 
 export function FlagBadge({ flag, compact = false }: { flag: Flag; compact?: boolean }) {
   const m = FLAG_META[flag];
+  if (compact) return <FlagGlyph flag={flag} />;
   return (
-    <Badge color={m.color} variant="light" leftSection={m.emoji}>
-      {compact ? null : m.label}
-    </Badge>
+    <Tag tone={flag} glyph={m.glyph}>
+      {m.label}
+    </Tag>
   );
 }
 
 export function InactiveBadge() {
   return (
-    <Badge color="gray" variant="outline" size="sm">
-      [inactif]
-    </Badge>
+    <Tag tone="neutral" glyph="ring" title="Personne inactive dans le référentiel">
+      inactif
+    </Tag>
   );
 }

@@ -110,11 +110,11 @@ export function useDrillDown() {
   );
 }
 
-/** Navigation vers un sous-onglet en conservant la query string. */
+/** Navigation vers un sous-onglet en conservant la query string (chemin + recherche, en chaîne). */
 export function useTabLink() {
   const location = useLocation();
   return useCallback(
-    (tab: string) => ({ pathname: tab ? `/analyse/${tab}` : '/analyse', search: location.search }),
+    (tab: string) => `${tab ? `/analyse/${tab}` : '/analyse'}${location.search}`,
     [location.search],
   );
 }

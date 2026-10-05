@@ -1,0 +1,86 @@
+/* Module Analyse — compléments de mise en page. Tokens uniquement (docs/STYLE.md). */
+
+/* Résultat précédent affiché pendant le recalcul. */
+.analyse-content {
+  transition: opacity 0.15s var(--ease);
+}
+.analyse-content[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+/* Bulle des graphiques : même matériau que le Tooltip du kit (§7). */
+.analyse-chart-tooltip {
+  max-width: 320px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--material);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--popover-shadow);
+  color: var(--text);
+  font-size: 12px;
+}
+.analyse-chart-tooltip-title {
+  margin-bottom: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.analyse-chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.analyse-chart-tooltip-value {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Légende : 12 px secondaire, pastilles 10 px rayon 3, écart 16. */
+.analyse-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.analyse-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.analyse-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+/* Glyphe de statut dans une ligne de texte. */
+.analyse-inline-glyph {
+  display: inline-flex;
+  vertical-align: -2px;
+}
+
+/* Détails d'un contrôle qualité. */
+.analyse-details {
+  margin: 4px 0 0 24px;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.analyse-details li + li {
+  margin-top: 2px;
+}
+
+/* Vue pivot : colonnes de semaines centrées. */
+.analyse-pivot th[data-center],
+.analyse-pivot td[data-center] {
+  text-align: center;
+  white-space: nowrap;
+}

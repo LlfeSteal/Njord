@@ -1,9 +1,10 @@
 // Journal d'audit (GET /audit?objet_type=&limit=), récents d'abord.
 import { useState } from 'react';
-import { Badge, Code, Group, Loader, Paper, Select, Stack, Table, Text, Tooltip } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import { settingsApi } from '../../api/client';
 import ErrorAlert from '../../components/ErrorAlert';
+import { Code, EmptyState, Group, Select, SkeletonRows, Spinner, Stack, Table, Text, Tooltip } from '../../ui';
+import { IconHistory } from '../../ui/Icons';
 import { fmtDateTime } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 
@@ -15,15 +16,6 @@ const OBJET_TYPES: { value: string; label: string }[] = [
   { value: 'settings', label: 'Paramètres' },
 ];
 const OBJET_LABEL = Object.fromEntries(OBJET_TYPES.map((o) => [o.value, o.label]));
-
-const ACTION_COLOR: Record<string, string> = {
-  import: 'blue',
-  archive: 'gray',
-  reactivate: 'green',
-  purge: 'red',
-  update: 'indigo',
-  merge: 'grape',
-};
 
 const LIMITS = ['100', '200', '500', '1000'];
 
@@ -37,28 +29,25 @@ export default function AuditLog() {
   const rows = auditQ.data ?? [];
 
   return (
-    <Stack gap="sm">
-      <Group gap="sm" align="flex-end" wrap="wrap">
+    <Stack gap={8}>
+      <Group gap={8}>
         <Select
-          label="Type d'objet"
-          placeholder="Tous"
+          aria-label="Type d'objet"
+          placeholder="Type d'objet"
           data={OBJET_TYPES}
           value={objetType}
           onChange={setObjetType}
           clearable
-          w={220}
         />
         <Select
-          label="Nombre d'entrées"
-          data={LIMITS}
+          aria-label="Nombre d'entrées"
+          data={LIMITS.map((v) => ({ value: v, label: `${v} entrées` }))}
           value={String(limit)}
           onChange={(v) => v && setLimit(Number(v))}
-          allowDeselect={false}
-          w={140}
         />
-        {auditQ.isFetching && <Loader size="xs" mb={10} />}
+        {auditQ.isFetching && <Spinner size={12} />}
         {auditQ.data && (
-          <Text size="sm" c="dimmed" mb={8} ml="auto">
+          <Text size="sm" tone="secondary" tabular style={{ marginLeft: 'auto' }}>
             {rows.length} entrée{rows.length > 1 ? 's' : ''}
             {rows.length >= limit ? ' (limite atteinte)' : ''}
           </Text>
@@ -67,64 +56,56 @@ export default function AuditLog() {
 
       <ErrorAlert error={auditQ.error} title="Impossible de charger le journal" />
 
-      <Paper withBorder radius="sm">
-        <Table.ScrollContainer minWidth={760}>
-          <Table striped highlightOnHover verticalSpacing={6} fz="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Date</Table.Th>
-                <Table.Th>Opérateur</Table.Th>
-                <Table.Th>Action</Table.Th>
-                <Table.Th>Objet</Table.Th>
-                <Table.Th>Identifiant</Table.Th>
-                <Table.Th>Détails</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {auditQ.isLoading ? (
-                <Table.Tr>
-                  <Table.Td colSpan={6}>
-                    <Group justify="center" p="md">
-                      <Loader size="sm" />
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              ) : rows.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={6}>
-                    <Text c="dimmed" ta="center" p="md" size="sm">
-                      Aucune entrée dans le journal.
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                rows.map((r) => (
-                  <Table.Tr key={r.id}>
-                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.at)}</Table.Td>
-                    <Table.Td>{r.operateur || '—'}</Table.Td>
-                    <Table.Td>
-                      <Badge variant="light" color={ACTION_COLOR[r.action] ?? 'gray'} tt="none">
-                        {r.action}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{OBJET_LABEL[r.objet_type] ?? r.objet_type}</Table.Td>
-                    <Table.Td>
-                      {r.objet_id ? (
-                        <Tooltip label={r.objet_id} withArrow disabled={r.objet_id.length <= 10}>
-                          <Code>{r.objet_id.length > 10 ? `${r.objet_id.slice(0, 8)}…` : r.objet_id}</Code>
-                        </Tooltip>
-                      ) : (
-                        '—'
-                      )}
-                    </Table.Td>
-                    <Table.Td style={{ maxWidth: 420, wordBreak: 'break-word' }}>{r.details || '—'}</Table.Td>
-                  </Table.Tr>
-                ))
-              )}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
-      </Paper>
+      <Table striped hover minWidth={760}>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Opérateur</th>
+            <th>Action</th>
+            <th>Objet</th>
+            <th>Identifiant</th>
+            <th>Détails</th>
+          </tr>
+        </thead>
+        <tbody>
+          {auditQ.isLoading ? (
+            <tr>
+              <td colSpan={6}>
+                <SkeletonRows rows={5} />
+              </td>
+            </tr>
+          ) : rows.length === 0 ? (
+            <tr>
+              <td colSpan={6}>
+                <EmptyState icon={<IconHistory size={40} />} title="Aucune entrée dans le journal." />
+              </td>
+            </tr>
+          ) : (
+            rows.map((r) => (
+              <tr key={r.id}>
+                <td data-nowrap>{fmtDateTime(r.at)}</td>
+                <td>{r.operateur || '—'}</td>
+                <td data-nowrap>
+                  <Text as="span" weight={500}>
+                    {r.action}
+                  </Text>
+                </td>
+                <td data-nowrap>{OBJET_LABEL[r.objet_type] ?? r.objet_type}</td>
+                <td>
+                  {r.objet_id ? (
+                    <Tooltip label={r.objet_id} disabled={r.objet_id.length <= 10}>
+                      <Code>{r.objet_id.length > 10 ? `${r.objet_id.slice(0, 8)}…` : r.objet_id}</Code>
+                    </Tooltip>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td style={{ maxWidth: 420, wordBreak: 'break-word' }}>{r.details || '—'}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </Table>
     </Stack>
   );
 }

@@ -1,7 +1,7 @@
 // Barre de sélection persistante (§8) : versions, plage de semaines, inactifs, exports.
 import { useMemo, useState } from 'react';
-import { Button, Checkbox, Group, Loader, Paper, Select, Switch, Text, Tooltip } from '@mantine/core';
-import { IconDownload } from '@tabler/icons-react';
+import { Button, Checkbox, Group, Select, Spinner, Stack, Switch, Text, Tooltip } from '../../ui';
+import { IconDownload } from '../../ui/Icons';
 import { analyseApi } from '../../api/client';
 import type { AnalyseContext, AnalyseParams, Version } from '../../api/types';
 import { fmtDate, fmtWeek } from '../../lib/format';
@@ -15,6 +15,16 @@ function versionOptions(list: Version[]) {
       value: v.id,
       label: `${v.intitule}${v.statut === 'archivee' ? ' (archivée)' : ''} — ${fmtDate(v.periode_debut)} → ${fmtDate(v.periode_fin)}`,
     }));
+}
+
+/** Téléchargement d'un export (équivalent d'un lien <a download>). */
+function download(href: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export default function SelectionBar({
@@ -39,7 +49,7 @@ export default function SelectionBar({
     () =>
       context.weeks.map((w) => ({
         value: w.week,
-        label: `${fmtWeek(w.week)} (${fmtDate(w.debut)})${w.verrouillee ? ' 🔒' : ''}`,
+        label: `${fmtWeek(w.week)} (${fmtDate(w.debut)})${w.verrouillee ? ' · verrouillée' : ''}`,
       })),
     [context.weeks],
   );
@@ -55,101 +65,74 @@ export default function SelectionBar({
     mask_sensitive: maskSensitive,
   });
 
-  const exportBtn = (label: string, href: string) => {
-    const btn = (
-      <Button
-        component="a"
-        href={exportDisabled ? undefined : href}
-        download
-        variant="default"
-        size="xs"
-        leftSection={<IconDownload size={14} />}
-        disabled={exportDisabled}
-      >
+  const exportBtn = (label: string, href: string) => (
+    <Tooltip label={exportHint} disabled={!exportDisabled}>
+      <Button size="sm" icon={<IconDownload size={14} />} disabled={exportDisabled} onClick={() => download(href)}>
         {label}
       </Button>
-    );
-    return exportDisabled ? (
-      <Tooltip label={exportHint}>
-        <span>{btn}</span>
-      </Tooltip>
-    ) : (
-      btn
-    );
-  };
+    </Tooltip>
+  );
 
   return (
-    <Paper withBorder p="sm" radius="md">
-      <Group align="flex-end" gap="sm" wrap="wrap">
+    <Stack gap={8}>
+      <Group gap={8}>
         <Select
-          label="Version du plan"
-          placeholder="Aucun plan"
+          aria-label="Version du plan"
+          placeholder="Version du plan"
           data={planOpts}
           value={params.plan_version_id ?? null}
-          onChange={(v) => update({ plan: v })}
-          allowDeselect={false}
-          w={{ base: '100%', sm: 300 }}
-          comboboxProps={{ width: 'target', withinPortal: true }}
+          onChange={(v) => v && update({ plan: v })}
+          menuWidth={300}
         />
         <Select
-          label="Version du réalisé"
-          placeholder="Aucun réalisé"
+          aria-label="Version du réalisé"
+          placeholder="Version du réalisé"
           data={realOpts}
           value={params.realise_version_id ?? null}
-          onChange={(v) => update({ realise: v })}
-          allowDeselect={false}
-          w={{ base: '100%', sm: 300 }}
+          onChange={(v) => v && update({ realise: v })}
+          menuWidth={300}
         />
-        <Group gap={6} align="flex-end" wrap="nowrap">
+        <Group gap={6} wrap={false}>
           <Select
-            label="Semaine de début"
+            aria-label="Semaine de début"
+            placeholder="Semaine de début"
             data={weekOpts.map((o) => ({ ...o, disabled: !!to && o.value > to }))}
             value={from}
-            onChange={(v) => update({ from: v })}
-            allowDeselect={false}
-            w={170}
+            onChange={(v) => v && update({ from: v })}
           />
+          <Text as="span" tone="secondary" aria-hidden>
+            →
+          </Text>
           <Select
-            label="Semaine de fin"
+            aria-label="Semaine de fin"
+            placeholder="Semaine de fin"
             data={weekOpts.map((o) => ({ ...o, disabled: !!from && o.value < from }))}
             value={to}
-            onChange={(v) => update({ to: v })}
-            allowDeselect={false}
-            w={170}
+            onChange={(v) => v && update({ to: v })}
           />
         </Group>
-        <Switch
-          label="Inclure les ressources inactives"
-          checked={state.inactifs}
-          onChange={(e) => update({ inactifs: e.currentTarget.checked })}
-          mb={8}
-        />
+        <Switch label="Inclure les ressources inactives" checked={state.inactifs} onChange={(v) => update({ inactifs: v })} />
         {fetching && (
-          <Group gap={6} mb={8}>
-            <Loader size="xs" />
-            <Text size="xs" c="dimmed">
+          <Group gap={6}>
+            <Spinner size={14} label="Calcul en cours" />
+            <Text size="sm" tone="secondary">
               Calcul en cours…
             </Text>
           </Group>
         )}
       </Group>
-      <Group gap="sm" mt="sm" wrap="wrap">
+      <Group gap={8}>
         {exportBtn('Exporter CSV conformité', conformiteUrl)}
-        <Group gap={8} wrap="nowrap">
+        <Group gap={8} wrap={false}>
           {exportBtn('Exporter CSV réalisé enrichi', enrichiUrl)}
-          <Checkbox
-            size="xs"
-            label="Masquer les données sensibles"
-            checked={maskSensitive}
-            onChange={(e) => setMaskSensitive(e.currentTarget.checked)}
-          />
+          <Checkbox label="Masquer les données sensibles" checked={maskSensitive} onChange={setMaskSensitive} />
         </Group>
         {(state.ct || state.ressource || state.flags.length > 0 || state.squad) && (
-          <Text size="xs" c="dimmed">
+          <Text size="sm" tone="secondary">
             L’export conformité applique les filtres du tableau d’écarts.
           </Text>
         )}
       </Group>
-    </Paper>
+    </Stack>
   );
 }

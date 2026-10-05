@@ -1,12 +1,10 @@
 // Sous-onglet Alertes (§7.5) : CT à risque, alerte globale % non sécurisé, dérive de provision.
-import { Alert, Anchor, Card, Group, Stack, Table, Text, Title } from '@mantine/core';
-import { IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
+import { Banner, Group, Link, Stack, Table, Text } from '../../ui';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 import type { AnalyseResult } from '../../api/types';
 import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
-import { CtCell } from './common';
+import { CtCell, SectionHeader } from './common';
 import { useDrillDown, useTabLink } from './params';
 import { analyseService } from './service';
 
@@ -19,115 +17,107 @@ export default function AlertesTab({ result }: { result: AnalyseResult }) {
   const s = settingsQ.data;
 
   return (
-    <Stack gap="lg">
+    <Stack gap={16}>
       {alertes.alerte_globale ? (
-        <Alert color="red" variant="light" icon={<IconAlertTriangle size={18} />} title="Alerte globale : part non sécurisée trop élevée">
+        <Banner tone="error" title="Alerte globale : part non sécurisée trop élevée">
           {fmtPct(alertes.pct_non_securise)} du budget classé est non sécurisé
           {s ? ` (seuil : ${fmtPct(s.seuil_non_securise_pct)})` : ''}.
-        </Alert>
+        </Banner>
       ) : (
-        <Alert color="green" variant="light" icon={<IconCircleCheck size={18} />} title="Part non sécurisée sous le seuil">
+        <Banner tone="success" title="Part non sécurisée sous le seuil">
           {fmtPct(alertes.pct_non_securise)} du budget classé est non sécurisé
           {s ? ` (seuil : ${fmtPct(s.seuil_non_securise_pct)})` : ''}.
-        </Alert>
+        </Banner>
       )}
 
-      <Card withBorder radius="md" padding="md">
-        <Group justify="space-between" mb={2}>
-          <Title order={4}>CT à risque ({alertes.ct_risque.length})</Title>
-        </Group>
-        <Text size="xs" c="dimmed" mb="xs">
-          TG dont Σ € non sécurisé dépasse {s ? fmtEur(s.seuil_ct_risque_eur) : 'le seuil paramétré'}.
-        </Text>
+      <section>
+        <SectionHeader
+          title={`CT à risque (${alertes.ct_risque.length})`}
+          sub={`TG dont Σ € non sécurisé dépasse ${s ? fmtEur(s.seuil_ct_risque_eur) : 'le seuil paramétré'}.`}
+        />
         {alertes.ct_risque.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            Aucun CT à risque.
-          </Text>
+          <Text tone="secondary">Aucun CT à risque.</Text>
         ) : (
-          <Table.ScrollContainer minWidth={560}>
-            <Table highlightOnHover fz="sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>CT</Table.Th>
-                  <Table.Th ta="right">⚠️ Non sécurisé</Table.Th>
-                  <Table.Th>Drill-down</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {[...alertes.ct_risque]
-                  .sort((a, b) => b.non_securise - a.non_securise)
-                  .map((a) => (
-                    <Table.Tr key={a.ct}>
-                      <Table.Td>
-                        <CtCell ct={a.ct} libelle={a.ct_libelle} />
-                      </Table.Td>
-                      <Table.Td ta="right" fw={600}>
+          <Table hover minWidth={560}>
+            <thead>
+              <tr>
+                <th>CT</th>
+                <th data-align="right">Non sécurisé</th>
+                <th>Drill-down</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...alertes.ct_risque]
+                .sort((a, b) => b.non_securise - a.non_securise)
+                .map((a) => (
+                  <tr key={a.ct}>
+                    <td>
+                      <CtCell ct={a.ct} libelle={a.ct_libelle} />
+                    </td>
+                    <td data-align="right">
+                      <Text as="span" weight={600}>
                         {fmtEur(a.non_securise)}
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="md">
-                          <Anchor component="button" type="button" size="sm" onClick={() => drill({ ct: a.ct })}>
-                            Écarts
-                          </Anchor>
-                          <Anchor component={Link} to={tabLink('budget')} size="sm">
-                            Budget
-                          </Anchor>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        )}
-      </Card>
-
-      <Card withBorder radius="md" padding="md">
-        <Title order={4} mb={2}>
-          Dérive de provision ({alertes.derive_provision.length})
-        </Title>
-        <Text size="xs" c="dimmed" mb="xs">
-          Consommations de PROVISIONS POUR ALEAS ou écritures sans ressource identifiée sur un CT provisionné.
-        </Text>
-        {alertes.derive_provision.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            Aucune dérive détectée.
-          </Text>
-        ) : (
-          <Table.ScrollContainer minWidth={760}>
-            <Table striped highlightOnHover fz="sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>CT</Table.Th>
-                  <Table.Th ta="right">Ligne</Table.Th>
-                  <Table.Th>Employé / fournisseur</Table.Th>
-                  <Table.Th>Type</Table.Th>
-                  <Table.Th>Date dépense</Table.Th>
-                  <Table.Th ta="right">Heures</Table.Th>
-                  <Table.Th ta="right">€</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {alertes.derive_provision.map((d) => (
-                  <Table.Tr key={`${d.ct}|${d.row_num}`}>
-                    <Table.Td>
-                      <Anchor component="button" type="button" size="sm" ff="monospace" onClick={() => drill({ ct: d.ct })}>
-                        {d.ct}
-                      </Anchor>
-                    </Table.Td>
-                    <Table.Td ta="right">{d.row_num}</Table.Td>
-                    <Table.Td>{d.employe_fournisseur || <Text span c="dimmed">—</Text>}</Table.Td>
-                    <Table.Td>{d.type}</Table.Td>
-                    <Table.Td>{fmtDate(d.date_depense)}</Table.Td>
-                    <Table.Td ta="right">{d.heures ? fmtHours(d.heures) : '—'}</Table.Td>
-                    <Table.Td ta="right">{d.eur ? fmtEur(d.eur, true) : '—'}</Table.Td>
-                  </Table.Tr>
+                      </Text>
+                    </td>
+                    <td>
+                      <Group gap={12}>
+                        <Link onClick={() => drill({ ct: a.ct })}>Écarts</Link>
+                        <Link to={tabLink('budget')}>Budget</Link>
+                      </Group>
+                    </td>
+                  </tr>
                 ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+            </tbody>
+          </Table>
         )}
-      </Card>
+      </section>
+
+      <section>
+        <SectionHeader
+          title={`Dérive de provision (${alertes.derive_provision.length})`}
+          sub="Consommations de PROVISIONS POUR ALEAS ou écritures sans ressource identifiée sur un CT provisionné."
+        />
+        {alertes.derive_provision.length === 0 ? (
+          <Text tone="secondary">Aucune dérive détectée.</Text>
+        ) : (
+          <Table striped hover minWidth={760}>
+            <thead>
+              <tr>
+                <th>CT</th>
+                <th data-align="right">Ligne</th>
+                <th>Employé / fournisseur</th>
+                <th>Type</th>
+                <th>Date dépense</th>
+                <th data-align="right">Heures</th>
+                <th data-align="right">€</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alertes.derive_provision.map((d) => (
+                <tr key={`${d.ct}|${d.row_num}`}>
+                  <td>
+                    <Link mono onClick={() => drill({ ct: d.ct })}>
+                      {d.ct}
+                    </Link>
+                  </td>
+                  <td data-align="right">{d.row_num}</td>
+                  <td>
+                    {d.employe_fournisseur || (
+                      <Text as="span" tone="secondary">
+                        —
+                      </Text>
+                    )}
+                  </td>
+                  <td>{d.type}</td>
+                  <td data-nowrap>{fmtDate(d.date_depense)}</td>
+                  <td data-align="right">{d.heures ? fmtHours(d.heures) : '—'}</td>
+                  <td data-align="right">{d.eur ? fmtEur(d.eur, true) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </section>
     </Stack>
   );
 }

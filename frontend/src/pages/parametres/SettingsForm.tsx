@@ -1,25 +1,26 @@
-// Formulaire des paramètres métier (GET/PUT /settings) — état React simple (pas de @mantine/form).
+// Formulaire des paramètres métier (GET/PUT /settings) — état React simple, sans bibliothèque de formulaire.
 import { useState, type ReactNode } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Group,
-  Loader,
-  NumberInput,
-  Paper,
-  SimpleGrid,
-  Stack,
-  TagsInput,
-  Text,
-  Title,
-} from '@mantine/core';
-import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { IconAlertTriangle, IconArrowBackUp, IconCheck, IconDeviceFloppy } from '@tabler/icons-react';
 import { settingsApi } from '../../api/client';
 import type { Settings } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
+import {
+  Banner,
+  Button,
+  Card,
+  Grid,
+  Group,
+  LoadingBlock,
+  Menu,
+  NumberInput,
+  Stack,
+  Tag,
+  TagsInput,
+  Text,
+  Title,
+  toast,
+} from '../../ui';
+import { IconChevronDown, IconSave, IconUndo } from '../../ui/Icons';
 import { qk } from '../../lib/queryKeys';
 import HolidaysEditor from './HolidaysEditor';
 
@@ -50,8 +51,8 @@ const SECTIONS: Section[] = [
     title: "Seuils d'écart",
     description: 'Écart = heures réelles − heures prévues, par ressource × CT × semaine.',
     fields: [
-      { key: 'seuil_sur_imputation_h', label: 'Sur-imputation', unit: 'h', min: 0, description: 'FLAG 🔴 si écart > +seuil' },
-      { key: 'seuil_sous_imputation_h', label: 'Sous-imputation', unit: 'h', min: 0, description: 'FLAG 🟣 si écart < −seuil' },
+      { key: 'seuil_sur_imputation_h', label: 'Sur-imputation', unit: 'h', min: 0, description: 'Flag « sur-imputation » si écart > +seuil' },
+      { key: 'seuil_sous_imputation_h', label: 'Sous-imputation', unit: 'h', min: 0, description: 'Flag « sous-imputation » si écart < −seuil' },
       {
         key: 'diviseur_hors_plan_h',
         label: 'Diviseur hors plan',
@@ -146,17 +147,63 @@ const dedupe = (xs: string[]) => Array.from(new Set(xs.map((x) => x.trim()).filt
 
 function SectionCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
-    <Paper withBorder p="md" radius="sm" component="section" aria-label={title}>
-      <Title order={5}>{title}</Title>
+    <Card as="section" aria-label={title}>
+      <Title order={3}>{title}</Title>
       {description && (
-        <Text size="xs" c="dimmed" mt={2}>
+        <Text size="sm" tone="secondary" mt={2}>
           {description}
         </Text>
       )}
-      <Stack gap="sm" mt="sm">
+      <Stack gap={12} mt={12}>
         {children}
       </Stack>
-    </Paper>
+    </Card>
+  );
+}
+
+/**
+ * Liste de types TYPE : saisie libre (TagsInput) + menu des types connus en suggestion
+ * (coche = présent dans la liste ; cliquer bascule l'appartenance).
+ */
+function TypeListInput({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const known = TYPE_SUGGESTIONS.filter((t) => !value.includes(t)).length;
+  return (
+    <Stack gap={4}>
+      <TagsInput label={label} description={description} value={value} onChange={onChange} />
+      <Group gap={4}>
+        <Menu
+          width={290}
+          target={(p) => (
+            <Button {...p} size="sm" variant="plain" iconRight={<IconChevronDown size={12} />}>
+              Types connus{known ? ` (${known} disponibles)` : ''}
+            </Button>
+          )}
+          items={[
+            { type: 'header', label: 'Types connus' },
+            ...TYPE_SUGGESTIONS.map((t) => ({
+              label: t,
+              checked: value.includes(t),
+              onSelect: () => onChange(value.includes(t) ? value.filter((x) => x !== t) : [...value, t]),
+            })),
+          ]}
+        />
+        {value.length > 0 && (
+          <Button size="sm" variant="plain" destructive onClick={() => onChange([])}>
+            Vider
+          </Button>
+        )}
+      </Group>
+    </Stack>
   );
 }
 
@@ -179,20 +226,14 @@ export default function SettingsForm() {
       qc.invalidateQueries({ queryKey: ['audit'] });
       setDraft(null);
       setWeekError(null);
-      notifications.show({ color: 'green', icon: <IconCheck size={18} />, title: 'Paramètres enregistrés', message: "L'analyse sera recalculée avec ces valeurs." });
+      toast({ tone: 'success', title: 'Paramètres enregistrés', message: "L'analyse sera recalculée avec ces valeurs." });
     },
     onError: (e) => {
-      notifications.show({ color: 'red', title: "Échec de l'enregistrement", message: e instanceof Error ? e.message : String(e) });
+      toast({ tone: 'error', title: "Échec de l'enregistrement", message: e instanceof Error ? e.message : String(e) });
     },
   });
 
-  if (settingsQ.isLoading) {
-    return (
-      <Group justify="center" p="xl">
-        <Loader />
-      </Group>
-    );
-  }
+  if (settingsQ.isLoading) return <LoadingBlock />;
   if (settingsQ.error || !current) {
     return <ErrorAlert error={settingsQ.error ?? new Error('Paramètres indisponibles')} title="Impossible de charger les paramètres" />;
   }
@@ -214,14 +255,16 @@ export default function SettingsForm() {
   };
 
   return (
+    // noValidate : la validation est faite ici (fieldError), pas par le navigateur (pas de blocage sur `step`).
     <form
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
         if (dirty && !invalid) save.mutate(current);
       }}
     >
-      <Stack gap="md">
-        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+      <Stack gap={12}>
+        <Grid cols={{ base: 1, md: 2 }} gap={12}>
           {SECTIONS.map((s) => (
             <SectionCard key={s.title} title={s.title} description={s.description}>
               {s.fields.map((f) => {
@@ -229,17 +272,15 @@ export default function SettingsForm() {
                 return (
                   <NumberInput
                     key={f.key}
-                    label={f.unit ? `${f.label} (${f.unit})` : f.label}
+                    label={f.label}
                     description={f.description}
-                    value={Number.isNaN(v) ? '' : v}
-                    onChange={(x) => set(f.key, typeof x === 'number' ? x : x === '' ? NaN : Number(String(x).replace(',', '.')))}
+                    suffix={f.unit}
+                    value={Number.isNaN(v) ? null : v}
+                    onChange={(x) => set(f.key, x ?? NaN)}
                     error={fieldError(f, v)}
                     min={f.minExclusive ? undefined : f.min}
                     max={f.max}
-                    allowDecimal={!f.integer}
-                    decimalSeparator=","
-                    thousandSeparator=" "
-                    allowNegative={false}
+                    step={f.integer ? 1 : undefined}
                     required
                   />
                 );
@@ -256,7 +297,6 @@ export default function SettingsForm() {
               onChange={onWeeksChange}
               splitChars={[',', ' ', ';']}
               error={weekError}
-              clearable
             />
             <HolidaysEditor value={current.jours_feries} onChange={(v) => set('jours_feries', v)} />
           </SectionCard>
@@ -265,66 +305,45 @@ export default function SettingsForm() {
             title="Classification"
             description="Valeurs du champ TYPE du réalisé. Les suggestions reprennent les types connus ; toute autre valeur peut être saisie."
           >
-            <TagsInput
+            <TypeListInput
               label="Types main d'œuvre (heures)"
               description="QUANTITE comptée en heures si TYPE ∈ liste et CATEGORIE = MAIN D'OEUVRE"
-              data={TYPE_SUGGESTIONS}
               value={current.mo_types}
               onChange={(v) => set('mo_types', dedupe(v))}
-              clearable
             />
-            <TagsInput
-              label="Types sécurisés"
-              data={TYPE_SUGGESTIONS}
-              value={current.securise}
-              onChange={(v) => set('securise', dedupe(v))}
-              clearable
-            />
-            <TagsInput
-              label="Types non sécurisés"
-              data={TYPE_SUGGESTIONS}
-              value={current.non_securise}
-              onChange={(v) => set('non_securise', dedupe(v))}
-              clearable
-            />
+            <TypeListInput label="Types sécurisés" value={current.securise} onChange={(v) => set('securise', dedupe(v))} />
+            <TypeListInput label="Types non sécurisés" value={current.non_securise} onChange={(v) => set('non_securise', dedupe(v))} />
             {overlap.length > 0 && (
-              <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={18} />} p="xs">
+              <Banner tone="warning" compact>
                 Présent dans les deux listes : {overlap.join(', ')}
-              </Alert>
+              </Banner>
             )}
           </SectionCard>
-        </SimpleGrid>
+        </Grid>
 
-        <Paper
-          withBorder
-          shadow="sm"
-          p="sm"
-          radius="sm"
-          style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
+        {/* Barre d'action collante en bas */}
+        <Card
+          padding={12}
           role="region"
           aria-label="Enregistrement des paramètres"
+          style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
         >
-          <Group justify="space-between" wrap="wrap" gap="sm">
-            <Group gap="xs">
+          <Group justify="between" gap={8}>
+            <Group gap={12}>
               {dirty ? (
-                <Badge color="orange" variant="light">
-                  Modifications non enregistrées
-                </Badge>
+                <Tag tone="warning">Modifications non enregistrées</Tag>
               ) : (
-                <Text size="sm" c="dimmed">
-                  Aucune modification
-                </Text>
+                <Text tone="secondary">Aucune modification</Text>
               )}
               {invalid && (
-                <Text size="sm" c="red">
+                <Text tone="danger">
                   {errors.length} champ{errors.length > 1 ? 's' : ''} invalide{errors.length > 1 ? 's' : ''}
                 </Text>
               )}
             </Group>
-            <Group gap="xs">
+            <Group gap={8}>
               <Button
-                variant="default"
-                leftSection={<IconArrowBackUp size={16} />}
+                icon={<IconUndo size={15} />}
                 disabled={!draft || save.isPending}
                 onClick={() => {
                   setDraft(null);
@@ -333,12 +352,12 @@ export default function SettingsForm() {
               >
                 Réinitialiser les modifications
               </Button>
-              <Button type="submit" leftSection={<IconDeviceFloppy size={16} />} disabled={!dirty || invalid} loading={save.isPending}>
+              <Button type="submit" variant="primary" icon={<IconSave size={15} />} disabled={!dirty || invalid} loading={save.isPending}>
                 Enregistrer
               </Button>
             </Group>
           </Group>
-        </Paper>
+        </Card>
       </Stack>
     </form>
   );

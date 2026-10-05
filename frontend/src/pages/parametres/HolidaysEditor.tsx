@@ -1,7 +1,7 @@
 // Éditeur des jours fériés (liste de dates YYYY-MM-DD), regroupés par année.
 import { useState } from 'react';
-import { Accordion, Badge, Button, Group, Input, TagsInput, Text } from '@mantine/core';
-import { IconTrash } from '@tabler/icons-react';
+import { Button, Disclosure, Field, Group, Pill, TagsInput, Text } from '../../ui';
+import { IconTrash } from '../../ui/Icons';
 
 /** Date calendaire valide au format YYYY-MM-DD. */
 function isIsoDate(s: string): boolean {
@@ -15,6 +15,8 @@ function isIsoDate(s: string): boolean {
 const normalize = (xs: string[]) => Array.from(new Set(xs)).sort();
 
 const WEEKDAY = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', timeZone: 'UTC' });
+
+const SPLIT = [',', ' ', ';'];
 
 export default function HolidaysEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [error, setError] = useState<string | null>(null);
@@ -41,25 +43,26 @@ export default function HolidaysEditor({ value, onChange }: { value: string[]; o
   };
 
   return (
-    <Input.Wrapper
+    <Field
       label="Jours fériés"
       description="Exclus des jours ouvrés. Saisir des dates AAAA-MM-JJ (Entrée ou virgule pour valider)."
       error={error}
     >
+      {/* Saisie seule : les dates acceptées rejoignent leur année ci-dessous. */}
       <TagsInput
-        mt={6}
         aria-label="Ajouter des jours fériés"
         placeholder="Ajouter, ex. 2027-05-01"
         value={[]}
+        showTags={false}
         onChange={(vals) => onChange(normalize([...value, ...accept(vals)]))}
-        splitChars={[',', ' ', ';']}
+        splitChars={SPLIT}
       />
       {years.length === 0 ? (
-        <Text size="sm" c="dimmed" mt="xs">
+        <Text size="sm" tone="secondary" mt={4}>
           Aucun jour férié défini.
         </Text>
       ) : (
-        <Accordion multiple variant="contained" mt="xs" defaultValue={byYear.has(currentYear) ? [currentYear] : []}>
+        <div style={{ marginTop: 8 }}>
           {years.map((y) => {
             const dates = byYear.get(y) ?? [];
             const weekend = dates.filter((d) => {
@@ -67,47 +70,37 @@ export default function HolidaysEditor({ value, onChange }: { value: string[]; o
               return wd === 0 || wd === 6;
             });
             return (
-              <Accordion.Item key={y} value={y}>
-                <Accordion.Control>
-                  <Group gap="xs">
-                    <Text fw={500}>{y}</Text>
-                    <Badge variant="light" size="sm">
+              <Disclosure
+                key={y}
+                defaultOpen={y === currentYear}
+                summary={
+                  <Group gap={8}>
+                    <span>{y}</span>
+                    <Pill>
                       {dates.length} jour{dates.length > 1 ? 's' : ''}
-                    </Badge>
+                    </Pill>
                     {weekend.length > 0 && (
-                      <Text size="xs" c="dimmed">
+                      <Text as="span" size="sm" tone="secondary">
                         dont {weekend.length} le week-end
                       </Text>
                     )}
                   </Group>
-                </Accordion.Control>
-                <Accordion.Panel>
-                  <TagsInput
-                    aria-label={`Jours fériés ${y}`}
-                    value={dates}
-                    onChange={(vals) => replaceYear(y, vals)}
-                    splitChars={[',', ' ', ';']}
-                  />
-                  <Group justify="space-between" mt={6}>
-                    <Text size="xs" c="dimmed">
-                      {dates.map((d) => `${WEEKDAY.format(new Date(d + 'T00:00:00Z'))} ${d.slice(8, 10)}/${d.slice(5, 7)}`).join(' · ')}
-                    </Text>
-                    <Button
-                      size="compact-xs"
-                      variant="subtle"
-                      color="red"
-                      leftSection={<IconTrash size={14} />}
-                      onClick={() => replaceYear(y, [])}
-                    >
-                      Retirer l'année {y}
-                    </Button>
-                  </Group>
-                </Accordion.Panel>
-              </Accordion.Item>
+                }
+              >
+                <TagsInput aria-label={`Jours fériés ${y}`} value={dates} onChange={(vals) => replaceYear(y, vals)} splitChars={SPLIT} />
+                <Group justify="between" align="start" mt={6} wrap={false}>
+                  <Text size="sm" tone="secondary">
+                    {dates.map((d) => `${WEEKDAY.format(new Date(d + 'T00:00:00Z'))} ${d.slice(8, 10)}/${d.slice(5, 7)}`).join(' · ')}
+                  </Text>
+                  <Button size="sm" variant="plain" destructive icon={<IconTrash size={15} />} onClick={() => replaceYear(y, [])}>
+                    Retirer l'année {y}
+                  </Button>
+                </Group>
+              </Disclosure>
             );
           })}
-        </Accordion>
+        </div>
       )}
-    </Input.Wrapper>
+    </Field>
   );
 }

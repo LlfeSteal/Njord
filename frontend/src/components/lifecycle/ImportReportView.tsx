@@ -1,81 +1,55 @@
 // Affichage du bilan d'import (ImportReport) : totaux, détection, spécificités plan/réalisé, motifs, issues.
-import { useState, type ReactNode } from 'react';
-import {
-  Badge,
-  Collapse,
-  Group,
-  Paper,
-  ScrollArea,
-  SimpleGrid,
-  Stack,
-  Table,
-  Text,
-  UnstyledButton,
-} from '@mantine/core';
-import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+// Compteurs en cartes KPI, détails en sections dépliables (cf. docs/STYLE.md §8, « Import wizard »).
+import type { ReactNode } from 'react';
+import { Card, Disclosure, Grid, Group, Pill, Stack, StatusGlyph, Table, Text, type GlyphKind, type Tone } from '../../ui';
 import type { ImportReport } from '../../api/types';
 import { fmtEur, fmtNumber, fmtPct, fmtPeriod } from '../../lib/format';
 import { ParsingBadge } from '../badges';
 
-function StatCard({ label, value, color }: { label: string; value: number; color?: string }) {
+/** Carte KPI : libellé 12 px secondaire (précédé d'un glyphe de statut si pertinent) + valeur. */
+function StatCard({ label, value, glyph }: { label: string; value: number; glyph?: { kind: GlyphKind; tone: Tone } }) {
   return (
-    <Paper withBorder p="sm" radius="sm">
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-        {label}
-      </Text>
-      <Text size="xl" fw={700} c={color}>
+    <Card padding={12}>
+      <Group gap={6} wrap={false}>
+        {glyph && <StatusGlyph kind={glyph.kind} tone={glyph.tone} size={12} />}
+        <Text size="sm" tone="secondary">
+          {label}
+        </Text>
+      </Group>
+      <Text size="kpi" weight={600} tabular>
         {fmtNumber(value)}
       </Text>
-    </Paper>
+    </Card>
   );
 }
 
 function Info({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Group gap={6} wrap="nowrap" align="baseline">
-      <Text size="sm" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+    <Group gap={6} wrap={false} align="baseline">
+      <Text tone="secondary" style={{ whiteSpace: 'nowrap' }}>
         {label} :
       </Text>
-      <Text size="sm" fw={500}>
-        {children}
-      </Text>
+      <Text weight={500}>{children}</Text>
     </Group>
   );
 }
 
-function CollapsibleList({ title, items }: { title: string; items: string[] }) {
-  const [open, setOpen] = useState(false);
+/** Liste de noms dépliable (pastilles), avec son compte à droite du résumé. */
+function NameList({ title, items }: { title: string; items: string[] }) {
   return (
-    <Paper withBorder p="xs" radius="sm">
-      <UnstyledButton
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        disabled={items.length === 0}
-        style={{ width: '100%' }}
-      >
-        <Group gap={6}>
-          {items.length > 0 &&
-            (open ? <IconChevronDown size={16} aria-hidden /> : <IconChevronRight size={16} aria-hidden />)}
-          <Text size="sm" fw={500}>
-            {title}
-          </Text>
-          <Badge size="sm" variant="light" color={items.length ? 'indigo' : 'gray'}>
-            {items.length}
-          </Badge>
-        </Group>
-      </UnstyledButton>
-      <Collapse in={open}>
-        <ScrollArea.Autosize mah={180} mt="xs">
-          <Group gap={6}>
+    <Disclosure summary={title} aside={<Pill>{fmtNumber(items.length)}</Pill>}>
+      {items.length === 0 ? (
+        <Text tone="secondary">Aucun.</Text>
+      ) : (
+        <div style={{ maxHeight: 180, overflow: 'auto' }}>
+          <Group gap={4}>
             {items.map((n) => (
-              <Badge key={n} variant="outline" color="gray" tt="none">
-                {n}
-              </Badge>
+              <Pill key={n}>{n}</Pill>
             ))}
           </Group>
-        </ScrollArea.Autosize>
-      </Collapse>
-    </Paper>
+        </div>
+      )}
+    </Disclosure>
   );
 }
 
@@ -84,17 +58,18 @@ const LAYOUT_LABEL: Record<string, string> = { A: 'A', B: 'B', mixte: 'mixte (A 
 export default function ImportReportView({ report }: { report: ImportReport }) {
   const motifs = Object.entries(report.motifs_count ?? {}).sort((a, b) => b[1] - a[1]);
   const issues = report.issues ?? [];
+  const hasDetails = report.kind === 'plan' || motifs.length > 0 || issues.length > 0;
   return (
-    <Stack gap="md">
-      <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm">
+    <Stack gap={12}>
+      <Grid cols={{ base: 2, sm: 4 }} gap={8}>
         <StatCard label="Lignes" value={report.total} />
-        <StatCard label="OK" value={report.ok} color="green" />
-        <StatCard label="Warn" value={report.warn} color={report.warn ? 'yellow.7' : undefined} />
-        <StatCard label="Drop" value={report.drop} color={report.drop ? 'red' : undefined} />
-      </SimpleGrid>
+        <StatCard label="OK" value={report.ok} glyph={{ kind: 'success', tone: 'success' }} />
+        <StatCard label="Warn" value={report.warn} glyph={report.warn ? { kind: 'warning', tone: 'warning' } : undefined} />
+        <StatCard label="Drop" value={report.drop} glyph={report.drop ? { kind: 'danger', tone: 'danger' } : undefined} />
+      </Grid>
 
-      <Paper withBorder p="sm" radius="sm">
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing={4}>
+      <Card padding={12}>
+        <Grid cols={{ base: 1, sm: 2 }} gap={4}>
           <Info label="Fichier">{report.filename || '—'}</Info>
           <Info label="Intitulé">{report.intitule || '—'}</Info>
           <Info label="Onglet">{report.sheet_name || '—'}</Info>
@@ -108,79 +83,69 @@ export default function ImportReportView({ report }: { report: ImportReport }) {
             </>
           )}
           {report.kind === 'realise' && <Info label="Montant total">{fmtEur(report.montant_total_eur)}</Info>}
-        </SimpleGrid>
-      </Paper>
+        </Grid>
+      </Card>
 
-      {report.kind === 'plan' && (
-        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-          <CollapsibleList title="Nouvelles personnes" items={report.nouvelles_personnes ?? []} />
-          <CollapsibleList title="Nouveaux squads" items={report.nouveaux_squads ?? []} />
-        </SimpleGrid>
+      {hasDetails && (
+        <Card padding={12}>
+          {report.kind === 'plan' && (
+            <>
+              <NameList title="Nouvelles personnes" items={report.nouvelles_personnes ?? []} />
+              <NameList title="Nouveaux squads" items={report.nouveaux_squads ?? []} />
+            </>
+          )}
+
+          {motifs.length > 0 && (
+            <Disclosure summary="Motifs" aside={<Pill>{fmtNumber(motifs.length)}</Pill>} defaultOpen>
+              <Table card={false} striped compact minWidth={360}>
+                <thead>
+                  <tr>
+                    <th>Motif</th>
+                    <th data-align="right">Occurrences</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {motifs.map(([m, n]) => (
+                    <tr key={m}>
+                      <td>{m}</td>
+                      <td data-align="right">{fmtNumber(n)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Disclosure>
+          )}
+
+          {issues.length > 0 && (
+            <Disclosure summary="Lignes signalées" aside={<Pill>{fmtNumber(issues.length)}</Pill>}>
+              <Table card={false} striped compact maxHeight={260}>
+                <thead>
+                  <tr>
+                    <th data-align="right" style={{ width: 90 }}>
+                      Ligne
+                    </th>
+                    <th style={{ width: 90 }}>Statut</th>
+                    <th>Motif</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {issues.map((it, i) => (
+                    <tr key={`${it.row_num}-${i}`}>
+                      <td data-align="right">{it.row_num}</td>
+                      <td>
+                        <ParsingBadge statut={it.statut} />
+                      </td>
+                      <td>{it.motif}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </Disclosure>
+          )}
+        </Card>
       )}
 
-      {motifs.length > 0 && (
-        <Stack gap={4}>
-          <Text fw={600} size="sm">
-            Motifs
-          </Text>
-          <Table.ScrollContainer minWidth={360}>
-            <Table striped withTableBorder verticalSpacing={4}>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Motif</Table.Th>
-                  <Table.Th ta="right">Occurrences</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {motifs.map(([m, n]) => (
-                  <Table.Tr key={m}>
-                    <Table.Td>{m}</Table.Td>
-                    <Table.Td ta="right">{fmtNumber(n)}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
-        </Stack>
-      )}
-
-      {issues.length > 0 && (
-        <Stack gap={4}>
-          <Text fw={600} size="sm">
-            Lignes signalées ({fmtNumber(issues.length)})
-          </Text>
-          <ScrollArea.Autosize mah={260} type="auto">
-            <Table striped withTableBorder verticalSpacing={4} stickyHeader>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th w={90}>Ligne</Table.Th>
-                  <Table.Th w={90}>Statut</Table.Th>
-                  <Table.Th>Motif</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {issues.map((it, i) => (
-                  <Table.Tr key={`${it.row_num}-${i}`}>
-                    <Table.Td>{it.row_num}</Table.Td>
-                    <Table.Td>
-                      <ParsingBadge statut={it.statut} />
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm">{it.motif}</Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </ScrollArea.Autosize>
-        </Stack>
-      )}
-
-      {issues.length === 0 && motifs.length === 0 && (
-        <Text size="sm" c="dimmed">
-          Aucune anomalie détectée.
-        </Text>
-      )}
+      {issues.length === 0 && motifs.length === 0 && <Text tone="secondary">Aucune anomalie détectée.</Text>}
     </Stack>
   );
 }

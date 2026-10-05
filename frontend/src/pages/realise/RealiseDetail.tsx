@@ -1,48 +1,53 @@
 // Détail d'un import du réalisé : écritures filtrables, tri, pagination, totaux, export CSV (SPEC_realise §6.3).
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import {
-  Alert,
-  Badge,
-  Box,
-  Button,
-  Checkbox,
-  Group,
-  Loader,
-  Pagination,
-  Paper,
-  Popover,
-  ScrollArea,
-  Select,
-  Stack,
-  Table,
-  Text,
-  Title,
-  UnstyledButton,
-} from '@mantine/core';
-import { useDebouncedValue, useLocalStorage } from '@mantine/hooks';
+import { useParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import {
-  IconArchive,
-  IconArrowLeft,
-  IconChevronDown,
-  IconChevronUp,
-  IconColumns,
-  IconDownload,
-  IconSelector,
-  IconTrash,
-} from '@tabler/icons-react';
 import { realiseApi, versionsApi, type RealiseEntriesQuery } from '../../api/client';
 import type { RealiseEntriesPage, Version } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
 import { StatusBadge } from '../../components/badges';
+import {
+  Banner,
+  Button,
+  Card,
+  Checkbox,
+  EmptyState,
+  Group,
+  Link,
+  LoadingBlock,
+  Pagination,
+  Pill,
+  Popover,
+  Select,
+  SkeletonRows,
+  SortHeader,
+  Spinner,
+  Stack,
+  StatusGlyph,
+  Table,
+  Text,
+  Title,
+  useDebouncedValue,
+  useLocalStorage,
+} from '../../ui';
+import { IconArrowLeft, IconColumns, IconDownload, IconSearch } from '../../ui/Icons';
 import { fmtDateTime, fmtEur, fmtNumber, fmtPeriod } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 import { COLUMNS, DEFAULT_VISIBLE, type EntryColumn, type SortField } from './columns';
 import EntriesFilters from './EntriesFilters';
 import { EMPTY_FILTERS, type EntriesFilterState } from './filters';
 
-const PAGE_SIZES = ['50', '100', '200'];
+const PAGE_SIZES = ['50', '100', '200'] as const;
+
+/** Téléchargement d'un fichier servi par l'API (équivalent d'un <a href download>). */
+function download(href: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 export default function RealiseDetail() {
   const { versionId = '' } = useParams();
@@ -131,36 +136,30 @@ export default function RealiseDetail() {
   };
 
   // ------------------------------------------------------------ rendu
-  if (versionQ.isLoading) {
-    return (
-      <Group justify="center" p="xl">
-        <Loader />
-      </Group>
-    );
-  }
+  if (versionQ.isLoading) return <LoadingBlock />;
   if (versionQ.error || !version) {
     return (
       <Stack>
-        <BackButton />
+        <BackLink />
         <ErrorAlert error={versionQ.error ?? new Error('Import introuvable')} title="Impossible de charger l'import" />
       </Stack>
     );
   }
 
   return (
-    <Stack gap="md" pb={4}>
+    <Stack gap={12}>
       <VersionHeader version={version} />
 
       {version.statut === 'archivee' && (
-        <Alert color="yellow" variant="light" icon={<IconArchive size={18} />} title="Version archivée">
+        <Banner tone="info" title="Version archivée">
           Cet import est archivé depuis le {fmtDateTime(version.archivee_le)} : consultation en lecture seule, il n'est plus
           retenu par défaut par l'analyse.
-        </Alert>
+        </Banner>
       )}
       {purged ? (
-        <Alert color="red" variant="light" icon={<IconTrash size={18} />} title="Version purgée">
+        <Banner tone="warning" title="Version purgée">
           Les écritures de cet import ont été définitivement supprimées le {fmtDateTime(version.purgee_le)}.
-        </Alert>
+        </Banner>
       ) : (
         <>
           {facetsQ.error ? <ErrorAlert error={facetsQ.error} title="Filtres indisponibles" /> : null}
@@ -188,36 +187,26 @@ export default function RealiseDetail() {
             onMaskSensitiveChange={setMaskSensitive}
           />
 
-          <Group justify="space-between" wrap="wrap" gap="sm">
-            <Group gap="xs">
-              <Text size="sm" fw={500}>
+          <Group justify="between" gap={8}>
+            <Group gap={8}>
+              <Text weight={600} tabular>
                 {data ? `${fmtNumber(data.total)} écriture${data.total > 1 ? 's' : ''}` : '…'}
               </Text>
-              {entriesQ.isFetching && <Loader size="xs" />}
+              {entriesQ.isFetching && <Spinner size={12} />}
             </Group>
-            <Group gap="xs" wrap="wrap">
+            <Group gap={8}>
               <ColumnPicker visible={visible} onChange={setVisible} maskSensitive={maskSensitive} />
               <Select
                 aria-label="Lignes par page"
                 data={PAGE_SIZES.map((v) => ({ value: v, label: `${v} / page` }))}
-                value={String(pageSize)}
+                value={String(pageSize) as (typeof PAGE_SIZES)[number]}
                 onChange={(v) => {
                   if (!v) return;
                   setPageSize(Number(v));
                   setPage(1);
                 }}
-                allowDeselect={false}
-                w={120}
-                size="sm"
               />
-              <Button
-                component="a"
-                href={realiseApi.entriesCsvUrl(versionId, baseQuery)}
-                download
-                variant="light"
-                size="sm"
-                leftSection={<IconDownload size={16} />}
-              >
+              <Button icon={<IconDownload size={15} />} onClick={() => download(realiseApi.entriesCsvUrl(versionId, baseQuery))}>
                 Export CSV
               </Button>
             </Group>
@@ -234,11 +223,7 @@ export default function RealiseDetail() {
             onSort={toggleSort}
           />
 
-          {data && totalPages > 1 && (
-            <Group justify="center">
-              <Pagination total={totalPages} value={page} onChange={setPage} size="sm" siblings={1} boundaries={1} />
-            </Group>
-          )}
+          {data && totalPages > 1 && <Pagination page={page} total={totalPages} onChange={setPage} />}
 
           {data && <TotalsFooter data={data} />}
         </>
@@ -249,21 +234,28 @@ export default function RealiseDetail() {
 
 // ------------------------------------------------------------------ sous-composants
 
-function BackButton() {
+function BackLink() {
   return (
-    <Button component={Link} to="/realise" variant="subtle" size="compact-sm" leftSection={<IconArrowLeft size={16} />} w="fit-content">
-      Retour aux imports
-    </Button>
+    <Link to="/realise">
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <IconArrowLeft size={15} />
+        Retour aux imports
+      </span>
+    </Link>
   );
 }
 
-function Stat({ label, children }: { label: string; children: ReactNode }) {
+/** Statistique de l'en-tête : libellé secondaire, valeur ; glyphe optionnel avant le libellé. */
+function Stat({ label, glyph, children }: { label: string; glyph?: ReactNode; children: ReactNode }) {
   return (
     <div>
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-        {label}
-      </Text>
-      <Text size="sm" fw={500} component="div">
+      <Group gap={4} wrap={false}>
+        {glyph}
+        <Text size="sm" tone="secondary">
+          {label}
+        </Text>
+      </Group>
+      <Text as="div" weight={500} tabular>
         {children}
       </Text>
     </div>
@@ -272,35 +264,23 @@ function Stat({ label, children }: { label: string; children: ReactNode }) {
 
 function VersionHeader({ version: v }: { version: Version }) {
   return (
-    <Stack gap="xs">
-      <BackButton />
-      <Group gap="sm" wrap="wrap">
-        <Title order={3}>{v.intitule}</Title>
+    <Stack gap={8}>
+      <BackLink />
+      <Group gap={12} align="baseline">
+        <Title order={2}>{v.intitule}</Title>
+        {v.source_format && <Text tone="secondary">format {v.source_format}</Text>}
         <StatusBadge statut={v.statut} />
-        {v.source_format && (
-          <Badge variant="outline" color="gray" size="sm">
-            format {v.source_format}
-          </Badge>
-        )}
       </Group>
-      <Paper withBorder p="sm" radius="sm">
-        <Group gap="xl" wrap="wrap">
+      <Card>
+        <Group gap={24} align="start">
           <Stat label="Période couverte">{fmtPeriod(v.periode_debut, v.periode_fin)}</Stat>
-          <Stat label="Montant total">
-            <Text span inherit c={(v.montant_total_eur ?? 0) < 0 ? 'red' : undefined}>
-              {fmtEur(v.montant_total_eur)}
-            </Text>
-          </Stat>
+          <Stat label="Montant total">{fmtEur(v.montant_total_eur)}</Stat>
           <Stat label="Lignes">{fmtNumber(v.nb_lignes)}</Stat>
-          <Stat label="Avertissements">
-            <Text span inherit c={v.nb_warn ? 'yellow.8' : undefined}>
-              {fmtNumber(v.nb_warn)}
-            </Text>
+          <Stat label="Avertissements" glyph={v.nb_warn ? <StatusGlyph kind="warning" tone="warning" size={12} /> : undefined}>
+            {fmtNumber(v.nb_warn)}
           </Stat>
-          <Stat label="Rejets">
-            <Text span inherit c={v.nb_drop ? 'red' : undefined}>
-              {fmtNumber(v.nb_drop)}
-            </Text>
+          <Stat label="Rejets" glyph={v.nb_drop ? <StatusGlyph kind="danger" tone="danger" size={12} /> : undefined}>
+            {fmtNumber(v.nb_drop)}
           </Stat>
           <Stat label="Importé le">
             {fmtDateTime(v.importee_le)}
@@ -308,13 +288,13 @@ function VersionHeader({ version: v }: { version: Version }) {
           </Stat>
           {v.filename && (
             <Stat label="Fichier">
-              <Text span inherit truncate="end" maw={260} display="inline-block" title={v.filename}>
+              <Text as="span" truncate title={v.filename} style={{ display: 'inline-block', maxWidth: 260, verticalAlign: 'bottom' }}>
                 {v.filename}
               </Text>
             </Stat>
           )}
         </Group>
-      </Paper>
+      </Card>
     </Stack>
   );
 }
@@ -329,67 +309,47 @@ function ColumnPicker({
   maskSensitive: boolean;
 }) {
   const shown = COLUMNS.filter((c) => visible.includes(c.key) && !(maskSensitive && c.sensitive)).length;
+  const toggle = (key: string, on: boolean) => onChange(on ? [...visible, key] : visible.filter((k) => k !== key));
   return (
-    <Popover position="bottom-end" shadow="md" withArrow trapFocus>
-      <Popover.Target>
-        <Button variant="default" size="sm" leftSection={<IconColumns size={16} />}>
+    <Popover
+      placement="bottom-end"
+      width={260}
+      target={(p) => (
+        <Button {...p} icon={<IconColumns size={15} />}>
           Colonnes ({shown}/{COLUMNS.length})
         </Button>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <ScrollArea.Autosize mah={360} type="auto" offsetScrollbars>
-          <Checkbox.Group value={visible} onChange={onChange} label="Colonnes affichées">
-            <Stack gap={6} mt="xs">
-              {COLUMNS.map((c) => (
-                <Checkbox
-                  key={c.key}
-                  value={c.key}
-                  size="xs"
-                  label={c.sensitive ? `${c.label} (sensible)` : c.label}
-                  disabled={maskSensitive && c.sensitive}
-                />
-              ))}
-            </Stack>
-          </Checkbox.Group>
-        </ScrollArea.Autosize>
-        <Group mt="sm" gap="xs">
-          <Button size="compact-xs" variant="subtle" onClick={() => onChange(DEFAULT_VISIBLE)}>
-            Par défaut
-          </Button>
-          <Button size="compact-xs" variant="subtle" onClick={() => onChange(COLUMNS.map((c) => c.key))}>
-            Toutes
-          </Button>
-        </Group>
-        {maskSensitive && (
-          <Text size="xs" c="dimmed" mt={6} maw={240}>
-            Désactivez « Masquer les colonnes sensibles » pour afficher les colonnes sensibles.
-          </Text>
-        )}
-      </Popover.Dropdown>
-    </Popover>
-  );
-}
-
-function SortHeader({
-  col,
-  sort,
-  onSort,
-}: {
-  col: EntryColumn & { sort: SortField };
-  sort: { field: SortField; order: 'asc' | 'desc' };
-  onSort: (f: SortField) => void;
-}) {
-  const active = sort.field === col.sort;
-  const Icon = !active ? IconSelector : sort.order === 'asc' ? IconChevronUp : IconChevronDown;
-  return (
-    <UnstyledButton
-      onClick={() => onSort(col.sort)}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, whiteSpace: 'nowrap' }}
-      aria-label={`Trier par ${col.label}`}
+      )}
     >
-      {col.label}
-      <Icon size={14} stroke={1.5} opacity={active ? 1 : 0.5} />
-    </UnstyledButton>
+      <Text size="sm" weight={600} tone="secondary">
+        Colonnes affichées
+      </Text>
+      <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
+        <Stack gap={6}>
+          {COLUMNS.map((c) => (
+            <Checkbox
+              key={c.key}
+              checked={visible.includes(c.key)}
+              onChange={(on) => toggle(c.key, on)}
+              label={c.sensitive ? `${c.label} (sensible)` : c.label}
+              disabled={maskSensitive && c.sensitive}
+            />
+          ))}
+        </Stack>
+      </div>
+      <Group mt={8} gap={4}>
+        <Button size="sm" variant="plain" onClick={() => onChange(DEFAULT_VISIBLE)}>
+          Par défaut
+        </Button>
+        <Button size="sm" variant="plain" onClick={() => onChange(COLUMNS.map((c) => c.key))}>
+          Toutes
+        </Button>
+      </Group>
+      {maskSensitive && (
+        <Text size="sm" tone="secondary" mt={6}>
+          Désactivez « Masquer les colonnes sensibles » pour afficher les colonnes sensibles.
+        </Text>
+      )}
+    </Popover>
   );
 }
 
@@ -409,53 +369,57 @@ function EntriesTable({
   onSort: (f: SortField) => void;
 }) {
   return (
-    <Table.ScrollContainer minWidth={Math.max(720, columns.length * 110)}>
-      <Table striped highlightOnHover verticalSpacing={6} fz="sm" style={{ opacity: stale ? 0.6 : 1, transition: 'opacity 120ms' }}>
-        <Table.Thead>
-          <Table.Tr>
-            {columns.map((c) => (
-              <Table.Th
-                key={c.key}
-                ta={c.align}
-                aria-sort={c.sort && sort.field === c.sort ? (sort.order === 'asc' ? 'ascending' : 'descending') : undefined}
-                style={{ whiteSpace: 'nowrap' }}
-              >
-                {c.sort ? <SortHeader col={c as EntryColumn & { sort: SortField }} sort={sort} onSort={onSort} /> : c.label}
-              </Table.Th>
-            ))}
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
+    // Données précédentes atténuées pendant le chargement de la page suivante.
+    <div style={{ opacity: stale ? 0.6 : 1, transition: 'opacity 120ms' }}>
+      <Table striped hover minWidth={Math.max(720, columns.length * 110)}>
+        <thead>
+          <tr>
+            {columns.map((c) =>
+              c.sort ? (
+                <SortHeader
+                  key={c.key}
+                  active={sort.field === c.sort}
+                  dir={sort.order}
+                  onSort={() => onSort(c.sort as SortField)}
+                  align={c.align}
+                >
+                  {c.label}
+                </SortHeader>
+              ) : (
+                <th key={c.key} data-align={c.align} data-nowrap>
+                  {c.label}
+                </th>
+              ),
+            )}
+          </tr>
+        </thead>
+        <tbody>
           {loading ? (
-            <Table.Tr>
-              <Table.Td colSpan={columns.length}>
-                <Group justify="center" p="md">
-                  <Loader size="sm" />
-                </Group>
-              </Table.Td>
-            </Table.Tr>
+            <tr>
+              <td colSpan={columns.length}>
+                <SkeletonRows rows={5} />
+              </td>
+            </tr>
           ) : !data || data.items.length === 0 ? (
-            <Table.Tr>
-              <Table.Td colSpan={columns.length}>
-                <Text c="dimmed" ta="center" p="md" size="sm">
-                  Aucune écriture ne correspond aux filtres.
-                </Text>
-              </Table.Td>
-            </Table.Tr>
+            <tr>
+              <td colSpan={columns.length}>
+                <EmptyState icon={<IconSearch size={40} />} title="Aucune écriture ne correspond aux filtres." />
+              </td>
+            </tr>
           ) : (
             data.items.map((e) => (
-              <Table.Tr key={e.id} style={e.statut_parsing === 'drop' ? { opacity: 0.6 } : undefined}>
+              <tr key={e.id} data-muted={e.statut_parsing === 'drop' || undefined}>
                 {columns.map((c) => (
-                  <Table.Td key={c.key} ta={c.align}>
+                  <td key={c.key} data-align={c.align} data-nowrap={c.nowrap || undefined} data-mono={c.mono || undefined}>
                     {c.render(e)}
-                  </Table.Td>
+                  </td>
                 ))}
-              </Table.Tr>
+              </tr>
             ))
           )}
-        </Table.Tbody>
+        </tbody>
       </Table>
-    </Table.ScrollContainer>
+    </div>
   );
 }
 
@@ -463,56 +427,49 @@ function TotalsFooter({ data }: { data: RealiseEntriesPage }) {
   const cats = Object.entries(data.totals?.par_categorie ?? {}).sort((a, b) => b[1] - a[1]);
   const totalEur = data.totals?.total_eur ?? 0;
   return (
-    <Paper
-      withBorder
-      shadow="sm"
-      p="sm"
-      radius="sm"
-      role="region"
-      aria-label="Totaux du filtre courant"
-      style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
-    >
-      <Group gap="xl" wrap="wrap" align="center">
-        <Box>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+    <Card role="region" aria-label="Totaux du filtre courant" style={{ position: 'sticky', bottom: 0, zIndex: 5 }}>
+      <Group gap={24} align="start">
+        <div>
+          <Text size="sm" tone="secondary">
             Σ Quantité
           </Text>
-          <Text fw={600}>{fmtNumber(data.totals?.quantite)}</Text>
-        </Box>
-        <Box>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+          <Text weight={600} tabular>
+            {fmtNumber(data.totals?.quantite)}
+          </Text>
+        </div>
+        <div>
+          <Text size="sm" tone="secondary">
             Σ Total €
           </Text>
-          <Text fw={600} c={totalEur < 0 ? 'red' : undefined}>
+          <Text weight={600} tabular>
             {fmtEur(totalEur, true)}
           </Text>
-        </Box>
-        <Box>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+        </div>
+        <div>
+          <Text size="sm" tone="secondary">
             Écritures
           </Text>
-          <Text fw={600}>{fmtNumber(data.total)}</Text>
-        </Box>
-        <Box style={{ flex: '1 1 300px' }}>
-          <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>
+          <Text weight={600} tabular>
+            {fmtNumber(data.total)}
+          </Text>
+        </div>
+        <div style={{ flex: '1 1 300px' }}>
+          <Text size="sm" tone="secondary" mb={4}>
             Lignes par catégorie
           </Text>
-          <Group gap={6} wrap="wrap">
+          <Group gap={6}>
             {cats.length === 0 ? (
-              <Text size="sm" c="dimmed">
-                —
-              </Text>
+              <Text tone="secondary">—</Text>
             ) : (
               cats.map(([cat, n]) => (
-                <Badge key={cat || '_'} variant="light" color="indigo" tt="none">
+                <Pill key={cat || '_'}>
                   {cat || '(vide)'} : {fmtNumber(n)}
-                </Badge>
+                </Pill>
               ))
             )}
           </Group>
-        </Box>
+        </div>
       </Group>
-    </Paper>
+    </Card>
   );
 }
-

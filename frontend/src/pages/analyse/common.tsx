@@ -1,52 +1,85 @@
-// Briques partagées des sous-onglets Analyse : palette graphique, en-têtes triables, cartes KPI, badges.
-import { useState, type ReactNode } from 'react';
-import { Badge, Card, Group, Stack, Table, Text, Tooltip, UnstyledButton, useComputedColorScheme } from '@mantine/core';
-import { IconChevronDown, IconChevronUp, IconSelector } from '@tabler/icons-react';
-import type { Confidence, Flag } from '../../api/types';
+// Composants partagés des sous-onglets Analyse : bulle et légende des graphiques, en-têtes triables, cartes KPI, badges.
+// Les utilitaires (couleurs, tri, confiance, écarts) sont dans helpers.ts.
+import type { ReactNode } from 'react';
+import {
+  Card,
+  Group,
+  SortHeader,
+  Stack,
+  StatusGlyph,
+  Tag,
+  Text,
+  Title,
+  Tooltip,
+  type GlyphKind,
+  type StatusTone,
+} from '../../ui';
+import type { Confidence } from '../../api/types';
+import { CONFIDENCE_META, type ChartSeries, type SortState } from './helpers';
+import './analyse.css';
 
-// ------------------------------------------------------------------ Palette graphique (skill dataviz)
-// Catégoriel slots 1-2 (bleu/orange) validés clair & sombre ; « autre » en gris neutre ;
-// flags = couleurs d'état fixes, toujours accompagnées de l'emoji + libellé.
-export function useChartPalette() {
-  const dark = useComputedColorScheme('light', { getInitialValueInEffect: false }) === 'dark';
-  return {
-    dark,
-    series1: dark ? '#3987e5' : '#2a78d6',
-    series2: dark ? '#d95926' : '#eb6834',
-    other: '#898781',
-    text: dark ? '#c3c2b7' : '#52514e',
-    grid: dark ? '#2c2c2a' : '#e1e0d9',
-    surface: dark ? '#242424' : '#ffffff',
-    flag: {
-      absence: dark ? '#c3c2b7' : '#52514e',
-      hors_plan: '#ec835a',
-      sur_imputation: '#d03b3b',
-      sous_imputation: dark ? '#9085e9' : '#4a3aa7',
-      conforme: '#0ca30c',
-    } satisfies Record<Flag, string>,
-  };
+function Swatch({ token, opacity }: { token: string; opacity?: number }) {
+  return <span className="analyse-swatch" style={{ background: `var(${token})`, opacity }} aria-hidden />;
 }
 
-// ------------------------------------------------------------------ Tri
-export type SortDir = 'asc' | 'desc';
-export interface SortState<K extends string> {
-  key: K;
-  dir: SortDir;
+/** Légende sous un graphique : 12 px secondaire, pastilles 10 px rayon 3. */
+export function ChartLegend({ series }: { series: ChartSeries[] }) {
+  return (
+    <div className="analyse-chart-legend">
+      {series.map((s) => (
+        <span key={s.key} className="analyse-chart-legend-item">
+          <Swatch token={s.token} opacity={s.opacity} />
+          {s.label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
-export function useSort<K extends string>(initial: SortState<K>) {
-  const [sort, setSort] = useState<SortState<K>>(initial);
-  const toggle = (key: K) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' }));
-  return { sort, toggle, setSort };
+interface TooltipEntry {
+  dataKey?: unknown;
+  value?: unknown;
+  payload?: unknown;
 }
 
-export function cmp(a: string | number | null | undefined, b: string | number | null | undefined): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  return String(a).localeCompare(String(b), 'fr', { numeric: true, sensitivity: 'base' });
+/**
+ * Contenu de bulle recharts (`<RTooltip content={<ChartTooltip … />} />`), au look de la bulle du kit :
+ * titre 13/600, une ligne 12 px secondaire par série avec sa pastille.
+ */
+export function ChartTooltip<D = unknown>({
+  active,
+  payload,
+  label,
+  series,
+  format,
+  title,
+}: {
+  active?: boolean;
+  payload?: readonly TooltipEntry[];
+  label?: ReactNode;
+  series: ChartSeries[] | ((datum: D) => ChartSeries[]);
+  format: (v: number) => string;
+  title?: (datum: D) => ReactNode;
+}) {
+  if (!active || !payload?.length) return null;
+  const datum = payload[0].payload as D;
+  const list = typeof series === 'function' ? series(datum) : series;
+  return (
+    <div className="analyse-chart-tooltip">
+      <div className="analyse-chart-tooltip-title">{title ? title(datum) : label}</div>
+      {list.map((s) => {
+        const entry = payload.find((p) => p.dataKey === s.key);
+        if (!entry) return null;
+        return (
+          <div key={s.key} className="analyse-chart-tooltip-row">
+            <Swatch token={s.token} opacity={s.opacity} />
+            {s.label}
+            <span className="analyse-chart-tooltip-value">{format(Number(entry.value))}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 export function SortTh<K extends string>({
@@ -62,48 +95,57 @@ export function SortTh<K extends string>({
   children: ReactNode;
   align?: 'right';
 }) {
-  const active = sort.key === k;
-  const Icon = !active ? IconSelector : sort.dir === 'asc' ? IconChevronUp : IconChevronDown;
   return (
-    <Table.Th
-      aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      style={{ whiteSpace: 'nowrap', textAlign: align }}
-    >
-      <UnstyledButton onClick={() => onSort(k)} style={{ font: 'inherit', fontWeight: 600 }}>
-        <Group gap={4} wrap="nowrap" justify={align === 'right' ? 'flex-end' : 'flex-start'}>
-          {children}
-          <Icon size={14} stroke={1.5} aria-hidden />
-        </Group>
-      </UnstyledButton>
-    </Table.Th>
+    <SortHeader active={sort.key === k} dir={sort.dir} onSort={() => onSort(k)} align={align}>
+      {children}
+    </SortHeader>
   );
 }
 
-// ------------------------------------------------------------------ Cartes KPI
+// ------------------------------------------------------------------ Sections et cartes KPI
+/** En-tête de section : titre 15/600, élément à droite, sous-titre 12 px secondaire. */
+export function SectionHeader({ title, sub, aside }: { title: ReactNode; sub?: ReactNode; aside?: ReactNode }) {
+  return (
+    <Stack gap={2} mb={8}>
+      <Group justify="between" wrap={false}>
+        <Title order={3}>{title}</Title>
+        {aside}
+      </Group>
+      {sub && (
+        <Text size="sm" tone="secondary">
+          {sub}
+        </Text>
+      )}
+    </Stack>
+  );
+}
+
+/** Carte KPI (§8) : pas de bordure colorée ; un glyphe de statut optionnel avant le libellé donne le ton. */
 export function StatCard({
   label,
   value,
   sub,
   children,
-  accent,
+  glyph,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
   children?: ReactNode;
-  accent?: string;
+  glyph?: { kind: GlyphKind; tone: StatusTone };
 }) {
   return (
-    <Card withBorder padding="md" radius="md" style={accent ? { borderLeft: `3px solid var(--mantine-color-${accent}-6)` } : undefined}>
+    <Card>
       <Stack gap={4}>
-        <Text size="sm" c="dimmed">
-          {label}
-        </Text>
-        <Text fz={28} fw={600} lh={1.15}>
-          {value}
-        </Text>
+        <Group gap={6} wrap={false}>
+          {glyph && <StatusGlyph kind={glyph.kind} tone={glyph.tone} size={12} />}
+          <Text size="sm" tone="secondary">
+            {label}
+          </Text>
+        </Group>
+        <Text size="kpi">{value}</Text>
         {sub && (
-          <Text size="xs" c="dimmed">
+          <Text size="sm" tone="secondary">
             {sub}
           </Text>
         )}
@@ -114,21 +156,13 @@ export function StatCard({
 }
 
 // ------------------------------------------------------------------ Confiance de correspondance
-export const CONFIDENCE_META: Record<Confidence, { label: string; color: string; hint: string }> = {
-  matricule: { label: 'Matricule', color: 'green', hint: 'Correspondance directe par matricule' },
-  alias: { label: 'Alias', color: 'blue', hint: 'Alias du référentiel Personne' },
-  fuzzy: { label: 'Approximative *', color: 'yellow', hint: 'Correspondance approximative (nom normalisé) — à confirmer' },
-  none: { label: 'Aucune', color: 'orange', hint: 'Écriture non rapprochée → 🟠 Hors plan' },
-  plan: { label: 'Plan seul', color: 'gray', hint: 'Ressource présente au plan uniquement' },
-};
-
 export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
   const m = CONFIDENCE_META[confidence];
   return (
-    <Tooltip label={m.hint} withArrow>
-      <Badge color={m.color} variant="light">
+    <Tooltip label={m.hint}>
+      <Tag tone={m.tone} glyph={m.glyph}>
         {m.label}
-      </Badge>
+      </Tag>
     </Tooltip>
   );
 }
@@ -136,8 +170,14 @@ export function ConfidenceBadge({ confidence }: { confidence: Confidence }) {
 /** Astérisque des correspondances approximatives. */
 export function FuzzyMark() {
   return (
-    <Tooltip label="Correspondance approximative (nom normalisé)" withArrow>
-      <Text component="span" c="yellow.8" fw={700} aria-label="correspondance approximative (nom normalisé)" style={{ cursor: 'help' }}>
+    <Tooltip label="Correspondance approximative (nom normalisé)">
+      <Text
+        as="span"
+        tone="warning"
+        weight={600}
+        aria-label="correspondance approximative (nom normalisé)"
+        style={{ cursor: 'help' }}
+      >
         *
       </Text>
     </Tooltip>
@@ -147,24 +187,12 @@ export function FuzzyMark() {
 export function CtCell({ ct, libelle }: { ct: string; libelle?: string }) {
   return (
     <Stack gap={0}>
-      <Text size="sm" ff="monospace">
-        {ct}
-      </Text>
+      <Text mono>{ct}</Text>
       {libelle && (
-        <Text size="xs" c="dimmed" lineClamp={1}>
+        <Text size="sm" tone="secondary" lineClamp={1}>
           {libelle}
         </Text>
       )}
     </Stack>
   );
 }
-
-/** Couleur Mantine de l'écart signé (le signe « + / − » porte aussi l'information). */
-export function ecartColor(flag: Flag, ecart: number): string | undefined {
-  if (flag === 'sur_imputation') return 'red.7';
-  if (flag === 'sous_imputation') return 'grape.7';
-  if (ecart === 0) return 'dimmed';
-  return undefined;
-}
-
-export const paginate = <T,>(rows: T[], page: number, size: number) => rows.slice((page - 1) * size, page * size);

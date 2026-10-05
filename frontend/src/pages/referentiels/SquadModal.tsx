@@ -1,7 +1,7 @@
 // Création / édition d'une squad (nom, entité, parent) + ajout d'alias (§6.1).
 import { useMemo, useState, type FormEvent } from 'react';
-import { Badge, Button, Divider, Group, Modal, Select, Stack, Text, TextInput } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Button, Divider, Group, Modal, Pill, Select, Stack, Text, TextInput } from '../../ui';
+import { IconPlus } from '../../ui/Icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { referentielApi } from '../../api/client';
 import type { Squad } from '../../api/types';
@@ -39,7 +39,7 @@ export default function SquadModal({ editing, squads, onClose, onCreated }: Prop
       size="lg"
     >
       {editing !== null && (
-        <Stack gap="md">
+        <Stack gap={16}>
           <SquadForm key={editing} squad={squad} squads={squads} onClose={onClose} onCreated={onCreated} />
           {squad && <SquadAliasSection squad={squad} />}
         </Stack>
@@ -102,20 +102,9 @@ function SquadForm({
 
   return (
     <form onSubmit={submit}>
-      <Stack gap="xs">
-        <TextInput
-          label="Nom canonique"
-          value={nom}
-          onChange={(e) => setNom(e.currentTarget.value)}
-          required
-          data-autofocus
-        />
-        <TextInput
-          label="Entité rattachée"
-          placeholder="Optionnel"
-          value={entite}
-          onChange={(e) => setEntite(e.currentTarget.value)}
-        />
+      <Stack gap={8}>
+        <TextInput label="Nom canonique" value={nom} onChange={setNom} required autoFocus />
+        <TextInput label="Entité rattachée" placeholder="Optionnel" value={entite} onChange={setEntite} />
         <Select
           label="Squad parente"
           placeholder="Aucune (racine)"
@@ -124,13 +113,17 @@ function SquadForm({
           onChange={setParentId}
           searchable
           clearable
-          nothingFoundMessage="Aucune squad"
+          nothingFound="Aucune squad"
         />
-        <Group justify="flex-end">
-          <Button variant="default" onClick={onClose}>
-            {squad ? 'Fermer' : 'Annuler'}
-          </Button>
-          <Button type="submit" disabled={!dirty || !nom.trim()} loading={create.isPending || update.isPending}>
+        {/* Actions dans le corps : en édition, la section Alias suit le formulaire. */}
+        <Group justify="end" gap={8} mt={4}>
+          <Button onClick={onClose}>{squad ? 'Fermer' : 'Annuler'}</Button>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!dirty || !nom.trim()}
+            loading={create.isPending || update.isPending}
+          >
             {squad ? 'Enregistrer' : 'Créer'}
           </Button>
         </Group>
@@ -153,32 +146,28 @@ function SquadAliasSection({ squad }: { squad: Squad }) {
     if (a) add.mutate(a);
   };
   return (
-    <Stack gap="xs">
-      <Divider label="Alias" labelPosition="left" />
+    <Stack gap={8}>
+      <Divider label="Alias" />
       {alias.length ? (
         <Group gap={4}>
           {alias.map((a) => (
-            <Badge key={a} variant="light" color="gray" style={{ textTransform: 'none' }}>
-              {a}
-            </Badge>
+            <Pill key={a}>{a}</Pill>
           ))}
         </Group>
       ) : (
-        <Text size="sm" c="dimmed">
-          Aucun alias.
-        </Text>
+        <Text tone="secondary">Aucun alias.</Text>
       )}
       <form onSubmit={submit}>
-        <Group gap="xs" align="flex-end">
-          <TextInput
-            style={{ flex: 1 }}
-            size="xs"
-            aria-label="Nouvel alias de squad"
-            placeholder="Variante du nom vue dans les fichiers"
-            value={value}
-            onChange={(e) => setValue(e.currentTarget.value)}
-          />
-          <Button type="submit" size="xs" leftSection={<IconPlus size={14} />} disabled={!value.trim()} loading={add.isPending}>
+        <Group gap={8} align="end" wrap={false}>
+          <div style={{ flex: 1 }}>
+            <TextInput
+              aria-label="Nouvel alias de squad"
+              placeholder="Variante du nom vue dans les fichiers"
+              value={value}
+              onChange={setValue}
+            />
+          </div>
+          <Button type="submit" icon={<IconPlus size={15} />} disabled={!value.trim()} loading={add.isPending}>
             Ajouter
           </Button>
         </Group>

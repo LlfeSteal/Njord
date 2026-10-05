@@ -1,11 +1,9 @@
 // Modale de purge : rappelle les conditions (archivée depuis ≥ N jours, cf. settings.purge_delai_jours),
 // exige la saisie exacte de l'intitulé, appelle versionsApi.purge et affiche le refus 409 éventuel.
 // CONTRAT FIGÉ (props) — implémentation : agent « FE partagé ».
-import { useEffect, useState } from 'react';
-import { Alert, Button, Code, Group, List, Modal, Stack, Text, TextInput } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { useEffect, useId, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { IconAlertTriangle } from '@tabler/icons-react';
+import { Banner, Button, Code, Modal, Stack, Text, TextInput, toast } from '../ui';
 import { ApiError, settingsApi, versionsApi } from '../api/client';
 import type { Kind, Version } from '../api/types';
 import { fmtDateTime } from '../lib/format';
@@ -32,6 +30,7 @@ const LINES_LABEL: Record<Kind, string> = { plan: 'lignes du plan de charge', re
 export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeModalProps) {
   const qc = useQueryClient();
   const opened = version != null;
+  const formId = useId();
   const [confirm, setConfirm] = useState('');
   const [operateur, setOperateur] = useState('');
   // Conserve la dernière version affichée pendant l'animation de fermeture.
@@ -45,8 +44,8 @@ export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeMo
     onSuccess: (res) => {
       saveOperateur(operateur);
       invalidateLifecycle(qc);
-      notifications.show({
-        color: 'green',
+      toast({
+        tone: 'success',
         title: 'Version purgée',
         message: `La version « ${res.intitule} » a été définitivement supprimée.`,
       });
@@ -77,50 +76,57 @@ export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeMo
       onClose={() => {
         if (!purge.isPending) onClose();
       }}
-      title={
-        <Group gap="xs">
-          <IconAlertTriangle size={20} color="var(--mantine-color-red-6)" aria-hidden />
-          <Text fw={600}>Purger définitivement une version</Text>
-        </Group>
-      }
+      title="Purger définitivement une version"
       size="lg"
-      closeOnClickOutside={!purge.isPending}
+      dismissable={!purge.isPending}
+      footer={
+        <>
+          <Button onClick={onClose} disabled={purge.isPending}>
+            Annuler
+          </Button>
+          {/* Bouton hors du <form> (pied de la modale) : rattaché via l'attribut form. */}
+          <Button type="submit" form={formId} variant="primary" destructive disabled={!matches} loading={purge.isPending}>
+            Purger définitivement
+          </Button>
+        </>
+      }
     >
       {v && (
         <form
+          id={formId}
           onSubmit={(e) => {
             e.preventDefault();
             if (matches && !purge.isPending) purge.mutate(v);
           }}
         >
-          <Stack gap="md">
-            <Text size="sm">
+          <Stack gap={12}>
+            <Text>
               Version : <b>{v.intitule}</b> — archivée le {fmtDateTime(v.archivee_le)}
             </Text>
 
-            <Alert color="red" variant="light" title="Conditions et effets de la purge">
-              <List size="sm" spacing={4}>
-                <List.Item>
+            <Banner tone="error" title="Conditions et effets de la purge">
+              <ul style={{ margin: 0, paddingLeft: 18, display: 'grid', gap: 4 }}>
+                <li>
                   La version doit être archivée depuis plus de{' '}
                   <b>{delai != null ? `${delai} jour${delai > 1 ? 's' : ''}` : 'N jours (paramètre « délai de purge »)'}</b>.
-                </List.Item>
-                <List.Item>
+                </li>
+                <li>
                   Les {LINES_LABEL[kind]} de cette version sont <b>supprimées définitivement</b> (irréversible).
-                </List.Item>
-                <List.Item>Les référentiels personnes et squads sont conservés.</List.Item>
-                <List.Item>L'action est journalisée (opérateur, horodatage).</List.Item>
-              </List>
-            </Alert>
+                </li>
+                <li>Les référentiels personnes et squads sont conservés.</li>
+                <li>L'action est journalisée (opérateur, horodatage).</li>
+              </ul>
+            </Banner>
 
             {v.statut !== 'archivee' && (
-              <Alert color="orange" variant="light">
+              <Banner tone="warning" compact>
                 Seule une version archivée peut être purgée.
-              </Alert>
+              </Banner>
             )}
             {v.statut === 'archivee' && tooEarly && availableFrom && (
-              <Alert color="orange" variant="light">
+              <Banner tone="warning" compact>
                 Purge possible à partir du {fmtDay(availableFrom)}. Le serveur refusera la demande d'ici là.
-              </Alert>
+              </Banner>
             )}
             {settings.error && <ErrorAlert error={settings.error} title="Paramètres indisponibles" />}
 
@@ -132,10 +138,9 @@ export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeMo
                 </>
               }
               value={confirm}
-              onChange={(e) => setConfirm(e.currentTarget.value)}
+              onChange={setConfirm}
               error={confirm !== '' && !matches ? "L'intitulé ne correspond pas (casse et espaces comprises)." : undefined}
-              autoComplete="off"
-              data-autofocus
+              autoFocus
               disabled={purge.isPending}
             />
             <TextInput
@@ -143,7 +148,7 @@ export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeMo
               description="Facultatif, enregistré dans le journal."
               placeholder="Votre nom"
               value={operateur}
-              onChange={(e) => setOperateur(e.currentTarget.value)}
+              onChange={setOperateur}
               disabled={purge.isPending}
             />
 
@@ -153,15 +158,6 @@ export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeMo
                 title={err instanceof ApiError && err.status === 409 ? 'Purge refusée' : 'Échec de la purge'}
               />
             )}
-
-            <Group justify="flex-end">
-              <Button variant="default" onClick={onClose} disabled={purge.isPending}>
-                Annuler
-              </Button>
-              <Button type="submit" color="red" disabled={!matches} loading={purge.isPending}>
-                Purger définitivement
-              </Button>
-            </Group>
           </Stack>
         </form>
       )}

@@ -1,7 +1,7 @@
-// Panneau de filtres des écritures du réalisé (SPEC_realise §6.3).
-import { Button, Group, NumberInput, Paper, Select, SimpleGrid, Skeleton, Switch, TextInput, Tooltip } from '@mantine/core';
-import { IconFilterOff, IconSearch } from '@tabler/icons-react';
+// Barre de filtres des écritures du réalisé (SPEC_realise §6.3).
 import type { Facets } from '../../api/types';
+import { Button, DateInput, Group, NumberInput, SearchField, Select, Skeleton, Stack, Switch, Text, Tooltip } from '../../ui';
+import { IconFilterOff } from '../../ui/Icons';
 import { countActiveFilters, type EntriesFilterState, type FacetKey } from './filters';
 
 /** Filtres à liste de valeurs ; `alt` = clés de facette alternatives tolérées. */
@@ -31,6 +31,9 @@ function facetValues(facets: Facets | undefined, key: string, alt?: string[]): s
   }
   return [];
 }
+
+/** Montant du filtre (nombre ou '' = vide) → valeur du champ numérique. */
+const amount = (v: number | string): number | null => (typeof v === 'number' ? v : null);
 
 interface Props {
   facets: Facets | undefined;
@@ -62,106 +65,89 @@ export default function EntriesFilters(p: Props) {
   }).filter((s) => s.values.length > 0);
 
   return (
-    <Paper withBorder p="sm" radius="sm">
-      {p.facetsLoading ? (
-        <SimpleGrid cols={{ base: 1, xs: 2, md: 4 }} spacing="sm">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} h={54} />
-          ))}
-        </SimpleGrid>
-      ) : (
-        <SimpleGrid cols={{ base: 1, xs: 2, md: 4, xl: 6 }} spacing="sm" verticalSpacing="xs">
-          {selects.map(({ def, values }) => (
-            <Select
-              key={def.key}
-              label={def.label}
-              placeholder="Toutes"
-              data={values.map((v) => ({ value: v, label: def.key === 'statut' ? (STATUT_LABELS[v] ?? v) : v }))}
-              value={f[def.key]}
-              onChange={(v) => p.onChange({ [def.key]: v })}
-              searchable
-              clearable
-              nothingFoundMessage="Aucune valeur"
-              comboboxProps={{ withinPortal: true }}
-              size="sm"
-            />
-          ))}
-          <TextInput
-            type="date"
-            label="Dépense du"
-            value={f.date_from}
-            onChange={(e) => p.onChange({ date_from: e.currentTarget.value })}
-            error={dateError}
-            size="sm"
-          />
-          <TextInput
-            type="date"
-            label="au"
-            value={f.date_to}
-            onChange={(e) => p.onChange({ date_to: e.currentTarget.value })}
-            size="sm"
-          />
-          <NumberInput
-            label="Montant min (€)"
-            placeholder="—"
-            value={f.montant_min}
-            onChange={(v) => p.onChange({ montant_min: v })}
-            decimalSeparator=","
-            thousandSeparator=" "
-            allowNegative
-            error={amountError}
-            size="sm"
-          />
-          <NumberInput
-            label="Montant max (€)"
-            placeholder="—"
-            value={f.montant_max}
-            onChange={(v) => p.onChange({ montant_max: v })}
-            decimalSeparator=","
-            thousandSeparator=" "
-            allowNegative
-            size="sm"
-          />
-        </SimpleGrid>
-      )}
-      <Group mt="sm" gap="md" align="flex-end" wrap="wrap">
-        <TextInput
-          style={{ flex: '1 1 260px' }}
-          label="Recherche"
-          placeholder={p.searchDescription ? 'TG, libellé TG ou description…' : 'TG ou libellé TG…'}
-          leftSection={<IconSearch size={16} />}
-          value={p.q}
-          onChange={(e) => p.onQChange(e.currentTarget.value)}
-          size="sm"
+    <Stack gap={8}>
+      {/* Recherche plein-texte + filtres à valeurs (pop-up buttons) */}
+      <Group gap={8}>
+        <SearchField
           aria-label="Recherche plein-texte"
+          placeholder={p.searchDescription ? 'TG, libellé TG ou description…' : 'TG ou libellé TG…'}
+          value={p.q}
+          onChange={p.onQChange}
+          width={260}
         />
-        <Tooltip label="Désactiver pour ne pas chercher dans un champ sensible" withArrow>
-          <Switch
-            label="Inclure la description"
-            checked={p.searchDescription}
-            onChange={(e) => p.onSearchDescriptionChange(e.currentTarget.checked)}
-            mb={6}
-          />
-        </Tooltip>
-        <Tooltip label="Nom, matricule, facture, commande, description (affichage et export)" withArrow multiline maw={300}>
-          <Switch
-            label="Masquer les colonnes sensibles"
-            checked={p.maskSensitive}
-            onChange={(e) => p.onMaskSensitiveChange(e.currentTarget.checked)}
-            mb={6}
-          />
-        </Tooltip>
+        {p.facetsLoading
+          ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} width={96} height={28} radius={7} />)
+          : selects.map(({ def, values }) => (
+              <Select
+                key={def.key}
+                aria-label={def.label}
+                placeholder={def.label}
+                data={values.map((v) => ({ value: v, label: def.key === 'statut' ? (STATUT_LABELS[v] ?? v) : v }))}
+                value={f[def.key]}
+                onChange={(v) => p.onChange({ [def.key]: v })}
+                searchable
+                clearable
+                nothingFound="Aucune valeur"
+                menuWidth={290}
+              />
+            ))}
         <Button
-          variant="subtle"
-          size="sm"
-          leftSection={<IconFilterOff size={16} />}
+          variant="plain"
+          icon={<IconFilterOff size={15} />}
           onClick={p.onReset}
           disabled={active === 0}
-          ml="auto"
+          style={{ marginLeft: 'auto' }}
         >
-          Réinitialiser les filtres{active ? ` (${active})` : ''}
+          Réinitialiser{active ? ` (${active})` : ''}
         </Button>
       </Group>
-    </Paper>
+
+      {/* Bornes de date et de montant, options de recherche */}
+      <Group gap={8} align="start">
+        <Group gap={8}>
+          <Text as="span" size="sm" tone="secondary">
+            Dépense du
+          </Text>
+          <DateInput
+            aria-label="Dépense du"
+            value={f.date_from}
+            onChange={(v) => p.onChange({ date_from: v })}
+            error={dateError}
+            width={150}
+          />
+          <Text as="span" size="sm" tone="secondary">
+            au
+          </Text>
+          <DateInput aria-label="Dépense au" value={f.date_to} onChange={(v) => p.onChange({ date_to: v })} width={150} />
+        </Group>
+        <Group gap={8}>
+          <NumberInput
+            aria-label="Montant min (€)"
+            placeholder="Montant min"
+            suffix="€"
+            value={amount(f.montant_min)}
+            onChange={(v) => p.onChange({ montant_min: v ?? '' })}
+            error={amountError}
+            width={140}
+          />
+          <NumberInput
+            aria-label="Montant max (€)"
+            placeholder="Montant max"
+            suffix="€"
+            value={amount(f.montant_max)}
+            onChange={(v) => p.onChange({ montant_max: v ?? '' })}
+            width={140}
+          />
+        </Group>
+        <Group gap={16} style={{ minHeight: 28 }}>
+          <Tooltip label="Désactiver pour ne pas chercher dans un champ sensible">
+            <Switch label="Inclure la description" checked={p.searchDescription} onChange={p.onSearchDescriptionChange} />
+          </Tooltip>
+          <Tooltip label="Nom, matricule, facture, commande, description (affichage et export)" maxWidth={300}>
+            <Switch label="Masquer les colonnes sensibles" checked={p.maskSensitive} onChange={p.onMaskSensitiveChange} />
+          </Tooltip>
+        </Group>
+      </Group>
+    </Stack>
   );
 }

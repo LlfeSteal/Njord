@@ -1,45 +1,43 @@
 // Petits composants partagés des référentiels (réutilisés par l'onglet Plan de charge).
 import type { ReactNode } from 'react';
-import { Badge, Group, Table, Text } from '@mantine/core';
+import { Table, Tag, Text } from '../../ui';
 import type { AliasSource, Personne } from '../../api/types';
 
-const ALIAS_SOURCE: Record<AliasSource, { label: string; color: string; title: string }> = {
-  import: { label: 'import', color: 'gray', title: "Créé automatiquement à l'import" },
-  manuel: { label: 'manuel', color: 'blue', title: 'Saisi manuellement' },
-  confirme: { label: 'confirmé', color: 'teal', title: "Confirmé depuis l'onglet Analyse" },
+const ALIAS_SOURCE: Record<AliasSource, { label: string; title: string }> = {
+  import: { label: 'import', title: "Créé automatiquement à l'import" },
+  manuel: { label: 'manuel', title: 'Saisi manuellement' },
+  confirme: { label: 'confirmé', title: "Confirmé depuis l'onglet Analyse" },
 };
 
+/** Origine d'un alias : simple mention secondaire (pas un statut). */
 export function AliasSourceBadge({ source }: { source: AliasSource }) {
-  const m = ALIAS_SOURCE[source] ?? { label: source, color: 'gray', title: source };
+  const m = ALIAS_SOURCE[source] ?? { label: source, title: source };
   return (
-    <Badge size="sm" variant="light" color={m.color} title={m.title}>
+    <Text as="span" size="sm" tone="secondary" title={m.title}>
       {m.label}
-    </Badge>
+    </Text>
   );
 }
 
+/** Statut de fiche : validée (point vert) ou brouillon (anneau orange, à traiter). */
 export function PersonneStatutBadge({ statut }: { statut: Personne['statut'] }) {
   return statut === 'validee' ? (
-    <Badge size="sm" variant="light" color="green">
+    <Tag tone="success" glyph="dot">
       validée
-    </Badge>
+    </Tag>
   ) : (
-    <Badge size="sm" variant="light" color="orange">
+    <Tag tone="warning" glyph="ring">
       brouillon
-    </Badge>
+    </Tag>
   );
 }
 
 export function MatriculesList({ matricules }: { matricules: string[] }) {
-  if (!matricules?.length) return <Text size="sm" c="dimmed">—</Text>;
+  if (!matricules?.length) return <Text as="span" tone="secondary">—</Text>;
   return (
-    <Group gap={4}>
-      {matricules.map((m) => (
-        <Badge key={m} size="sm" variant="outline" color="gray" style={{ textTransform: 'none', fontFamily: 'monospace' }}>
-          {m}
-        </Badge>
-      ))}
-    </Group>
+    <Text as="span" mono>
+      {matricules.join(', ')}
+    </Text>
   );
 }
 
@@ -51,20 +49,24 @@ export function AliasTable({
   personne: Personne;
   actions?: (a: Personne['alias'][number]) => ReactNode;
 }) {
-  if (!personne.alias?.length) return <Text size="sm" c="dimmed">Aucun alias.</Text>;
+  if (!personne.alias?.length) return <Text tone="secondary">Aucun alias.</Text>;
   return (
-    <Table withRowBorders={false} verticalSpacing={4} fz="sm">
-      <Table.Tbody>
+    <Table compact card={false}>
+      <tbody>
         {personne.alias.map((a) => (
-          <Table.Tr key={a.id}>
-            <Table.Td>{a.alias}</Table.Td>
-            <Table.Td w={90}>
+          <tr key={a.id}>
+            <td>{a.alias}</td>
+            <td style={{ width: 90 }}>
               <AliasSourceBadge source={a.source} />
-            </Table.Td>
-            {actions && <Table.Td w={40}>{actions(a)}</Table.Td>}
-          </Table.Tr>
+            </td>
+            {actions && (
+              <td data-actions style={{ width: 40 }}>
+                {actions(a)}
+              </td>
+            )}
+          </tr>
         ))}
-      </Table.Tbody>
+      </tbody>
     </Table>
   );
 }

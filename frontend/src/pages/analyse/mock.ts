@@ -188,7 +188,7 @@ export async function mockRun(p: AnalyseParams): Promise<AnalyseResult> {
   // Le réalisé archivé s'arrête en W39.
   const maxIdx = realV?.id === 'real-1' ? 3 : 4;
 
-  // Σ réel par personne sur la période (règle ⚫).
+  // Σ réel par personne sur la période (règle d’absence).
   const sumReel = new Map<number, number>();
   for (const a of ASSIGNMENTS)
     for (const { i } of idx) sumReel.set(a.person, (sumReel.get(a.person) ?? 0) + (i <= maxIdx ? a.reel[i] : 0));

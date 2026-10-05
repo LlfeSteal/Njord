@@ -1,7 +1,6 @@
-// Table des lignes d'une version de plan (tri cliquable, badges inactif / warn / drop).
-import type { CSSProperties } from 'react';
-import { ActionIcon, Group, Table, Text, Tooltip, UnstyledButton, VisuallyHidden } from '@mantine/core';
-import { IconChevronDown, IconChevronUp, IconSelector, IconUserPlus } from '@tabler/icons-react';
+// Table des lignes d'une version de plan (tri cliquable, statuts inactif / warn / drop).
+import { Group, IconButton, SortHeader, Table, Text, Tooltip, VisuallyHidden } from '../../ui';
+import { IconUserPlus } from '../../ui/Icons';
 import type { PlanLine } from '../../api/types';
 import { InactiveBadge, ParsingBadge } from '../../components/badges';
 import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../lib/format';
@@ -12,9 +11,6 @@ const KIND_LABEL: Record<PlanLine['ressource_kind'], string> = {
   external: 'externe',
   unknown: 'inconnue',
 };
-
-const nowrap: CSSProperties = { whiteSpace: 'nowrap' };
-const right: CSSProperties = { textAlign: 'right', whiteSpace: 'nowrap' };
 
 interface Props {
   items: PlanLine[];
@@ -41,133 +37,141 @@ function Th({
   onSort: (k: SortKey) => void;
   alignRight?: boolean;
 }) {
-  const style = alignRight ? right : nowrap;
-  if (!sortKey) return <Table.Th style={style}>{label}</Table.Th>;
-  const active = sort === sortKey;
-  const Icon = active ? (order === 'asc' ? IconChevronUp : IconChevronDown) : IconSelector;
-  return (
-    <Table.Th style={style} aria-sort={active ? (order === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      <UnstyledButton
-        onClick={() => onSort(sortKey)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, fontSize: 'inherit' }}
-        title={`Trier par ${label.toLowerCase()}`}
-      >
+  if (!sortKey)
+    return (
+      <th data-nowrap data-align={alignRight ? 'right' : undefined}>
         {label}
-        <Icon size={14} stroke={1.5} style={{ opacity: active ? 1 : 0.5 }} />
-      </UnstyledButton>
-    </Table.Th>
+      </th>
+    );
+  return (
+    <SortHeader
+      active={sort === sortKey}
+      dir={order}
+      onSort={() => onSort(sortKey)}
+      align={alignRight ? 'right' : undefined}
+    >
+      {label}
+    </SortHeader>
+  );
+}
+
+function AliasAction({ line: l, onAlias }: { line: PlanLine; onAlias: (l: PlanLine) => void }) {
+  if (l.personne_id)
+    return (
+      <IconButton label={`Créer un alias personne (ligne ${l.row_num})`} onClick={() => onAlias(l)}>
+        <IconUserPlus size={15} />
+      </IconButton>
+    );
+  // Bouton désactivé : la bulle explique pourquoi.
+  return (
+    <Tooltip label="Ressource non rattachée à une fiche personne">
+      <IconButton label={`Créer un alias personne (ligne ${l.row_num})`} disabled>
+        <IconUserPlus size={15} />
+      </IconButton>
+    </Tooltip>
   );
 }
 
 export default function PlanLinesTable({ items, sort, order, onSort, squadName, onAlias, dimmed }: Props) {
   const th = { sort, order, onSort };
   return (
-    <Table.ScrollContainer minWidth={1350}>
-      <Table striped highlightOnHover verticalSpacing="xs" fz="sm" style={{ opacity: dimmed ? 0.6 : 1 }}>
-        <Table.Thead>
-          <Table.Tr>
-            <Th label="N°" sortKey="row_num" {...th} />
-            <Th label="CT" sortKey="ct" {...th} />
-            <Th label="Ressource" sortKey="ressource" {...th} />
-            <Th label="Libellé" {...th} />
-            <Th label="Squad / groupe" {...th} />
-            <Th label="Ligne de coût" {...th} />
-            <Th label="Charge totale" sortKey="charge_totale" alignRight {...th} />
-            <Th label="PPS" sortKey="pps" alignRight {...th} />
-            <Th label="%" alignRight {...th} />
-            <Th label="Unité" {...th} />
-            <Th label="Dates" sortKey="date_debut" {...th} />
-            <Th label="Statut" {...th} />
-            <Table.Th>
-              <VisuallyHidden>Actions</VisuallyHidden>
-            </Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {items.length === 0 && (
-            <Table.Tr>
-              <Table.Td colSpan={13}>
-                <Text c="dimmed" ta="center" py="md">
-                  Aucune ligne ne correspond aux filtres.
+    <Table striped hover minWidth={1350} style={dimmed ? { opacity: 0.6 } : undefined}>
+      <thead>
+        <tr>
+          <Th label="N°" sortKey="row_num" {...th} />
+          <Th label="CT" sortKey="ct" {...th} />
+          <Th label="Ressource" sortKey="ressource" {...th} />
+          <Th label="Libellé" {...th} />
+          <Th label="Squad / groupe" {...th} />
+          <Th label="Ligne de coût" {...th} />
+          <Th label="Charge totale" sortKey="charge_totale" alignRight {...th} />
+          <Th label="PPS" sortKey="pps" alignRight {...th} />
+          <Th label="%" alignRight {...th} />
+          <Th label="Unité" {...th} />
+          <Th label="Dates" sortKey="date_debut" {...th} />
+          <Th label="Statut" {...th} />
+          <th>
+            <VisuallyHidden>Actions</VisuallyHidden>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.length === 0 && (
+          <tr>
+            <td colSpan={13}>
+              <Text tone="secondary" align="center" style={{ padding: '12px 0' }}>
+                Aucune ligne ne correspond aux filtres.
+              </Text>
+            </td>
+          </tr>
+        )}
+        {items.map((l) => {
+          const dropped = l.statut_parsing === 'drop';
+          const squad = squadName(l.squad_id);
+          return (
+            <tr key={l.id} data-strike={dropped || undefined}>
+              <td>
+                <Text as="span" tone="secondary" tabular>
+                  {l.row_num}
                 </Text>
-              </Table.Td>
-            </Table.Tr>
-          )}
-          {items.map((l) => {
-            const dropped = l.statut_parsing === 'drop';
-            const squad = squadName(l.squad_id);
-            return (
-              <Table.Tr
-                key={l.id}
-                style={dropped ? { opacity: 0.55, textDecoration: 'line-through' } : undefined}
-              >
-                <Table.Td style={{ color: 'var(--mantine-color-dimmed)' }}>{l.row_num}</Table.Td>
-                <Table.Td style={{ ...nowrap, fontFamily: 'monospace' }}>{l.ct}</Table.Td>
-                <Table.Td>
-                  <Group gap={6} wrap="nowrap">
-                    <Text size="sm" ff="monospace" style={nowrap}>
-                      {l.ressource}
-                    </Text>
-                    {l.inactive && <InactiveBadge />}
-                  </Group>
-                  <Text size="xs" c="dimmed">
-                    {KIND_LABEL[l.ressource_kind] ?? l.ressource_kind}
+              </td>
+              <td data-mono data-nowrap>
+                {l.ct}
+              </td>
+              <td>
+                <Group gap={6} wrap={false}>
+                  <Text as="span" mono style={{ whiteSpace: 'nowrap' }}>
+                    {l.ressource}
                   </Text>
-                </Table.Td>
-                <Table.Td>{l.libelle || '—'}</Table.Td>
-                <Table.Td>
-                  {squad || (l.groupe ? '' : '—')}
-                  {l.groupe && l.groupe !== squad && (
-                    <Text size="xs" c="dimmed">
-                      {l.groupe}
-                    </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs">{l.ligne_cout}</Text>
-                </Table.Td>
-                <Table.Td style={right}>{fmtHours(l.charge_totale)}</Table.Td>
-                <Table.Td style={right}>{fmtEur(l.pps)}</Table.Td>
-                <Table.Td style={right}>{fmtPct(l.pourcentage)}</Table.Td>
-                <Table.Td style={{ ...nowrap, fontFamily: 'monospace' }}>{l.unite || '—'}</Table.Td>
-                <Table.Td style={nowrap}>
-                  {fmtDate(l.date_debut)} → {fmtDate(l.date_fin)}
-                </Table.Td>
-                <Table.Td>
-                  {l.statut_parsing === 'ok' ? (
-                    <Text size="xs" c="dimmed">
-                      ok
-                    </Text>
-                  ) : (
-                    <ParsingBadge statut={l.statut_parsing} motif={l.motif_rejet || undefined} />
-                  )}
-                </Table.Td>
-                <Table.Td style={{ textDecoration: 'none' }}>
-                  <Tooltip
-                    label={
-                      l.personne_id
-                        ? 'Créer un alias personne'
-                        : 'Ressource non rattachée à une fiche personne'
-                    }
-                    withArrow
-                  >
-                    <ActionIcon
-                      variant="subtle"
-                      aria-label={`Créer un alias personne (ligne ${l.row_num})`}
-                      data-disabled={!l.personne_id || undefined}
-                      aria-disabled={!l.personne_id}
-                      onClick={() => l.personne_id && onAlias(l)}
-                    >
-                      <IconUserPlus size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                </Table.Td>
-              </Table.Tr>
-            );
-          })}
-        </Table.Tbody>
-      </Table>
-    </Table.ScrollContainer>
+                  {l.inactive && <InactiveBadge />}
+                </Group>
+                <Text size="sm" tone="secondary">
+                  {KIND_LABEL[l.ressource_kind] ?? l.ressource_kind}
+                </Text>
+              </td>
+              <td>{l.libelle || '—'}</td>
+              <td>
+                {squad || (l.groupe ? '' : '—')}
+                {l.groupe && l.groupe !== squad && (
+                  <Text size="sm" tone="secondary">
+                    {l.groupe}
+                  </Text>
+                )}
+              </td>
+              <td>
+                <Text size="sm">{l.ligne_cout}</Text>
+              </td>
+              <td data-align="right" data-nowrap>
+                {fmtHours(l.charge_totale)}
+              </td>
+              <td data-align="right" data-nowrap>
+                {fmtEur(l.pps)}
+              </td>
+              <td data-align="right" data-nowrap>
+                {fmtPct(l.pourcentage)}
+              </td>
+              <td data-mono data-nowrap>
+                {l.unite || '—'}
+              </td>
+              <td data-nowrap>
+                {fmtDate(l.date_debut)} → {fmtDate(l.date_fin)}
+              </td>
+              <td>
+                {l.statut_parsing === 'ok' ? (
+                  <Text as="span" size="sm" tone="secondary">
+                    ok
+                  </Text>
+                ) : (
+                  <ParsingBadge statut={l.statut_parsing} motif={l.motif_rejet || undefined} />
+                )}
+              </td>
+              <td data-actions>
+                <AliasAction line={l} onAlias={onAlias} />
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
   );
 }
-

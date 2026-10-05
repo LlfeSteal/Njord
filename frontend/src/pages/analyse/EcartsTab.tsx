@@ -1,15 +1,16 @@
 // Sous-onglet Écarts (§7.1) : table ressource × CT × semaine, filtres (URL), tri, pagination, vue pivot.
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Group, MultiSelect, Pagination, Paper, Select, Stack, Switch, Table, Text, Tooltip } from '@mantine/core';
-import { IconAlertTriangle, IconFilterOff } from '@tabler/icons-react';
+import { Button, Group, MultiSelect, Pagination, Select, Stack, StatusGlyph, Switch, Table, Text, Tooltip } from '../../ui';
+import { IconFilterOff } from '../../ui/Icons';
 import { FLAG_SEVERITY, type AnalyseResult, type EcartRow, type Flag } from '../../api/types';
-import { FLAG_META, FlagBadge, InactiveBadge } from '../../components/badges';
+import { FLAG_META, FlagBadge, FlagGlyph, InactiveBadge } from '../../components/badges';
 import { fmtHours, fmtHoursSigned, fmtWeek } from '../../lib/format';
-import { CtCell, FuzzyMark, SortTh, cmp, ecartColor, paginate, useSort, type SortState } from './common';
+import { CtCell, FuzzyMark, SortTh } from './common';
+import { cmp, ecartTone, paginate, useSort, type SortState } from './helpers';
 import type { AnalyseUrlState, UrlPatch } from './params';
 
 type Key = 'flag' | 'ressource' | 'ct' | 'semaine' | 'prevu' | 'reel' | 'ecart';
-const PAGE_SIZES = ['25', '50', '100', '250'];
+const PAGE_SIZES = ['25', '50', '100', '250'].map((v) => ({ value: v, label: v }));
 
 const bySeverity = (a: EcartRow, b: EcartRow) =>
   FLAG_SEVERITY[b.flag] - FLAG_SEVERITY[a.flag] || Math.abs(b.ecart) - Math.abs(a.ecart);
@@ -23,27 +24,24 @@ function sortRows(rows: EcartRow[], s: SortState<Key>): EcartRow[] {
   return out.sort((a, b) => (s.dir === 'asc' ? 1 : -1) * cmp(get(a), get(b)) || bySeverity(a, b));
 }
 
-const flagBg = (f: Flag) =>
-  f === 'conforme' ? undefined : `var(--mantine-color-${f === 'absence' ? 'gray' : FLAG_META[f].color}-light)`;
-
 function RessourceCell({ e }: { e: EcartRow }) {
   return (
-    <Group gap={4} wrap="nowrap">
+    <Group gap={4} wrap={false}>
       <Stack gap={0}>
-        <Group gap={2} wrap="nowrap">
-          <Text size="sm">{e.ressource_label || e.ressource}</Text>
+        <Group gap={2} wrap={false}>
+          <Text>{e.ressource_label || e.ressource}</Text>
           {e.confidence === 'fuzzy' && <FuzzyMark />}
         </Group>
         {e.ressource_label && e.ressource_label !== e.ressource && (
-          <Text size="xs" c="dimmed" ff="monospace">
+          <Text size="sm" tone="secondary" mono>
             {e.ressource}
           </Text>
         )}
       </Stack>
       {e.inactive && <InactiveBadge />}
       {e.warn && (
-        <Tooltip label="Ligne source signalée « warn » au parsing" withArrow>
-          <IconAlertTriangle size={16} color="var(--mantine-color-yellow-7)" aria-label="avertissement de parsing" />
+        <Tooltip label="Ligne source signalée « warn » au parsing">
+          <StatusGlyph kind="warning" tone="warning" label="avertissement de parsing" />
         </Tooltip>
       )}
     </Group>
@@ -88,59 +86,57 @@ function buildPivot(rows: EcartRow[]): PivotRow[] {
 
 function PivotTable({ rows, weeks }: { rows: PivotRow[]; weeks: string[] }) {
   return (
-    <Table.ScrollContainer minWidth={420 + weeks.length * 96}>
-      <Table withColumnBorders withTableBorder fz="sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Ressource</Table.Th>
-            <Table.Th>CT</Table.Th>
-            {weeks.map((w) => (
-              <Table.Th key={w} ta="center" style={{ whiteSpace: 'nowrap' }}>
-                {fmtWeek(w).split(' ')[0]}
-              </Table.Th>
-            ))}
-            <Table.Th ta="right">Σ prévu</Table.Th>
-            <Table.Th ta="right">Σ réel</Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {rows.map((r) => (
-            <Table.Tr key={r.key} style={r.first ? { borderTop: '2px solid var(--mantine-color-default-border)' } : undefined}>
-              <Table.Td>{r.first ? <RessourceCell e={r.head} /> : null}</Table.Td>
-              <Table.Td>
-                <CtCell ct={r.ct} libelle={r.ct_libelle} />
-              </Table.Td>
-              {weeks.map((w) => {
-                const e = r.cells.get(w);
-                if (!e)
-                  return (
-                    <Table.Td key={w} ta="center" c="dimmed">
-                      —
-                    </Table.Td>
-                  );
-                const m = FLAG_META[e.flag];
+    <Table className="analyse-pivot" minWidth={420 + weeks.length * 96}>
+      <thead>
+        <tr>
+          <th>Ressource</th>
+          <th>CT</th>
+          {weeks.map((w) => (
+            <th key={w} data-center>
+              {fmtWeek(w).split(' ')[0]}
+            </th>
+          ))}
+          <th data-align="right">Σ prévu</th>
+          <th data-align="right">Σ réel</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.key}>
+            <td>{r.first ? <RessourceCell e={r.head} /> : null}</td>
+            <td>
+              <CtCell ct={r.ct} libelle={r.ct_libelle} />
+            </td>
+            {weeks.map((w) => {
+              const e = r.cells.get(w);
+              if (!e)
                 return (
-                  <Tooltip
-                    key={w}
-                    withArrow
-                    label={`${m.emoji} ${m.label} · prévu ${fmtHours(e.prevu)} · réel ${fmtHours(e.reel)}`}
-                  >
-                    <Table.Td ta="center" style={{ background: flagBg(e.flag), whiteSpace: 'nowrap' }}>
-                      <span aria-label={m.label}>{m.emoji}</span>{' '}
-                      <Text span size="xs" fw={e.flag === 'conforme' ? 400 : 600}>
+                  <td key={w} data-center>
+                    <Text as="span" tone="tertiary">
+                      —
+                    </Text>
+                  </td>
+                );
+              const m = FLAG_META[e.flag];
+              return (
+                <td key={w} data-center>
+                  <Tooltip label={`${m.label} · prévu ${fmtHours(e.prevu)} · réel ${fmtHours(e.reel)}`}>
+                    <Group gap={4} wrap={false}>
+                      <FlagGlyph flag={e.flag} size={12} />
+                      <Text as="span" size="sm" tabular weight={e.flag === 'conforme' ? 400 : 600} tone={ecartTone(e.flag, e.ecart)}>
                         {fmtHoursSigned(e.ecart)}
                       </Text>
-                    </Table.Td>
+                    </Group>
                   </Tooltip>
-                );
-              })}
-              <Table.Td ta="right">{fmtHours(Math.round(r.prevu * 10) / 10)}</Table.Td>
-              <Table.Td ta="right">{fmtHours(Math.round(r.reel * 10) / 10)}</Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </Table.ScrollContainer>
+                </td>
+              );
+            })}
+            <td data-align="right">{fmtHours(Math.round(r.prevu * 10) / 10)}</td>
+            <td data-align="right">{fmtHours(Math.round(r.reel * 10) / 10)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
   );
 }
 
@@ -213,150 +209,144 @@ export default function EcartsTab({
   }, [filtered]);
 
   return (
-    <Stack gap="md">
-      <Paper withBorder p="sm" radius="md">
-        <Group align="flex-end" gap="sm" wrap="wrap">
-          <Select
-            label="CT"
-            placeholder="Tous"
-            data={withValue(opts.cts, state.ct)}
-            value={state.ct ?? null}
-            onChange={(v) => update({ ct: v })}
-            searchable
-            clearable
-            w={{ base: '100%', sm: 260 }}
-            nothingFoundMessage="Aucun CT"
-          />
-          <Select
-            label="Ressource"
-            placeholder="Toutes"
-            data={withValue(opts.res, state.ressource)}
-            value={state.ressource ?? null}
-            onChange={(v) => update({ ressource: v })}
-            searchable
-            clearable
-            w={{ base: '100%', sm: 220 }}
-            nothingFoundMessage="Aucune ressource"
-          />
-          <MultiSelect
-            label="Flag"
-            placeholder={state.flags.length ? undefined : 'Tous'}
-            data={(Object.keys(FLAG_META) as Flag[])
-              .sort((a, b) => FLAG_SEVERITY[b] - FLAG_SEVERITY[a])
-              .map((f) => ({ value: f, label: `${FLAG_META[f].emoji} ${FLAG_META[f].label}` }))}
-            value={state.flags}
-            onChange={(v) => update({ flags: v as Flag[] })}
-            clearable
-            w={{ base: '100%', sm: 280 }}
-          />
-          <Select
-            label="Squad"
-            placeholder="Toutes"
-            data={withValue(opts.squads, state.squad)}
-            value={state.squad ?? null}
-            onChange={(v) => update({ squad: v })}
-            clearable
-            w={{ base: '100%', sm: 180 }}
-            disabled={opts.squads.length === 0 && !state.squad}
-          />
-          {hasFilter && (
-            <Button
-              variant="subtle"
-              size="sm"
-              leftSection={<IconFilterOff size={16} />}
-              onClick={() => update({ ct: null, ressource: null, squad: null, flags: [] })}
-            >
-              Réinitialiser
-            </Button>
-          )}
-        </Group>
-        <Group justify="space-between" mt="sm" wrap="wrap" gap="xs">
-          <Group gap="xs" wrap="wrap">
-            <Text size="sm" c="dimmed">
-              {filtered.length} tuple{filtered.length > 1 ? 's' : ''}
-            </Text>
-            {[...flagCounts.entries()]
-              .sort(([a], [b]) => FLAG_SEVERITY[b] - FLAG_SEVERITY[a])
-              .map(([f, n]) => (
-                <Text key={f} size="xs" c="dimmed">
-                  <span aria-hidden>{FLAG_META[f].emoji}</span> {FLAG_META[f].label} : {n}
+    <Stack gap={12}>
+      <Group gap={8}>
+        <Select
+          aria-label="CT"
+          placeholder="CT"
+          data={withValue(opts.cts, state.ct)}
+          value={state.ct ?? null}
+          onChange={(v) => update({ ct: v })}
+          searchable
+          clearable
+          menuWidth={290}
+          nothingFound="Aucun CT"
+        />
+        <Select
+          aria-label="Ressource"
+          placeholder="Ressource"
+          data={withValue(opts.res, state.ressource)}
+          value={state.ressource ?? null}
+          onChange={(v) => update({ ressource: v })}
+          searchable
+          clearable
+          menuWidth={290}
+          nothingFound="Aucune ressource"
+        />
+        <MultiSelect
+          aria-label="Flag"
+          placeholder="Flag"
+          data={(Object.keys(FLAG_META) as Flag[])
+            .sort((a, b) => FLAG_SEVERITY[b] - FLAG_SEVERITY[a])
+            .map((f) => ({ value: f, label: FLAG_META[f].label }))}
+          value={state.flags}
+          onChange={(v) => update({ flags: v })}
+          clearable
+        />
+        <Select
+          aria-label="Squad"
+          placeholder="Squad"
+          data={withValue(opts.squads, state.squad)}
+          value={state.squad ?? null}
+          onChange={(v) => update({ squad: v })}
+          clearable
+          disabled={opts.squads.length === 0 && !state.squad}
+        />
+        {hasFilter && (
+          <Button
+            variant="plain"
+            icon={<IconFilterOff size={15} />}
+            onClick={() => update({ ct: null, ressource: null, squad: null, flags: [] })}
+          >
+            Réinitialiser
+          </Button>
+        )}
+      </Group>
+      <Group justify="between" gap={8}>
+        <Group gap={12}>
+          <Text tone="secondary" tabular>
+            {filtered.length} tuple{filtered.length > 1 ? 's' : ''}
+          </Text>
+          {[...flagCounts.entries()]
+            .sort(([a], [b]) => FLAG_SEVERITY[b] - FLAG_SEVERITY[a])
+            .map(([f, n]) => (
+              <Group key={f} gap={4} wrap={false}>
+                <FlagGlyph flag={f} size={12} />
+                <Text size="sm" tone="secondary" tabular>
+                  {FLAG_META[f].label} : {n}
                 </Text>
-              ))}
-          </Group>
-          <Switch label="Regrouper par ressource" checked={pivot} onChange={(e) => setPivot(e.currentTarget.checked)} />
+              </Group>
+            ))}
         </Group>
-      </Paper>
+        <Switch label="Regrouper par ressource" checked={pivot} onChange={setPivot} />
+      </Group>
 
       {total === 0 ? (
-        <Text c="dimmed" ta="center" py="xl">
+        <Text tone="secondary" align="center" mt={24} mb={24}>
           Aucun tuple ne correspond aux filtres.
         </Text>
       ) : pivot ? (
         <PivotTable rows={paginate(pivotRows, page, size)} weeks={weeks} />
       ) : (
-        <Table.ScrollContainer minWidth={820}>
-          <Table striped highlightOnHover fz="sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
-            <Table.Thead>
-              <Table.Tr>
-                <SortTh k="ressource" sort={sort} onSort={toggle}>
-                  Ressource
-                </SortTh>
-                <SortTh k="ct" sort={sort} onSort={toggle}>
-                  CT
-                </SortTh>
-                <SortTh k="semaine" sort={sort} onSort={toggle}>
-                  Semaine
-                </SortTh>
-                <SortTh k="prevu" sort={sort} onSort={toggle} align="right">
-                  Prévu (h)
-                </SortTh>
-                <SortTh k="reel" sort={sort} onSort={toggle} align="right">
-                  Réel (h)
-                </SortTh>
-                <SortTh k="ecart" sort={sort} onSort={toggle} align="right">
-                  Écart (h)
-                </SortTh>
-                <SortTh k="flag" sort={sort} onSort={toggle}>
-                  Flag
-                </SortTh>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {paginate(sorted, page, size).map((e, i) => (
-                <Table.Tr key={`${e.personne_id ?? e.ressource}|${e.ct}|${e.semaine}|${i}`}>
-                  <Table.Td>
-                    <RessourceCell e={e} />
-                  </Table.Td>
-                  <Table.Td>
-                    <CtCell ct={e.ct} libelle={e.ct_libelle} />
-                  </Table.Td>
-                  <Table.Td style={{ whiteSpace: 'nowrap' }}>{fmtWeek(e.semaine)}</Table.Td>
-                  <Table.Td ta="right">{fmtHours(e.prevu)}</Table.Td>
-                  <Table.Td ta="right">{fmtHours(e.reel)}</Table.Td>
-                  <Table.Td ta="right">
-                    <Text span size="sm" fw={e.flag === 'conforme' ? 400 : 600} c={ecartColor(e.flag, e.ecart)}>
-                      {fmtHoursSigned(e.ecart)}
-                    </Text>
-                  </Table.Td>
-                  <Table.Td>
-                    <FlagBadge flag={e.flag} />
-                  </Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+        <Table striped hover minWidth={820}>
+          <thead>
+            <tr>
+              <SortTh k="ressource" sort={sort} onSort={toggle}>
+                Ressource
+              </SortTh>
+              <SortTh k="ct" sort={sort} onSort={toggle}>
+                CT
+              </SortTh>
+              <SortTh k="semaine" sort={sort} onSort={toggle}>
+                Semaine
+              </SortTh>
+              <SortTh k="prevu" sort={sort} onSort={toggle} align="right">
+                Prévu (h)
+              </SortTh>
+              <SortTh k="reel" sort={sort} onSort={toggle} align="right">
+                Réel (h)
+              </SortTh>
+              <SortTh k="ecart" sort={sort} onSort={toggle} align="right">
+                Écart (h)
+              </SortTh>
+              <SortTh k="flag" sort={sort} onSort={toggle}>
+                Flag
+              </SortTh>
+            </tr>
+          </thead>
+          <tbody>
+            {paginate(sorted, page, size).map((e, i) => (
+              <tr key={`${e.personne_id ?? e.ressource}|${e.ct}|${e.semaine}|${i}`}>
+                <td>
+                  <RessourceCell e={e} />
+                </td>
+                <td>
+                  <CtCell ct={e.ct} libelle={e.ct_libelle} />
+                </td>
+                <td data-nowrap>{fmtWeek(e.semaine)}</td>
+                <td data-align="right">{fmtHours(e.prevu)}</td>
+                <td data-align="right">{fmtHours(e.reel)}</td>
+                <td data-align="right">
+                  <Text as="span" weight={e.flag === 'conforme' ? 400 : 600} tone={ecartTone(e.flag, e.ecart)}>
+                    {fmtHoursSigned(e.ecart)}
+                  </Text>
+                </td>
+                <td>
+                  <FlagBadge flag={e.flag} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
       )}
 
       {total > 0 && (
-        <Group justify="space-between" wrap="wrap">
-          <Group gap="xs">
-            <Text size="sm" c="dimmed">
-              Lignes par page
-            </Text>
-            <Select data={PAGE_SIZES} value={pageSize} onChange={(v) => v && setPageSize(v)} w={80} size="xs" allowDeselect={false} />
+        <Group justify="between">
+          <Group gap={8}>
+            <Text tone="secondary">Lignes par page</Text>
+            <Select aria-label="Lignes par page" data={PAGE_SIZES} value={pageSize} onChange={(v) => v && setPageSize(v)} />
           </Group>
-          {pages > 1 && <Pagination total={pages} value={page} onChange={setPage} size="sm" />}
+          {pages > 1 && <Pagination page={page} total={pages} onChange={setPage} />}
         </Group>
       )}
     </Stack>

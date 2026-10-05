@@ -1,7 +1,20 @@
 // Onglet Squads : table hiérarchique (parent → enfants indentés), création / édition / alias.
 import { useMemo, useState } from 'react';
-import { ActionIcon, Badge, Button, Center, Group, Loader, Table, Text, TextInput, Tooltip, VisuallyHidden } from '@mantine/core';
-import { IconCornerDownRight, IconPencil, IconPlus, IconSearch } from '@tabler/icons-react';
+import {
+  Button,
+  EmptyState,
+  Group,
+  IconButton,
+  Pill,
+  SearchField,
+  SkeletonRows,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+  VisuallyHidden,
+} from '../../ui';
+import { IconCornerDownRight, IconPencil, IconPlus, IconUsers } from '../../ui/Icons';
 import ErrorAlert from '../../components/ErrorAlert';
 import { fold, useSquadIndex } from './hooks';
 import SquadModal from './SquadModal';
@@ -26,107 +39,97 @@ export default function SquadsTab() {
   }, [nodes, filter]);
 
   return (
-    <>
-      <Group justify="space-between" align="flex-end" mb="sm" wrap="wrap">
-        <TextInput
-          label="Filtrer"
+    <Stack gap={8}>
+      <Group justify="between" gap={8}>
+        <SearchField
+          aria-label="Filtrer les squads"
           placeholder="Nom, alias, entité…"
-          leftSection={<IconSearch size={16} />}
           value={filter}
-          onChange={(e) => setFilter(e.currentTarget.value)}
-          w={{ base: '100%', sm: 320 }}
+          onChange={setFilter}
+          width={320}
         />
-        <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing('new')}>
+        <Button variant="primary" icon={<IconPlus size={15} />} onClick={() => setEditing('new')}>
           Nouvelle squad
         </Button>
       </Group>
 
       <ErrorAlert error={query.error} />
       {query.isLoading ? (
-        <Center py="xl">
-          <Loader />
-        </Center>
+        <SkeletonRows rows={6} />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<IconUsers size={40} />} title={nodes.length ? 'Aucun résultat' : 'Aucune squad'}>
+          {nodes.length ? 'Aucune squad ne correspond au filtre.' : 'Aucune squad pour le moment.'}
+        </EmptyState>
       ) : (
         <>
-          <Text size="xs" c="dimmed" mb={4}>
+          <Text size="sm" tone="secondary" tabular>
             {rows.length} squad{rows.length > 1 ? 's' : ''}
           </Text>
-          <Table.ScrollContainer minWidth={720}>
-            <Table striped highlightOnHover verticalSpacing="xs" fz="sm">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Squad</Table.Th>
-                  <Table.Th>Alias</Table.Th>
-                  <Table.Th>Entité rattachée</Table.Th>
-                  <Table.Th style={{ textAlign: 'right' }}>Sous-squads</Table.Th>
-                  <Table.Th w={50}>
-                    <VisuallyHidden>Actions</VisuallyHidden>
-                  </Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {rows.length === 0 && (
-                  <Table.Tr>
-                    <Table.Td colSpan={5}>
-                      <Text c="dimmed" ta="center" py="md">
-                        {nodes.length ? 'Aucune squad ne correspond au filtre.' : 'Aucune squad pour le moment.'}
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                )}
-                {rows.map(({ squad: s, depth, path, childCount }) => {
-                  const alias = s.alias ?? [];
-                  return (
-                    <Table.Tr key={s.id}>
-                      <Table.Td>
-                        <Group gap={4} wrap="nowrap" style={{ paddingLeft: depth * 20 }} title={path}>
-                          {depth > 0 && <IconCornerDownRight size={14} color="var(--mantine-color-dimmed)" />}
-                          <Text size="sm" fw={depth === 0 ? 600 : 400}>
-                            {s.nom_canonique}
+          <Table striped hover minWidth={720}>
+            <thead>
+              <tr>
+                <th>Squad</th>
+                <th>Alias</th>
+                <th>Entité rattachée</th>
+                <th data-align="right">Sous-squads</th>
+                <th style={{ width: 50 }}>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ squad: s, depth, path, childCount }) => {
+                const alias = s.alias ?? [];
+                return (
+                  <tr key={s.id}>
+                    <td>
+                      <Group gap={4} wrap={false} style={{ paddingLeft: depth * 20 }} title={path}>
+                        {depth > 0 && (
+                          <Text as="span" tone="tertiary">
+                            <IconCornerDownRight size={14} />
                           </Text>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        {alias.length === 0 ? (
-                          <Text span c="dimmed">
-                            —
-                          </Text>
-                        ) : (
-                          <Group gap={4}>
-                            {alias.slice(0, MAX_ALIAS).map((a) => (
-                              <Badge key={a} size="sm" variant="light" color="gray" style={{ textTransform: 'none' }}>
-                                {a}
-                              </Badge>
-                            ))}
-                            {alias.length > MAX_ALIAS && (
-                              <Tooltip label={alias.slice(MAX_ALIAS).join(', ')} multiline maw={320}>
-                                <Badge size="sm" variant="outline" color="gray">
-                                  +{alias.length - MAX_ALIAS}
-                                </Badge>
-                              </Tooltip>
-                            )}
-                          </Group>
                         )}
-                      </Table.Td>
-                      <Table.Td>{s.entite_rattachee || <Text span c="dimmed">—</Text>}</Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>{childCount || ''}</Table.Td>
-                      <Table.Td>
-                        <Tooltip label="Modifier / alias" withArrow>
-                          <ActionIcon
-                            variant="subtle"
-                            aria-label={`Modifier la squad ${s.nom_canonique}`}
-                            onClick={() => setEditing(s.id)}
-                          >
-                            <IconPencil size={16} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                        <Text as="span" weight={depth === 0 ? 600 : 400}>
+                          {s.nom_canonique}
+                        </Text>
+                      </Group>
+                    </td>
+                    <td>
+                      {alias.length === 0 ? (
+                        <Text as="span" tone="secondary">
+                          —
+                        </Text>
+                      ) : (
+                        <Group gap={4}>
+                          {alias.slice(0, MAX_ALIAS).map((a) => (
+                            <Pill key={a}>{a}</Pill>
+                          ))}
+                          {alias.length > MAX_ALIAS && (
+                            <Tooltip label={alias.slice(MAX_ALIAS).join(', ')}>
+                              <Pill>+{alias.length - MAX_ALIAS}</Pill>
+                            </Tooltip>
+                          )}
+                        </Group>
+                      )}
+                    </td>
+                    <td>
+                      {s.entite_rattachee || (
+                        <Text as="span" tone="secondary">
+                          —
+                        </Text>
+                      )}
+                    </td>
+                    <td data-align="right">{childCount || ''}</td>
+                    <td data-actions>
+                      <IconButton label={`Modifier la squad ${s.nom_canonique}`} onClick={() => setEditing(s.id)}>
+                        <IconPencil size={15} />
+                      </IconButton>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
         </>
       )}
 
@@ -136,6 +139,6 @@ export default function SquadsTab() {
         onClose={() => setEditing(null)}
         onCreated={(s) => setEditing(s.id)}
       />
-    </>
+    </Stack>
   );
 }

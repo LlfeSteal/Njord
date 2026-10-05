@@ -7,7 +7,9 @@ import { realiseApi, versionsApi, type RealiseEntriesQuery } from '../../api/cli
 import type { RealiseEntriesPage, RealiseEntry } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
 import { StatusBadge } from '../../components/badges';
+import ImportWizard from '../../components/ImportWizard';
 import VersionInfoInspector from '../../components/lifecycle/VersionInfoInspector';
+import VersionSwitcher from '../../components/lifecycle/VersionSwitcher';
 import { useVersionLifecycle } from '../../components/lifecycle/useVersionLifecycle';
 import { plural } from '../../components/lifecycle/lifecycleUtils';
 import {
@@ -17,6 +19,7 @@ import {
   EmptyState,
   IconButton,
   InspectorSection,
+  Link,
   KeyValue,
   LoadingBlock,
   Modal,
@@ -33,7 +36,7 @@ import {
   useLocalStorage,
   type MenuEntry,
 } from '../../ui';
-import { IconColumns, IconDownload, IconInfo, IconSearch } from '../../ui/Icons';
+import { IconColumns, IconDownload, IconImport, IconInfo, IconSearch } from '../../ui/Icons';
 import { fmtDateTime, fmtEur, fmtNumber, fmtPeriod } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 import { COLUMNS, DEFAULT_VISIBLE, type EntryColumn, type SortField } from './columns';
@@ -43,7 +46,7 @@ import { filtersFromParams, URL_FILTERS, type EntriesFilterState } from './filte
 import './realise.css';
 
 const PAGE_SIZES = ['50', '100', '200'] as const;
-const BACK = { to: '/realise', label: 'Imports du réalisé' };
+const BACK = { to: '/realise', label: 'Réalisé' };
 
 type Panel = { type: 'info' } | { type: 'entry'; entry: RealiseEntry } | null;
 
@@ -57,8 +60,11 @@ function download(href: string) {
   a.remove();
 }
 
-export default function RealiseDetail() {
-  const { versionId = '' } = useParams();
+/** `versionId` imposé = import courant affiché sur /realise ; sinon l'id de l'URL (/realise/:id). */
+export default function RealiseDetail({ versionId: forced }: { versionId?: string } = {}) {
+  const params = useParams();
+  const versionId = forced ?? params.versionId ?? '';
+  const [wizard, setWizard] = useState(false);
   const [sp, setSp] = useSearchParams();
   const lc = useVersionLifecycle('realise');
   const versionQ = useQuery({
@@ -181,7 +187,7 @@ export default function RealiseDetail() {
   }
 
   const v = version;
-  const subtitle = [
+  const summary = [
     plural(v.nb_lignes, 'ligne'),
     v.nb_warn ? `${fmtNumber(v.nb_warn)} à vérifier` : '',
     v.nb_drop ? `${fmtNumber(v.nb_drop)} rejetée${v.nb_drop > 1 ? 's' : ''}` : '',
@@ -190,6 +196,14 @@ export default function RealiseDetail() {
   ]
     .filter(Boolean)
     .join(' · ');
+  const subtitle =
+    v.statut === 'active' ? (
+      summary
+    ) : (
+      <>
+        {summary} · <Link to="/realise">Revenir à l'import actif</Link>
+      </>
+    );
 
   const lifecycleEntries = lc.menuEntries(v);
   const menu: MenuEntry[] = [
@@ -237,18 +251,22 @@ export default function RealiseDetail() {
       inspector={inspector}
       toolbar={
         <PageToolbar
-          back={BACK}
-          title={v.intitule}
+          title={<VersionSwitcher kind="realise" current={v} basePath="/realise" onImport={() => setWizard(true)} />}
           accessory={<StatusBadge statut={v.statut} />}
           subtitle={subtitle}
           actions={
-            <IconButton
-              label="Infos"
-              aria-pressed={infoOpen}
-              onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
-            >
-              <IconInfo size={16} />
-            </IconButton>
+            <>
+              <Button icon={<IconImport size={15} />} onClick={() => setWizard(true)}>
+                Importer
+              </Button>
+              <IconButton
+                label="Infos"
+                aria-pressed={infoOpen}
+                onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
+              >
+                <IconInfo size={16} />
+              </IconButton>
+            </>
           }
           menu={menu.length ? menu : undefined}
           bottom={
@@ -326,6 +344,7 @@ export default function RealiseDetail() {
         onChange={setVisible}
         maskSensitive={maskSensitive}
       />
+      <ImportWizard kind="realise" opened={wizard} onClose={() => setWizard(false)} />
       {lc.modals}
     </Page>
   );

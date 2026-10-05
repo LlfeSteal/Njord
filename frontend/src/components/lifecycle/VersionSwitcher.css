@@ -1,0 +1,39 @@
+/* Titre de page cliquable (pop-up button discret) : fond au survol / à l'ouverture seulement. */
+.version-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  margin: -2px 0;
+  padding: 2px 6px;
+  /* Texte aligné sur le sous-titre sans marge négative (qui fausserait la largeur intrinsèque). */
+  transform: translateX(-6px);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+.version-switcher:hover,
+.version-switcher[aria-expanded='true'] {
+  background: var(--fill);
+}
+.version-switcher svg {
+  color: var(--text-secondary);
+  flex: none;
+}
+.version-switcher__label {
+  min-width: 0;
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Le titre de la barre d'outils rogne son contenu : on laisse déborder le fond de survol
+   (marges négatives), l'ellipse étant portée par le libellé du bouton. */
+.ui-page-toolbar__title:has(> .version-switcher) {
+  overflow: visible;
+}

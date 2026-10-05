@@ -39,7 +39,9 @@ Navigation en barre latérale (`src/components/AppLayout.tsx`), routes dans `src
 | `/ecarts` | Écarts d'imputation | `src/pages/pilotage/ecarts/` |
 | `/budget` | Budget par CT | `src/pages/pilotage/budget/` |
 | `/previsions` | Atterrissage et charge à venir | `src/pages/pilotage/previsions/` |
-| `/plan/*`, `/realise/*` | Versions importées et leurs lignes | `src/pages/plan/`, `src/pages/realise/` |
+| `/plan`, `/realise` | Version **active** (sinon la plus récente) ; le titre est un sélecteur d'historique | `src/pages/plan/`, `src/pages/realise/` |
+| `/plan/:id`, `/realise/:id` | Version précise de l'historique | idem |
+| `/plan/versions`, `/realise/versions` | Gestion des versions (archivage, réactivation, purge) | idem + `src/components/VersionsPanel.tsx` |
 | `/personnes`, `/squads` | Référentiels | `src/pages/referentiels/` |
 | `/reglages/*` | Paramètres et journal | `src/pages/parametres/` |
 

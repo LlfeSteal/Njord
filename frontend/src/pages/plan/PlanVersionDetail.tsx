@@ -5,7 +5,9 @@ import { useParams } from 'react-router-dom';
 import {
   Card,
   EmptyState,
+  Button,
   IconButton,
+  Link,
   LoadingBlock,
   Page,
   PageToolbar,
@@ -15,13 +17,15 @@ import {
   Stack,
   type MenuEntry,
 } from '../../ui';
-import { IconDownload, IconInfo } from '../../ui/Icons';
+import { IconDownload, IconImport, IconInfo } from '../../ui/Icons';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { planApi, versionsApi } from '../../api/client';
 import type { PlanLine } from '../../api/types';
 import { StatusBadge } from '../../components/badges';
 import ErrorAlert from '../../components/ErrorAlert';
+import ImportWizard from '../../components/ImportWizard';
 import VersionInfoInspector from '../../components/lifecycle/VersionInfoInspector';
+import VersionSwitcher from '../../components/lifecycle/VersionSwitcher';
 import { useVersionLifecycle } from '../../components/lifecycle/useVersionLifecycle';
 import { plural } from '../../components/lifecycle/lifecycleUtils';
 import { fmtDateTime, fmtNumber, fmtPeriod } from '../../lib/format';
@@ -35,7 +39,7 @@ import { PAGE_SIZES, useLineFilters, type SortKey } from './useLineFilters';
 import './plan.css';
 
 const NUMERIC_SORTS: SortKey[] = ['charge_totale', 'pps'];
-const BACK = { to: '/plan', label: 'Plans de charge' };
+const BACK = { to: '/plan', label: 'Plan de charge' };
 
 type Panel = { type: 'info' } | { type: 'line'; line: PlanLine } | null;
 
@@ -49,8 +53,11 @@ function download(href: string) {
   a.remove();
 }
 
-export default function PlanVersionDetail() {
-  const { versionId = '' } = useParams();
+/** `versionId` imposé = version courante affichée sur /plan ; sinon l'id de l'URL (/plan/:id). */
+export default function PlanVersionDetail({ versionId: forced }: { versionId?: string } = {}) {
+  const params = useParams();
+  const versionId = forced ?? params.versionId ?? '';
+  const [wizard, setWizard] = useState(false);
   const { filters, sort, order, limit, page, update, query } = useLineFilters();
   const squads = useSquadIndex();
   const lc = useVersionLifecycle('plan');
@@ -99,7 +106,7 @@ export default function PlanVersionDetail() {
     );
   }
 
-  const subtitle = [
+  const summary = [
     plural(v.nb_lignes, 'ligne'),
     v.nb_warn ? `${fmtNumber(v.nb_warn)} à vérifier` : '',
     v.nb_drop ? `${fmtNumber(v.nb_drop)} rejetée${v.nb_drop > 1 ? 's' : ''}` : '',
@@ -107,6 +114,14 @@ export default function PlanVersionDetail() {
   ]
     .filter(Boolean)
     .join(' · ');
+  const subtitle =
+    v.statut === 'active' ? (
+      summary
+    ) : (
+      <>
+        {summary} · <Link to="/plan">Revenir à la version active</Link>
+      </>
+    );
 
   const lifecycleEntries = lc.menuEntries(v);
   const menu: MenuEntry[] = [
@@ -144,18 +159,22 @@ export default function PlanVersionDetail() {
       inspector={inspector}
       toolbar={
         <PageToolbar
-          back={BACK}
-          title={v.intitule}
+          title={<VersionSwitcher kind="plan" current={v} basePath="/plan" onImport={() => setWizard(true)} />}
           accessory={<StatusBadge statut={v.statut} />}
           subtitle={subtitle}
           actions={
-            <IconButton
-              label="Infos"
-              aria-pressed={infoOpen}
-              onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
-            >
-              <IconInfo size={16} />
-            </IconButton>
+            <>
+              <Button icon={<IconImport size={15} />} onClick={() => setWizard(true)}>
+                Importer
+              </Button>
+              <IconButton
+                label="Infos"
+                aria-pressed={infoOpen}
+                onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
+              >
+                <IconInfo size={16} />
+              </IconButton>
+            </>
           }
           menu={menu.length ? menu : undefined}
           bottom={
@@ -224,6 +243,7 @@ export default function PlanVersionDetail() {
       )}
 
       <AliasPersonneModal line={aliasLine} onClose={() => setAliasLine(null)} />
+      <ImportWizard kind="plan" opened={wizard} onClose={() => setWizard(false)} />
       {lc.modals}
     </Page>
   );

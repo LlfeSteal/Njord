@@ -47,6 +47,8 @@ export interface VersionsPanelProps {
   extraColumns?: VersionColumn[];
   /** Aide affichée dans l'état vide. */
   emptyHelp?: ReactNode;
+  /** Lien de retour vers la version courante (« Plan de charge » → /plan). */
+  back?: { to: string; label: string };
 }
 
 const STATUT_ORDER: Record<Version['statut'], number> = { active: 0, archivee: 1, purgee: 2 };
@@ -73,7 +75,7 @@ function QualityGlyph({ v }: { v: Version }) {
   );
 }
 
-export default function VersionsPanel({ kind, title, onOpen, extraColumns = [], emptyHelp }: VersionsPanelProps) {
+export default function VersionsPanel({ kind, title, onOpen, extraColumns = [], emptyHelp, back }: VersionsPanelProps) {
   const [includePurged, setIncludePurged] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const lc = useVersionLifecycle(kind);
@@ -228,6 +230,7 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [], 
     <Page
       toolbar={
         <PageToolbar
+          back={back}
           title={title}
           subtitle={subtitle}
           actions={

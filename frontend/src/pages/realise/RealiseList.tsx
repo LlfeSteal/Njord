@@ -12,8 +12,9 @@ export default function RealiseList() {
   return (
     <VersionsPanel
       kind="realise"
-      title="Réalisé"
-      onOpen={(v) => navigate(`/realise/${v.id}`)}
+      title="Imports du réalisé"
+      back={{ to: '/realise', label: 'Réalisé' }}
+      onOpen={(v) => navigate(v.statut === 'active' ? '/realise' : `/realise/${v.id}`)}
       extraColumns={EXTRA_COLUMNS}
       emptyHelp="Importez un extrait du réalisé (.xlsx). L'import actif est celui que le pilotage utilise par défaut."
     />

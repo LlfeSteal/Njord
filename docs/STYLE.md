@@ -243,6 +243,44 @@ All components live in `frontend/src/ui/` (one `.tsx` + one `.css` per component
 
 ## 8. Njord screens
 
+### Page template (controller-first)
+
+Njord is organised by the **controller's tasks**, not by data source. A page is always the same frame:
+
+```
+┌ Sidebar 220 ┬ Toolbar: [back] Title · subtitle            actions  ⋯ ┐
+│ Pilotage    ├──────────────────────────────────────────────┬─────────┤
+│  Vue d'ens. │ content (padding 16 × 24, gap 16)            │Inspector│
+│  Anomalies 3│                                              │  360 px │
+│  Écarts     │                                              │         │
+│  Budget     │                                              │         │
+│  Prévisions │                                              │         │
+│ Données     │                                              │         │
+│  Plan …     │                                              │         │
+│ Réglages    │                                              │         │
+└─────────────┴──────────────────────────────────────────────┴─────────┘
+```
+
+- **Sidebar** (`AppShell`, `Sidebar`): source list on `--material`, items 28 px, radius 6; active item = `--accent-tint` background, `--accent` text and icon; section titles 11/600 secondary; badge = Pill. Collapses under 900 px.
+- **Toolbar** (`PageToolbar`): sticky, translucent, 0.5 px bottom hairline; title 17/600, one subtitle line 12 px secondary; **one** primary action at most, everything else in the `⋯` menu (exports, secondary actions). An optional bottom row carries search + `FilterButton` + `ActiveFilters`, or a segmented control.
+- **Inspector** (`Inspector`, `InspectorSection`, `KeyValue`): opens on row click, 360 px, `--card`, left hairline; details that do not deserve a column live here (full group path, cost line, unit, raw label, parsing reason, breakdowns, actions).
+- **Filters**: never more than one row. A search field and a `Filtres` button with a count; criteria live in its popover; active filters show as removable accent pills.
+- **Pilotage context**: one compact control in the toolbar (« Plan × Réalisé · S36 → S40 ▾ »), shared by every Pilotage page.
+
+### Density rules
+
+- **At most 6 columns** by default in a table (the rest in the inspector or a column chooser).
+- **No two-line cells** in a list: one row = one line (36 px), secondary data goes to the inspector.
+- **At most 3 key figures** at the top of a screen (`Metric`, no card around them).
+- One chart per idea; no chart without a reading key in one sentence.
+- Explanatory paragraphs belong in empty states or help text, not above content.
+- Settings use **grouped inset lists** (`GroupedList`, `ListRow`: label left, control right), one column, 720 px max.
+
+### Anomaly rows (the one tinted background)
+
+A row in anomaly gets `data-tone="warning|danger"`: background tinted 8 % of the tone (`color-mix(in srgb, var(--warning) 8%, var(--card))`) and a 24 px leading cell (`data-glyph`) with the `StatusGlyph`. Its reason appears in the inspector and as the glyph's help tag. No status column.
+
+
 ### Tables
 
 - Native `<table>` in a card, full width; horizontal scroll inside the card when narrow.

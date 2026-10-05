@@ -1,0 +1,142 @@
+/* Listes insérées (§8 « Density rules ») : groupe --card rayon 10, lignes 44 px, filets en retrait. */
+
+.ui-grouped {
+  min-width: 0;
+}
+
+.ui-grouped__title {
+  margin: 0;
+  padding: 0 4px 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ui-grouped__list {
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.ui-grouped__footer {
+  padding: 6px 4px 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ------------------------------------------------------------------ ListRow */
+
+.ui-list-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+/* Filet 0,5 px aligné sur le texte (après l'icône le cas échéant). */
+.ui-list-row + .ui-list-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 0;
+  border-top: 0.5px solid var(--separator);
+  pointer-events: none;
+}
+.ui-list-row + .ui-list-row[data-icon]::before {
+  left: 40px;
+}
+
+.ui-list-row[data-clickable] {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s var(--ease);
+}
+.ui-list-row[data-clickable]:hover {
+  background: var(--fill);
+}
+/* Le groupe rogne son contenu : anneau de focus à l'intérieur de la ligne. */
+.ui-list-row[data-clickable]:focus-visible {
+  outline-offset: -3px;
+}
+.ui-list-row[data-selected],
+.ui-list-row[data-selected]:hover {
+  background: var(--accent-tint);
+}
+
+.ui-list-row__icon {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.ui-list-row__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ui-list-row__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+label.ui-list-row__label {
+  cursor: default;
+}
+.ui-list-row__label[data-tone='danger'] {
+  color: var(--danger);
+}
+.ui-list-row__label[data-tone='accent'] {
+  color: var(--accent);
+}
+.ui-list-row__desc {
+  margin-top: 1px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* Valeur en lecture seule : secondaire, à droite. */
+.ui-list-row__value {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* Contrôle : largeur fixée par l'appelant (champ compact ~160 px). */
+.ui-list-row__control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  max-width: 60%;
+}
+
+.ui-list-row__chevron {
+  flex: none;
+  margin-right: -2px;
+  color: var(--text-tertiary);
+}

@@ -108,6 +108,41 @@
   font-weight: 600;
 }
 
+/* Lignes en anomalie (§8 « Anomaly rows ») : seule exception aux fonds colorés, teinte 8 % du ton.
+   Le second sélecteur l'emporte sur l'alternance ; le survol (ombre interne) s'y superpose. */
+.ui-table tr[data-tone='warning'] > :is(td, th),
+.ui-table[data-striped] tbody tr[data-tone='warning']:nth-child(even) > :is(td, th) {
+  background-color: color-mix(in srgb, var(--warning) 8%, var(--card));
+}
+.ui-table tr[data-tone='danger'] > :is(td, th),
+.ui-table[data-striped] tbody tr[data-tone='danger']:nth-child(even) > :is(td, th) {
+  background-color: color-mix(in srgb, var(--danger) 8%, var(--card));
+}
+/* La sélection reste visible sur une ligne alternée ou en anomalie. */
+.ui-table[data-striped] tbody tr[data-selected]:nth-child(even) > :is(td, th),
+.ui-table tbody tr[data-selected][data-tone] > :is(td, th) {
+  background-color: var(--accent-tint);
+}
+
+/* Ligne de totaux : 600, filet haut ; collante en bas quand le tableau défile (maxHeight). */
+.ui-table tfoot :is(td, th),
+.ui-table tr[data-total] > :is(td, th) {
+  font-weight: 600;
+}
+.ui-table tbody tr[data-total] > :is(td, th) {
+  border-top: 0.5px solid var(--separator);
+}
+/* Les bordures ne suivent pas une cellule collante (border-collapse) : filet en ombre interne. */
+.ui-table-scroll[data-scroll-y] .ui-table tfoot :is(td, th),
+.ui-table-scroll[data-scroll-y] .ui-table tr[data-total] > :is(td, th) {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background-color: var(--card);
+  border-top-color: transparent;
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
 /* Conventions de cellule. */
 .ui-table :is(th, td)[data-align='right'] {
   text-align: right;
@@ -122,6 +157,17 @@
 }
 .ui-table :is(th, td)[data-nowrap] {
   white-space: nowrap;
+}
+/* Cellule de glyphe en tête de ligne : 24 px utiles, glyphe centré. */
+.ui-table :is(td, th)[data-glyph] {
+  box-sizing: content-box;
+  width: 24px;
+  padding: 0 0 0 12px;
+  text-align: center;
+  line-height: 0;
+}
+.ui-table :is(td, th)[data-glyph] > * {
+  vertical-align: middle;
 }
 .ui-table td[data-actions] {
   width: 1%;

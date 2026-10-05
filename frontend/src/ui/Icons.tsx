@@ -433,3 +433,81 @@ export function IconTimeline({ stroke = 2.4, ...p }: IconProps) {
     </SvgIcon>
   );
 }
+
+// ------------------------------------------------------------------ Ajouts barre latérale / pilotage
+
+/** Vue d'ensemble : jauge / tableau de bord. */
+export function IconGauge(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <path d="M4.8 17.5A8.5 8.5 0 1 1 19.2 17.5" />
+      <path d="M12 13l3.4-4.2" />
+      <circle cx="12" cy="13" r="1.2" fill="currentColor" />
+    </SvgIcon>
+  );
+}
+
+/** Anomalies : bac de réception. */
+export function IconInbox(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <path d="M3.5 12.5h4.8l1.6 2.5h4.2l1.6-2.5h4.8" />
+      <path d="M6.3 5.6 3.5 12.5V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-5.5l-2.8-6.9a1.8 1.8 0 0 0-1.7-1.1H8a1.8 1.8 0 0 0-1.7 1.1Z" />
+    </SvgIcon>
+  );
+}
+
+/** Écarts : barres comparées sur une ligne de base. */
+export function IconChartBar(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <path d="M3.5 20h17" />
+      <rect x="5" y="10" width="3.5" height="7" rx="1" />
+      <rect x="10.25" y="5" width="3.5" height="12" rx="1" />
+      <rect x="15.5" y="8" width="3.5" height="9" rx="1" />
+    </SvgIcon>
+  );
+}
+
+/** Budget : symbole euro dans un cercle. */
+export function IconEuro(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M15.3 9.2a3.8 3.8 0 1 0 0 5.6" />
+      <path d="M7.6 11h5.2M7.6 13.2h5.2" />
+    </SvgIcon>
+  );
+}
+
+/** Prévisions : courbe montante prolongée en pointillés. */
+export function IconTrend(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <path d="M3.5 17.5 8.5 12l3.5 3 4-4.5" />
+      <path d="M16 10.5 20.5 5.5" strokeDasharray="1.6 3" />
+    </SvgIcon>
+  );
+}
+
+/** Bascule de barre latérale : rectangle avec colonne gauche. */
+export function IconSidebar(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="M9.5 4.5v15" />
+      <path d="M5.6 8.5h1.4M5.6 11h1.4" />
+    </SvgIcon>
+  );
+}
+
+/** Menu « ⋯ » : trois points horizontaux, remplis. */
+export function IconMore(p: IconProps) {
+  return (
+    <SvgIcon {...p}>
+      <circle cx="6" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="18" cy="12" r="1.5" fill="currentColor" />
+    </SvgIcon>
+  );
+}

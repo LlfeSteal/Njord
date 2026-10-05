@@ -1,0 +1,47 @@
+/* Filtres (§8 « Filters ») : bouton teinté comme un pop-up actif, popover de critères, pastilles. */
+
+.ui-btn.ui-filter-btn[data-active] {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.ui-btn.ui-filter-btn[data-active]:hover,
+.ui-btn.ui-filter-btn[data-active][aria-expanded='true'] {
+  background: color-mix(in srgb, var(--blue) 20%, transparent);
+}
+.ui-btn.ui-filter-btn:not([data-active])[aria-expanded='true'] {
+  background: var(--fill-pressed);
+}
+.ui-filter-btn .ui-pill {
+  margin-right: -4px;
+}
+
+/* Contenu du popover : critères empilés, pied séparé par un filet. */
+.ui-filters__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.ui-filters__footer {
+  display: flex;
+  justify-content: flex-end;
+  margin: 16px -16px -8px;
+  padding: 8px 8px 0;
+  border-top: 0.5px solid var(--separator);
+}
+
+/* Pastilles des filtres actifs. */
+.ui-active-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.ui-active-filters .ui-pill {
+  max-width: 260px;
+}
+.ui-active-filters__clear {
+  margin-left: 4px;
+  white-space: nowrap;
+}

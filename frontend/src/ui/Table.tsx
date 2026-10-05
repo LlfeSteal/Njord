@@ -12,6 +12,9 @@
 //   <tr data-strike>                → tertiaire barré (version purgée…)
 //   <tr data-selected>              → teinte bleue 14 %
 //   <tr data-emphasis>              → graisse 600 (version active, ligne de total)
+//   <tr data-tone="warning|danger"> → ligne en anomalie : teinte 8 % du ton (seule exception aux fonds colorés)
+//   <td data-glyph>                 → 1re cellule étroite (24 px) portant le StatusGlyph de la ligne
+//   <tfoot> / <tr data-total>      → ligne de totaux : 600, filet haut, collante en bas si maxHeight
 import type { ReactNode } from 'react';
 import { IconButton } from './Button';
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconSelector } from './Icons';

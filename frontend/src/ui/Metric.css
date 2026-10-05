@@ -1,0 +1,96 @@
+/* Chiffres clés (§8 « Density rules ») : sans carte ; libellé 12 secondaire, valeur 28/600 tabulaire. */
+
+.ui-metric {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-metric__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.ui-metric__label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-metric__value {
+  margin-top: 2px;
+  color: var(--text);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ui-metric__value[data-tone='danger'] { color: var(--danger); }
+.ui-metric__value[data-tone='warning'] { color: var(--warning); }
+.ui-metric__value[data-tone='success'] { color: var(--success); }
+
+.ui-metric__sub {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-metric__extra {
+  margin-top: 8px;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ ProgressBar */
+
+.ui-progress {
+  max-width: 100%;
+  padding: 2px 0;
+}
+/* Largeur relative (%) : conteneur de requête, la piste passe à 6 px dès 200 px de large. */
+.ui-progress[data-fluid] {
+  container: ui-progress / inline-size;
+}
+.ui-progress__track {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill);
+}
+.ui-progress[data-thick] .ui-progress__track {
+  height: 6px;
+}
+@container ui-progress (min-width: 200px) {
+  .ui-progress__track {
+    height: 6px;
+  }
+}
+
+.ui-progress__bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s var(--ease);
+}
+.ui-progress__bar[data-tone='success'] { background: var(--success); }
+.ui-progress__bar[data-tone='warning'] { background: var(--warning); }
+.ui-progress__bar[data-tone='danger'] { background: var(--danger); }
+
+/* Repère : trait vertical 2 px qui dépasse de la piste. */
+.ui-progress__marker {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-secondary);
+}

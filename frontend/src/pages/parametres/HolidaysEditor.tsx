@@ -18,7 +18,16 @@ const WEEKDAY = new Intl.DateTimeFormat('fr-FR', { weekday: 'short', timeZone: '
 
 const SPLIT = [',', ' ', ';'];
 
-export default function HolidaysEditor({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+export default function HolidaysEditor({
+  value,
+  onChange,
+  label = 'Jours fériés',
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+  /** Libellé du champ ; null quand le conteneur (fenêtre) porte déjà le titre. */
+  label?: string | null;
+}) {
   const [error, setError] = useState<string | null>(null);
   const currentYear = String(new Date().getFullYear());
 
@@ -44,7 +53,7 @@ export default function HolidaysEditor({ value, onChange }: { value: string[]; o
 
   return (
     <Field
-      label="Jours fériés"
+      label={label}
       description="Exclus des jours ouvrés. Saisir des dates AAAA-MM-JJ (Entrée ou virgule pour valider)."
       error={error}
     >

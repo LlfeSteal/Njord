@@ -1,33 +1,56 @@
 import { lazy, Suspense, type ReactNode } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import AppLayout from './components/AppLayout';
 import { LoadingBlock } from './ui';
 
-// Un chunk par onglet (chargé à la demande).
+// Un chunk par page (chargé à la demande).
+// Pilotage
+const OverviewPage = lazy(() => import('./pages/pilotage/overview'));
+const AnomaliesPage = lazy(() => import('./pages/pilotage/anomalies'));
+const EcartsPage = lazy(() => import('./pages/pilotage/ecarts'));
+const BudgetPage = lazy(() => import('./pages/pilotage/budget'));
+const PrevisionsPage = lazy(() => import('./pages/pilotage/previsions'));
+// Données
 const PlanModule = lazy(() => import('./pages/plan'));
 const RealiseModule = lazy(() => import('./pages/realise'));
-const AnalyseModule = lazy(() => import('./pages/analyse'));
-const ReferentielsModule = lazy(() => import('./pages/referentiels'));
+const PersonnesPage = lazy(() => import('./pages/referentiels/personnes'));
+const SquadsPage = lazy(() => import('./pages/referentiels/squads'));
+// Réglages
 const ParametresModule = lazy(() => import('./pages/parametres'));
 
-// Chaque module gère ses sous-routes (ex. /plan/:versionId) via <Routes> relatives.
+// Les modules Données gèrent leurs sous-routes (ex. /plan/:versionId) via <Routes> relatives.
 export default function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
-        <Route index element={<Navigate to="/plan" replace />} />
+        <Route index element={<Lazy><OverviewPage /></Lazy>} />
+        <Route path="/anomalies" element={<Lazy><AnomaliesPage /></Lazy>} />
+        <Route path="/ecarts" element={<Lazy><EcartsPage /></Lazy>} />
+        <Route path="/budget" element={<Lazy><BudgetPage /></Lazy>} />
+        <Route path="/previsions" element={<Lazy><PrevisionsPage /></Lazy>} />
         <Route path="/plan/*" element={<Lazy><PlanModule /></Lazy>} />
         <Route path="/realise/*" element={<Lazy><RealiseModule /></Lazy>} />
-        <Route path="/analyse/*" element={<Lazy><AnalyseModule /></Lazy>} />
-        <Route path="/referentiels/*" element={<Lazy><ReferentielsModule /></Lazy>} />
-        <Route path="/parametres/*" element={<Lazy><ParametresModule /></Lazy>} />
-        <Route path="*" element={<Navigate to="/plan" replace />} />
+        <Route path="/personnes/*" element={<Lazy><PersonnesPage /></Lazy>} />
+        <Route path="/squads/*" element={<Lazy><SquadsPage /></Lazy>} />
+        <Route path="/reglages/*" element={<Lazy><ParametresModule /></Lazy>} />
+        {/* Anciennes adresses (query string conservée) */}
+        <Route path="/analyse/*" element={<Navigate to="/" replace />} />
+        <Route path="/referentiels/*" element={<Redirect to="/personnes" />} />
+        <Route path="/parametres/audit" element={<Redirect to="/reglages/journal" />} />
+        <Route path="/parametres/*" element={<Redirect to="/reglages" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );
 }
 
-// Suspense sous la coquille : la barre d'outils reste affichée pendant le chargement d'un onglet.
+// Suspense sous la coquille : la barre latérale reste affichée pendant le chargement d'une page.
 function Lazy({ children }: { children: ReactNode }) {
   return <Suspense fallback={<LoadingBlock />}>{children}</Suspense>;
+}
+
+// Redirection qui garde la query string (ex. /referentiels?personne=… → /personnes?personne=…).
+function Redirect({ to }: { to: string }) {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: to, search }} replace />;
 }

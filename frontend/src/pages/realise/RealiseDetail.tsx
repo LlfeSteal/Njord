@@ -1,43 +1,51 @@
-// Détail d'un import du réalisé : écritures filtrables, tri, pagination, totaux, export CSV (SPEC_realise §6.3).
-import { useMemo, useState, type ReactNode } from 'react';
-import { useParams } from 'react-router-dom';
+// Détail d'un import du réalisé : barre d'outils (retour, statut, compteurs, filtres), écritures
+// paginées avec totaux en pied, inspecteur (écriture sélectionnée ou infos de l'import).
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { realiseApi, versionsApi, type RealiseEntriesQuery } from '../../api/client';
-import type { RealiseEntriesPage, Version } from '../../api/types';
+import type { RealiseEntriesPage, RealiseEntry } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
 import { StatusBadge } from '../../components/badges';
+import VersionInfoInspector from '../../components/lifecycle/VersionInfoInspector';
+import { useVersionLifecycle } from '../../components/lifecycle/useVersionLifecycle';
+import { plural } from '../../components/lifecycle/lifecycleUtils';
 import {
-  Banner,
   Button,
   Card,
   Checkbox,
   EmptyState,
-  Group,
-  Link,
+  IconButton,
+  InspectorSection,
+  KeyValue,
   LoadingBlock,
+  Modal,
+  Page,
+  PageToolbar,
   Pagination,
-  Pill,
-  Popover,
   Select,
   SkeletonRows,
   SortHeader,
-  Spinner,
   Stack,
-  StatusGlyph,
   Table,
-  Text,
-  Title,
+  VisuallyHidden,
   useDebouncedValue,
   useLocalStorage,
+  type MenuEntry,
 } from '../../ui';
-import { IconArrowLeft, IconColumns, IconDownload, IconSearch } from '../../ui/Icons';
+import { IconColumns, IconDownload, IconInfo, IconSearch } from '../../ui/Icons';
 import { fmtDateTime, fmtEur, fmtNumber, fmtPeriod } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 import { COLUMNS, DEFAULT_VISIBLE, type EntryColumn, type SortField } from './columns';
 import EntriesFilters from './EntriesFilters';
-import { EMPTY_FILTERS, type EntriesFilterState } from './filters';
+import EntryInspector, { EntryGlyph } from './EntryInspector';
+import { filtersFromParams, URL_FILTERS, type EntriesFilterState } from './filters';
+import './realise.css';
 
 const PAGE_SIZES = ['50', '100', '200'] as const;
+const BACK = { to: '/realise', label: 'Imports du réalisé' };
+
+type Panel = { type: 'info' } | { type: 'entry'; entry: RealiseEntry } | null;
 
 /** Téléchargement d'un fichier servi par l'API (équivalent d'un <a href download>). */
 function download(href: string) {
@@ -51,6 +59,8 @@ function download(href: string) {
 
 export default function RealiseDetail() {
   const { versionId = '' } = useParams();
+  const [sp, setSp] = useSearchParams();
+  const lc = useVersionLifecycle('realise');
   const versionQ = useQuery({
     queryKey: qk.version('realise', versionId),
     queryFn: () => versionsApi.get('realise', versionId),
@@ -67,7 +77,7 @@ export default function RealiseDetail() {
   });
 
   // ------------------------------------------------------------ état des filtres
-  const [filters, setFilters] = useState<EntriesFilterState>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<EntriesFilterState>(() => filtersFromParams(sp));
   const [q, setQ] = useState('');
   const [searchDescription, setSearchDescription] = useState(true);
   const [maskSensitive, setMaskSensitive] = useState(true);
@@ -75,9 +85,19 @@ export default function RealiseDetail() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [visible, setVisible] = useLocalStorage<string[]>({
-    key: 'njord.realise.columns',
+    key: 'njord.realise.columns.v2',
     defaultValue: DEFAULT_VISIBLE,
   });
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [panel, setPanel] = useState<Panel>(null);
+
+  // Liens entrants (`?tg=…`, `?statut=warn`) : l'URL fait foi pour ces deux critères.
+  const urlTg = sp.get('tg');
+  const urlStatut = sp.get('statut');
+  useEffect(() => {
+    setFilters((f) => (f.tg === urlTg && f.statut === urlStatut ? f : { ...f, tg: urlTg, statut: urlStatut }));
+    setPage(1);
+  }, [urlTg, urlStatut]);
 
   const [dq] = useDebouncedValue(q.trim(), 350);
   const [dMin] = useDebouncedValue(filters.montant_min, 400);
@@ -86,6 +106,21 @@ export default function RealiseDetail() {
   const patchFilters = (patch: Partial<EntriesFilterState>) => {
     setFilters((f) => ({ ...f, ...patch }));
     setPage(1);
+    if (URL_FILTERS.some((k) => k in patch)) {
+      setSp(
+        (prev) => {
+          const n = new URLSearchParams(prev);
+          for (const k of URL_FILTERS) {
+            if (!(k in patch)) continue;
+            const v = patch[k];
+            if (v) n.set(k, v);
+            else n.delete(k);
+          }
+          return n;
+        },
+        { replace: true },
+      );
+    }
   };
 
   const baseQuery = useMemo<RealiseEntriesQuery>(() => {
@@ -139,79 +174,115 @@ export default function RealiseDetail() {
   if (versionQ.isLoading) return <LoadingBlock />;
   if (versionQ.error || !version) {
     return (
-      <Stack>
-        <BackLink />
+      <Page toolbar={<PageToolbar back={BACK} title="Import introuvable" />}>
         <ErrorAlert error={versionQ.error ?? new Error('Import introuvable')} title="Impossible de charger l'import" />
-      </Stack>
+      </Page>
     );
   }
 
-  return (
-    <Stack gap={12}>
-      <VersionHeader version={version} />
+  const v = version;
+  const subtitle = [
+    plural(v.nb_lignes, 'ligne'),
+    v.nb_warn ? `${fmtNumber(v.nb_warn)} à vérifier` : '',
+    v.nb_drop ? `${fmtNumber(v.nb_drop)} rejetée${v.nb_drop > 1 ? 's' : ''}` : '',
+    fmtPeriod(v.periode_debut, v.periode_fin),
+    v.montant_total_eur != null ? fmtEur(v.montant_total_eur) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-      {version.statut === 'archivee' && (
-        <Banner tone="info" title="Version archivée">
-          Cet import est archivé depuis le {fmtDateTime(version.archivee_le)} : consultation en lecture seule, il n'est plus
-          retenu par défaut par l'analyse.
-        </Banner>
-      )}
-      {purged ? (
-        <Banner tone="warning" title="Version purgée">
-          Les écritures de cet import ont été définitivement supprimées le {fmtDateTime(version.purgee_le)}.
-        </Banner>
-      ) : (
-        <>
-          {facetsQ.error ? <ErrorAlert error={facetsQ.error} title="Filtres indisponibles" /> : null}
-          <EntriesFilters
-            facets={facetsQ.data}
-            facetsLoading={facetsQ.isLoading}
-            filters={filters}
-            onChange={patchFilters}
-            onReset={() => {
-              setFilters(EMPTY_FILTERS);
-              setQ('');
-              setPage(1);
-            }}
-            q={q}
-            onQChange={(v) => {
-              setQ(v);
-              setPage(1);
-            }}
-            searchDescription={searchDescription}
-            onSearchDescriptionChange={(v) => {
-              setSearchDescription(v);
-              setPage(1);
-            }}
-            maskSensitive={maskSensitive}
-            onMaskSensitiveChange={setMaskSensitive}
+  const lifecycleEntries = lc.menuEntries(v);
+  const menu: MenuEntry[] = [
+    ...(!purged
+      ? [
+          {
+            label: 'Exporter les écritures filtrées (CSV)',
+            icon: <IconDownload size={15} />,
+            onSelect: () => download(realiseApi.entriesCsvUrl(versionId, baseQuery)),
+          },
+          { type: 'separator' as const },
+          {
+            label: 'Masquer les colonnes sensibles',
+            checked: maskSensitive,
+            onSelect: () => setMaskSensitive((m) => !m),
+          },
+          { label: 'Colonnes…', icon: <IconColumns size={15} />, onSelect: () => setColumnsOpen(true) },
+        ]
+      : []),
+    ...(lifecycleEntries.length && !purged ? [{ type: 'separator' as const }] : []),
+    ...lifecycleEntries,
+  ];
+
+  const infoOpen = panel?.type === 'info';
+  const selected = panel?.type === 'entry' ? panel.entry : null;
+  const cats = Object.entries(data?.totals?.par_categorie ?? {}).sort((a, b) => b[1] - a[1]);
+
+  const inspector = infoOpen ? (
+    <VersionInfoInspector version={v} opened onClose={() => setPanel(null)} lifecycle={lc}>
+      {cats.length > 0 && (
+        <InspectorSection title="Lignes par catégorie (filtre courant)">
+          <KeyValue
+            items={cats.map(([cat, n]) => ({ label: cat || '(vide)', value: fmtNumber(n), numeric: true }))}
           />
+        </InspectorSection>
+      )}
+    </VersionInfoInspector>
+  ) : (
+    <EntryInspector entry={selected} onClose={() => setPanel(null)} maskSensitive={maskSensitive} />
+  );
 
-          <Group justify="between" gap={8}>
-            <Group gap={8}>
-              <Text weight={600} tabular>
-                {data ? `${fmtNumber(data.total)} écriture${data.total > 1 ? 's' : ''}` : '…'}
-              </Text>
-              {entriesQ.isFetching && <Spinner size={12} />}
-            </Group>
-            <Group gap={8}>
-              <ColumnPicker visible={visible} onChange={setVisible} maskSensitive={maskSensitive} />
-              <Select
-                aria-label="Lignes par page"
-                data={PAGE_SIZES.map((v) => ({ value: v, label: `${v} / page` }))}
-                value={String(pageSize) as (typeof PAGE_SIZES)[number]}
-                onChange={(v) => {
-                  if (!v) return;
-                  setPageSize(Number(v));
+  return (
+    <Page
+      wide
+      inspector={inspector}
+      toolbar={
+        <PageToolbar
+          back={BACK}
+          title={v.intitule}
+          accessory={<StatusBadge statut={v.statut} />}
+          subtitle={subtitle}
+          actions={
+            <IconButton
+              label="Infos"
+              aria-pressed={infoOpen}
+              onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
+            >
+              <IconInfo size={16} />
+            </IconButton>
+          }
+          menu={menu.length ? menu : undefined}
+          bottom={
+            purged ? undefined : (
+              <EntriesFilters
+                facets={facetsQ.data}
+                filters={filters}
+                onChange={patchFilters}
+                q={q}
+                onQChange={(val) => {
+                  setQ(val);
                   setPage(1);
                 }}
+                searchDescription={searchDescription}
+                onSearchDescriptionChange={(val) => {
+                  setSearchDescription(val);
+                  setPage(1);
+                }}
+                nbWarn={v.nb_warn}
               />
-              <Button icon={<IconDownload size={15} />} onClick={() => download(realiseApi.entriesCsvUrl(versionId, baseQuery))}>
-                Export CSV
-              </Button>
-            </Group>
-          </Group>
-
+            )
+          }
+        />
+      }
+    >
+      {purged ? (
+        <Card>
+          <EmptyState title="Import purgé">
+            Ses écritures ont été définitivement supprimées{v.purgee_le ? ` le ${fmtDateTime(v.purgee_le)}` : ''}.
+          </EmptyState>
+        </Card>
+      ) : (
+        <Stack gap={12}>
+          {facetsQ.error ? <ErrorAlert error={facetsQ.error} title="Filtres indisponibles" /> : null}
           {entriesQ.error ? <ErrorAlert error={entriesQ.error} title="Impossible de charger les écritures" /> : null}
 
           <EntriesTable
@@ -221,137 +292,98 @@ export default function RealiseDetail() {
             stale={entriesQ.isPlaceholderData}
             sort={sort}
             onSort={toggleSort}
+            selectedId={selected?.id ?? null}
+            onSelect={(entry) => setPanel({ type: 'entry', entry })}
           />
 
-          {data && totalPages > 1 && <Pagination page={page} total={totalPages} onChange={setPage} />}
-
-          {data && <TotalsFooter data={data} />}
-        </>
+          {data && data.total > 0 && (
+            <div className="realise-foot">
+              <Pagination
+                page={Math.min(page, totalPages)}
+                total={totalPages}
+                onChange={setPage}
+                summary={`${fmtNumber((page - 1) * pageSize + 1)}–${fmtNumber(Math.min(page * pageSize, data.total))} sur ${plural(data.total, 'écriture')}`}
+              />
+              <Select
+                aria-label="Lignes par page"
+                data={PAGE_SIZES.map((s) => ({ value: s, label: `${s} / page` }))}
+                value={String(pageSize) as (typeof PAGE_SIZES)[number]}
+                onChange={(s) => {
+                  if (!s) return;
+                  setPageSize(Number(s));
+                  setPage(1);
+                }}
+              />
+            </div>
+          )}
+        </Stack>
       )}
-    </Stack>
+
+      <ColumnsModal
+        opened={columnsOpen}
+        onClose={() => setColumnsOpen(false)}
+        visible={visible}
+        onChange={setVisible}
+        maskSensitive={maskSensitive}
+      />
+      {lc.modals}
+    </Page>
   );
 }
 
 // ------------------------------------------------------------------ sous-composants
 
-function BackLink() {
-  return (
-    <Link to="/realise">
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <IconArrowLeft size={15} />
-        Retour aux imports
-      </span>
-    </Link>
-  );
-}
-
-/** Statistique de l'en-tête : libellé secondaire, valeur ; glyphe optionnel avant le libellé. */
-function Stat({ label, glyph, children }: { label: string; glyph?: ReactNode; children: ReactNode }) {
-  return (
-    <div>
-      <Group gap={4} wrap={false}>
-        {glyph}
-        <Text size="sm" tone="secondary">
-          {label}
-        </Text>
-      </Group>
-      <Text as="div" weight={500} tabular>
-        {children}
-      </Text>
-    </div>
-  );
-}
-
-function VersionHeader({ version: v }: { version: Version }) {
-  return (
-    <Stack gap={8}>
-      <BackLink />
-      <Group gap={12} align="baseline">
-        <Title order={2}>{v.intitule}</Title>
-        {v.source_format && <Text tone="secondary">format {v.source_format}</Text>}
-        <StatusBadge statut={v.statut} />
-      </Group>
-      <Card>
-        <Group gap={24} align="start">
-          <Stat label="Période couverte">{fmtPeriod(v.periode_debut, v.periode_fin)}</Stat>
-          <Stat label="Montant total">{fmtEur(v.montant_total_eur)}</Stat>
-          <Stat label="Lignes">{fmtNumber(v.nb_lignes)}</Stat>
-          <Stat label="Avertissements" glyph={v.nb_warn ? <StatusGlyph kind="warning" tone="warning" size={12} /> : undefined}>
-            {fmtNumber(v.nb_warn)}
-          </Stat>
-          <Stat label="Rejets" glyph={v.nb_drop ? <StatusGlyph kind="danger" tone="danger" size={12} /> : undefined}>
-            {fmtNumber(v.nb_drop)}
-          </Stat>
-          <Stat label="Importé le">
-            {fmtDateTime(v.importee_le)}
-            {v.importeur ? ` par ${v.importeur}` : ''}
-          </Stat>
-          {v.filename && (
-            <Stat label="Fichier">
-              <Text as="span" truncate title={v.filename} style={{ display: 'inline-block', maxWidth: 260, verticalAlign: 'bottom' }}>
-                {v.filename}
-              </Text>
-            </Stat>
-          )}
-        </Group>
-      </Card>
-    </Stack>
-  );
-}
-
-function ColumnPicker({
+function ColumnsModal({
+  opened,
+  onClose,
   visible,
   onChange,
   maskSensitive,
 }: {
+  opened: boolean;
+  onClose: () => void;
   visible: string[];
   onChange: (v: string[]) => void;
   maskSensitive: boolean;
 }) {
-  const shown = COLUMNS.filter((c) => visible.includes(c.key) && !(maskSensitive && c.sensitive)).length;
   const toggle = (key: string, on: boolean) => onChange(on ? [...visible, key] : visible.filter((k) => k !== key));
   return (
-    <Popover
-      placement="bottom-end"
-      width={260}
-      target={(p) => (
-        <Button {...p} icon={<IconColumns size={15} />}>
-          Colonnes ({shown}/{COLUMNS.length})
-        </Button>
-      )}
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Colonnes affichées"
+      subtitle={maskSensitive ? 'Colonnes sensibles masquées (menu ⋯).' : undefined}
+      size="sm"
+      footer={
+        <>
+          <Button variant="plain" onClick={() => onChange(DEFAULT_VISIBLE)}>
+            Par défaut
+          </Button>
+          <Button variant="plain" onClick={() => onChange(COLUMNS.map((c) => c.key))}>
+            Toutes
+          </Button>
+          <Button variant="primary" onClick={onClose}>
+            OK
+          </Button>
+        </>
+      }
     >
-      <Text size="sm" weight={600} tone="secondary">
-        Colonnes affichées
-      </Text>
-      <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
-        <Stack gap={6}>
-          {COLUMNS.map((c) => (
-            <Checkbox
-              key={c.key}
-              checked={visible.includes(c.key)}
-              onChange={(on) => toggle(c.key, on)}
-              label={c.sensitive ? `${c.label} (sensible)` : c.label}
-              disabled={maskSensitive && c.sensitive}
-            />
-          ))}
-        </Stack>
+      <div className="realise-columns">
+        {COLUMNS.map((c) => (
+          <Checkbox
+            key={c.key}
+            checked={visible.includes(c.key)}
+            onChange={(on) => toggle(c.key, on)}
+            label={c.sensitive ? `${c.label} (sensible)` : c.label}
+            disabled={maskSensitive && c.sensitive}
+          />
+        ))}
       </div>
-      <Group mt={8} gap={4}>
-        <Button size="sm" variant="plain" onClick={() => onChange(DEFAULT_VISIBLE)}>
-          Par défaut
-        </Button>
-        <Button size="sm" variant="plain" onClick={() => onChange(COLUMNS.map((c) => c.key))}>
-          Toutes
-        </Button>
-      </Group>
-      {maskSensitive && (
-        <Text size="sm" tone="secondary" mt={6}>
-          Désactivez « Masquer les colonnes sensibles » pour afficher les colonnes sensibles.
-        </Text>
-      )}
-    </Popover>
+    </Modal>
   );
 }
+
+const TOTAL_KEYS = ['quantite', 'total_eur'];
 
 function EntriesTable({
   columns,
@@ -360,6 +392,8 @@ function EntriesTable({
   stale,
   sort,
   onSort,
+  selectedId,
+  onSelect,
 }: {
   columns: EntryColumn[];
   data: RealiseEntriesPage | undefined;
@@ -367,109 +401,102 @@ function EntriesTable({
   stale: boolean;
   sort: { field: SortField; order: 'asc' | 'desc' };
   onSort: (f: SortField) => void;
+  selectedId: number | null;
+  onSelect: (e: RealiseEntry) => void;
 }) {
-  return (
-    // Données précédentes atténuées pendant le chargement de la page suivante.
-    <div style={{ opacity: stale ? 0.6 : 1, transition: 'opacity 120ms' }}>
-      <Table striped hover minWidth={Math.max(720, columns.length * 110)}>
-        <thead>
-          <tr>
-            {columns.map((c) =>
-              c.sort ? (
-                <SortHeader
-                  key={c.key}
-                  active={sort.field === c.sort}
-                  dir={sort.order}
-                  onSort={() => onSort(c.sort as SortField)}
-                  align={c.align}
-                >
-                  {c.label}
-                </SortHeader>
-              ) : (
-                <th key={c.key} data-align={c.align} data-nowrap>
-                  {c.label}
-                </th>
-              ),
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            <tr>
-              <td colSpan={columns.length}>
-                <SkeletonRows rows={5} />
-              </td>
-            </tr>
-          ) : !data || data.items.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length}>
-                <EmptyState icon={<IconSearch size={40} />} title="Aucune écriture ne correspond aux filtres." />
-              </td>
-            </tr>
-          ) : (
-            data.items.map((e) => (
-              <tr key={e.id} data-muted={e.statut_parsing === 'drop' || undefined}>
-                {columns.map((c) => (
-                  <td key={c.key} data-align={c.align} data-nowrap={c.nowrap || undefined} data-mono={c.mono || undefined}>
-                    {c.render(e)}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
-    </div>
-  );
-}
+  const span = columns.length + 1;
+  // Pied : libellé sur la cellule glyphe + les colonnes précédant la première colonne totalisée.
+  const firstTotal = columns.findIndex((c) => TOTAL_KEYS.includes(c.key));
+  const labelSpan = firstTotal < 0 ? span : firstTotal + 1;
+  const totalCell = (c: EntryColumn) => {
+    if (!data) return null;
+    if (c.key === 'quantite') return fmtNumber(data.totals?.quantite);
+    if (c.key === 'total_eur') return fmtEur(data.totals?.total_eur ?? 0, true);
+    return null;
+  };
 
-function TotalsFooter({ data }: { data: RealiseEntriesPage }) {
-  const cats = Object.entries(data.totals?.par_categorie ?? {}).sort((a, b) => b[1] - a[1]);
-  const totalEur = data.totals?.total_eur ?? 0;
   return (
-    <Card role="region" aria-label="Totaux du filtre courant" style={{ position: 'sticky', bottom: 0, zIndex: 5 }}>
-      <Group gap={24} align="start">
-        <div>
-          <Text size="sm" tone="secondary">
-            Σ Quantité
-          </Text>
-          <Text weight={600} tabular>
-            {fmtNumber(data.totals?.quantite)}
-          </Text>
-        </div>
-        <div>
-          <Text size="sm" tone="secondary">
-            Σ Total €
-          </Text>
-          <Text weight={600} tabular>
-            {fmtEur(totalEur, true)}
-          </Text>
-        </div>
-        <div>
-          <Text size="sm" tone="secondary">
-            Écritures
-          </Text>
-          <Text weight={600} tabular>
-            {fmtNumber(data.total)}
-          </Text>
-        </div>
-        <div style={{ flex: '1 1 300px' }}>
-          <Text size="sm" tone="secondary" mb={4}>
-            Lignes par catégorie
-          </Text>
-          <Group gap={6}>
-            {cats.length === 0 ? (
-              <Text tone="secondary">—</Text>
+    <Table
+      striped
+      className="realise-table"
+      minWidth={Math.max(640, columns.length * 120)}
+      style={{ opacity: stale ? 0.6 : 1, transition: 'opacity 120ms' }}
+    >
+      <thead>
+        <tr>
+          <th data-glyph>
+            <VisuallyHidden>Contrôle</VisuallyHidden>
+          </th>
+          {columns.map((c) =>
+            c.sort ? (
+              <SortHeader
+                key={c.key}
+                active={sort.field === c.sort}
+                dir={sort.order}
+                onSort={() => onSort(c.sort as SortField)}
+                align={c.align}
+              >
+                {c.label}
+              </SortHeader>
             ) : (
-              cats.map(([cat, n]) => (
-                <Pill key={cat || '_'}>
-                  {cat || '(vide)'} : {fmtNumber(n)}
-                </Pill>
-              ))
-            )}
-          </Group>
-        </div>
-      </Group>
-    </Card>
+              <th key={c.key} data-align={c.align}>
+                {c.label}
+              </th>
+            ),
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {loading ? (
+          <tr>
+            <td colSpan={span}>
+              <SkeletonRows rows={5} />
+            </td>
+          </tr>
+        ) : !data || data.items.length === 0 ? (
+          <tr>
+            <td colSpan={span}>
+              <EmptyState icon={<IconSearch size={40} />} title="Aucune écriture">
+                Aucune écriture ne correspond aux filtres.
+              </EmptyState>
+            </td>
+          </tr>
+        ) : (
+          data.items.map((e) => (
+            <tr
+              key={e.id}
+              data-tone={e.statut_parsing === 'warn' ? 'warning' : e.statut_parsing === 'drop' ? 'danger' : undefined}
+              data-clickable
+              data-selected={selectedId === e.id || undefined}
+              onClick={() => onSelect(e)}
+            >
+              <td data-glyph>
+                <EntryGlyph entry={e} />
+              </td>
+              {columns.map((c) => (
+                <td key={c.key} data-align={c.align} data-nowrap data-mono={c.mono || undefined}>
+                  {c.render(e)}
+                </td>
+              ))}
+            </tr>
+          ))
+        )}
+      </tbody>
+      {data && data.total > 0 && (
+        <tfoot>
+          <tr>
+            <td colSpan={labelSpan} data-nowrap>
+              Total · {plural(data.total, 'écriture')}
+            </td>
+            {firstTotal >= 0 &&
+              columns.slice(firstTotal).map((c) => (
+                <td key={c.key} data-align={c.align} data-nowrap>
+                  {totalCell(c)}
+                </td>
+              ))}
+          </tr>
+        </tfoot>
+      )}
+    </Table>
   );
 }

@@ -1,5 +1,6 @@
-// Formulaire des paramètres métier (GET/PUT /settings) — état React simple, sans bibliothèque de formulaire.
-import { useState, type ReactNode } from 'react';
+// Paramètres métier (GET/PUT /settings), façon Réglages macOS : listes groupées, une colonne de 720 px.
+// État React simple, sans bibliothèque de formulaire ; barre d'enregistrement visible seulement si modifié.
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { settingsApi } from '../../api/client';
 import type { Settings } from '../../api/types';
@@ -7,22 +8,23 @@ import ErrorAlert from '../../components/ErrorAlert';
 import {
   Banner,
   Button,
-  Card,
-  Grid,
-  Group,
+  GroupedList,
+  ListRow,
   LoadingBlock,
   Menu,
+  Modal,
   NumberInput,
+  Page,
   Stack,
-  Tag,
   TagsInput,
   Text,
-  Title,
   toast,
 } from '../../ui';
-import { IconChevronDown, IconSave, IconUndo } from '../../ui/Icons';
+import { IconChevronDown } from '../../ui/Icons';
 import { qk } from '../../lib/queryKeys';
 import HolidaysEditor from './HolidaysEditor';
+import ReglagesToolbar from './ReglagesToolbar';
+import './reglages.css';
 
 type NumKey = {
   [K in keyof Settings]: Settings[K] extends number ? K : never;
@@ -51,8 +53,20 @@ const SECTIONS: Section[] = [
     title: "Seuils d'écart",
     description: 'Écart = heures réelles − heures prévues, par ressource × CT × semaine.',
     fields: [
-      { key: 'seuil_sur_imputation_h', label: 'Sur-imputation', unit: 'h', min: 0, description: 'Flag « sur-imputation » si écart > +seuil' },
-      { key: 'seuil_sous_imputation_h', label: 'Sous-imputation', unit: 'h', min: 0, description: 'Flag « sous-imputation » si écart < −seuil' },
+      {
+        key: 'seuil_sur_imputation_h',
+        label: 'Sur-imputation',
+        unit: 'h',
+        min: 0,
+        description: 'Flag « sur-imputation » si écart > +seuil',
+      },
+      {
+        key: 'seuil_sous_imputation_h',
+        label: 'Sous-imputation',
+        unit: 'h',
+        min: 0,
+        description: 'Flag « sous-imputation » si écart < −seuil',
+      },
       {
         key: 'diviseur_hors_plan_h',
         label: 'Diviseur hors plan',
@@ -66,7 +80,13 @@ const SECTIONS: Section[] = [
   {
     title: 'Budget & alertes',
     fields: [
-      { key: 'seuil_ct_risque_eur', label: 'CT à risque', unit: '€', min: 0, description: 'CT à risque si Σ € non sécurisé > seuil' },
+      {
+        key: 'seuil_ct_risque_eur',
+        label: 'CT à risque',
+        unit: '€',
+        min: 0,
+        description: 'CT à risque si Σ € non sécurisé > seuil',
+      },
       {
         key: 'seuil_non_securise_pct',
         label: 'Part non sécurisée',
@@ -75,7 +95,13 @@ const SECTIONS: Section[] = [
         max: 100,
         description: 'Alerte globale si % non sécurisé > seuil',
       },
-      { key: 'seuil_ecart_tg_eur', label: 'Écart par TG', unit: '€', min: 0, description: 'Contrôle qualité : |Σ € réalisé − Σ PPS plan| par TG' },
+      {
+        key: 'seuil_ecart_tg_eur',
+        label: 'Écart par TG',
+        unit: '€',
+        min: 0,
+        description: 'Contrôle qualité : |Σ € réalisé − Σ PPS plan| par TG',
+      },
     ],
   },
   {
@@ -145,20 +171,18 @@ function fieldError(f: NumField, v: number): string | undefined {
 
 const dedupe = (xs: string[]) => Array.from(new Set(xs.map((x) => x.trim()).filter(Boolean)));
 
-function SectionCard({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    <Card as="section" aria-label={title}>
-      <Title order={3}>{title}</Title>
-      {description && (
-        <Text size="sm" tone="secondary" mt={2}>
-          {description}
-        </Text>
-      )}
-      <Stack gap={12} mt={12}>
-        {children}
-      </Stack>
-    </Card>
-  );
+/** Résumé d'une liste pour la ligne : « 2 semaines : S51, S52 » (tronqué au-delà de `max` éléments). */
+function summarize(items: string[], unit: [string, string], empty: string, max = 4): string {
+  if (items.length === 0) return empty;
+  const head = items.slice(0, max).join(', ') + (items.length > max ? '…' : '');
+  return `${items.length} ${items.length > 1 ? unit[1] : unit[0]} : ${head}`;
+}
+
+/** Résumé des jours fériés : nombre et années couvertes. */
+function holidaysSummary(dates: string[]): string {
+  if (dates.length === 0) return 'Aucun';
+  const years = Array.from(new Set(dates.map((d) => d.slice(0, 4)))).sort();
+  return `${dates.length} jour${dates.length > 1 ? 's' : ''} · ${years.join(', ')}`;
 }
 
 /**
@@ -179,8 +203,8 @@ function TypeListInput({
   const known = TYPE_SUGGESTIONS.filter((t) => !value.includes(t)).length;
   return (
     <Stack gap={4}>
-      <TagsInput label={label} description={description} value={value} onChange={onChange} />
-      <Group gap={4}>
+      <TagsInput aria-label={label} description={description} value={value} onChange={onChange} />
+      <div className="reglages-inline">
         <Menu
           width={290}
           target={(p) => (
@@ -202,8 +226,41 @@ function TypeListInput({
             Vider
           </Button>
         )}
-      </Group>
+      </div>
     </Stack>
+  );
+}
+
+const FORM_ID = 'reglages-form';
+
+/** Éditeurs de liste ouverts en fenêtre depuis leur ligne. */
+type ListEditor = 'weeks' | 'holidays' | 'mo_types' | 'securise' | 'non_securise';
+
+const TYPE_LISTS: { key: 'mo_types' | 'securise' | 'non_securise'; label: string; description?: string }[] = [
+  {
+    key: 'mo_types',
+    label: "Types main d'œuvre (heures)",
+    description: "QUANTITE comptée en heures si TYPE ∈ liste et CATEGORIE = MAIN D'OEUVRE",
+  },
+  { key: 'securise', label: 'Types sécurisés' },
+  { key: 'non_securise', label: 'Types non sécurisés' },
+];
+
+const EDITOR_TITLE: Record<ListEditor, string> = {
+  weeks: 'Semaines ISO verrouillées',
+  holidays: 'Jours fériés',
+  mo_types: "Types main d'œuvre (heures)",
+  securise: 'Types sécurisés',
+  non_securise: 'Types non sécurisés',
+};
+
+/** Ligne de réglage dont la description cède la place à l'erreur de validation. */
+function rowDescription(description: string | undefined, error: string | null | undefined) {
+  if (!error) return description;
+  return (
+    <Text as="span" size="sm" tone="danger">
+      {error}
+    </Text>
   );
 }
 
@@ -212,6 +269,7 @@ export default function SettingsForm() {
   const settingsQ = useQuery({ queryKey: qk.settings(), queryFn: settingsApi.get });
   const [draft, setDraft] = useState<Settings | null>(null);
   const [weekError, setWeekError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<ListEditor | null>(null);
 
   const saved = settingsQ.data;
   const current = draft ?? saved;
@@ -233,9 +291,23 @@ export default function SettingsForm() {
     },
   });
 
-  if (settingsQ.isLoading) return <LoadingBlock />;
+  const toolbar = <ReglagesToolbar />;
+
+  if (settingsQ.isLoading)
+    return (
+      <Page toolbar={toolbar}>
+        <LoadingBlock />
+      </Page>
+    );
   if (settingsQ.error || !current) {
-    return <ErrorAlert error={settingsQ.error ?? new Error('Paramètres indisponibles')} title="Impossible de charger les paramètres" />;
+    return (
+      <Page toolbar={toolbar}>
+        <ErrorAlert
+          error={settingsQ.error ?? new Error('Paramètres indisponibles')}
+          title="Impossible de charger les paramètres"
+        />
+      </Page>
+    );
   }
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft({ ...current, [key]: value });
@@ -254,111 +326,158 @@ export default function SettingsForm() {
     set('semaines_verrouillees', weeks);
   };
 
+  const reset = () => {
+    setDraft(null);
+    setWeekError(null);
+  };
+
   return (
-    // noValidate : la validation est faite ici (fieldError), pas par le navigateur (pas de blocage sur `step`).
-    <form
-      noValidate
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (dirty && !invalid) save.mutate(current);
-      }}
-    >
-      <Stack gap={12}>
-        <Grid cols={{ base: 1, md: 2 }} gap={12}>
+    <Page toolbar={toolbar}>
+      <div className="reglages-form">
+        {/* noValidate : la validation est faite ici (fieldError), pas par le navigateur (pas de blocage sur `step`).
+            Le formulaire ne contient que les champs (Entrée enregistre) ; les lignes de liste restent hors formulaire. */}
+        <form
+          id={FORM_ID}
+          noValidate
+          className="reglages-fields"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (dirty && !invalid) save.mutate(current);
+          }}
+        >
           {SECTIONS.map((s) => (
-            <SectionCard key={s.title} title={s.title} description={s.description}>
+            <GroupedList key={s.title} title={s.title} footer={s.description}>
               {s.fields.map((f) => {
                 const v = current[f.key];
+                const id = `reglage-${f.key}`;
                 return (
-                  <NumberInput
+                  <ListRow
                     key={f.key}
                     label={f.label}
-                    description={f.description}
-                    suffix={f.unit}
-                    value={Number.isNaN(v) ? null : v}
-                    onChange={(x) => set(f.key, x ?? NaN)}
-                    error={fieldError(f, v)}
-                    min={f.minExclusive ? undefined : f.min}
-                    max={f.max}
-                    step={f.integer ? 1 : undefined}
-                    required
+                    htmlFor={id}
+                    description={rowDescription(f.description, fieldError(f, v))}
+                    control={
+                      <NumberInput
+                        id={id}
+                        width={140}
+                        suffix={f.unit}
+                        value={Number.isNaN(v) ? null : v}
+                        onChange={(x) => set(f.key, x ?? NaN)}
+                        min={f.minExclusive ? undefined : f.min}
+                        max={f.max}
+                        step={f.integer ? 1 : undefined}
+                        required
+                      />
+                    }
                   />
                 );
               })}
-            </SectionCard>
+            </GroupedList>
           ))}
+        </form>
 
-          <SectionCard title="Calendrier" description="Utilisé pour répartir la charge du plan par semaine ISO (jours ouvrés).">
-            <TagsInput
-              label="Semaines ISO verrouillées"
-              description="Aucune charge prévue ; tout réalisé imputé dessus est « hors plan ». Saisir un numéro (1 à 53) puis Entrée."
-              placeholder="ex. 51"
-              value={current.semaines_verrouillees.map(String)}
-              onChange={onWeeksChange}
-              splitChars={[',', ' ', ';']}
-              error={weekError}
-            />
-            <HolidaysEditor value={current.jours_feries} onChange={(v) => set('jours_feries', v)} />
-          </SectionCard>
+        <GroupedList title="Calendrier" footer="Utilisé pour répartir la charge du plan par semaine ISO (jours ouvrés).">
+          <ListRow
+            label="Semaines ISO verrouillées"
+            description={rowDescription('Aucune charge prévue ; tout réalisé imputé dessus est « hors plan »', weekError)}
+            value={
+              <span className="reglages-summary">
+                {summarize(
+                  current.semaines_verrouillees.map((w) => `S${w}`),
+                  ['semaine', 'semaines'],
+                  'Aucune',
+                )}
+              </span>
+            }
+            onClick={() => setEditor('weeks')}
+          />
+          <ListRow
+            label="Jours fériés"
+            description="Exclus des jours ouvrés"
+            value={<span className="reglages-summary">{holidaysSummary(current.jours_feries)}</span>}
+            onClick={() => setEditor('holidays')}
+          />
+        </GroupedList>
 
-          <SectionCard
+        <Stack gap={8}>
+          <GroupedList
             title="Classification"
-            description="Valeurs du champ TYPE du réalisé. Les suggestions reprennent les types connus ; toute autre valeur peut être saisie."
+            footer="Valeurs du champ TYPE du réalisé. Les suggestions reprennent les types connus ; toute autre valeur peut être saisie."
           >
-            <TypeListInput
-              label="Types main d'œuvre (heures)"
-              description="QUANTITE comptée en heures si TYPE ∈ liste et CATEGORIE = MAIN D'OEUVRE"
-              value={current.mo_types}
-              onChange={(v) => set('mo_types', dedupe(v))}
-            />
-            <TypeListInput label="Types sécurisés" value={current.securise} onChange={(v) => set('securise', dedupe(v))} />
-            <TypeListInput label="Types non sécurisés" value={current.non_securise} onChange={(v) => set('non_securise', dedupe(v))} />
-            {overlap.length > 0 && (
-              <Banner tone="warning" compact>
-                Présent dans les deux listes : {overlap.join(', ')}
-              </Banner>
-            )}
-          </SectionCard>
-        </Grid>
+            {TYPE_LISTS.map((t) => (
+              <ListRow
+                key={t.key}
+                label={t.label}
+                value={<span className="reglages-summary">{summarize(current[t.key], ['type', 'types'], 'Aucun', 2)}</span>}
+                onClick={() => setEditor(t.key)}
+              />
+            ))}
+          </GroupedList>
+          {overlap.length > 0 && (
+            <Banner tone="warning" compact>
+              Présent dans les deux listes : {overlap.join(', ')}
+            </Banner>
+          )}
+        </Stack>
 
-        {/* Barre d'action collante en bas */}
-        <Card
-          padding={12}
-          role="region"
-          aria-label="Enregistrement des paramètres"
-          style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
-        >
-          <Group justify="between" gap={8}>
-            <Group gap={12}>
-              {dirty ? (
-                <Tag tone="warning">Modifications non enregistrées</Tag>
-              ) : (
-                <Text tone="secondary">Aucune modification</Text>
-              )}
-              {invalid && (
-                <Text tone="danger">
-                  {errors.length} champ{errors.length > 1 ? 's' : ''} invalide{errors.length > 1 ? 's' : ''}
-                </Text>
-              )}
-            </Group>
-            <Group gap={8}>
-              <Button
-                icon={<IconUndo size={15} />}
-                disabled={!draft || save.isPending}
-                onClick={() => {
-                  setDraft(null);
-                  setWeekError(null);
-                }}
-              >
-                Réinitialiser les modifications
+        {/* Barre d'enregistrement : collante, seulement en cas de modification. */}
+        {dirty && (
+          <div className="reglages-savebar" role="region" aria-label="Enregistrement des paramètres">
+            <Text as="span" size="sm" tone="secondary">
+              Modifications non enregistrées
+            </Text>
+            {invalid && (
+              <Text as="span" size="sm" tone="danger">
+                {errors.length} champ{errors.length > 1 ? 's' : ''} invalide{errors.length > 1 ? 's' : ''}
+              </Text>
+            )}
+            <span className="reglages-savebar__actions">
+              <Button disabled={save.isPending} onClick={reset}>
+                Annuler
               </Button>
-              <Button type="submit" variant="primary" icon={<IconSave size={15} />} disabled={!dirty || invalid} loading={save.isPending}>
+              <Button type="submit" form={FORM_ID} variant="primary" disabled={invalid} loading={save.isPending}>
                 Enregistrer
               </Button>
-            </Group>
-          </Group>
-        </Card>
-      </Stack>
-    </form>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        opened={editor !== null}
+        onClose={() => setEditor(null)}
+        title={editor ? EDITOR_TITLE[editor] : undefined}
+        size="md"
+        footer={
+          <Button variant="primary" onClick={() => setEditor(null)}>
+            OK
+          </Button>
+        }
+      >
+        {editor === 'weeks' && (
+          <TagsInput
+            aria-label="Semaines ISO verrouillées"
+            description="Aucune charge prévue ; tout réalisé imputé dessus est « hors plan ». Saisir un numéro (1 à 53) puis Entrée."
+            placeholder="ex. 51"
+            value={current.semaines_verrouillees.map(String)}
+            onChange={onWeeksChange}
+            splitChars={[',', ' ', ';']}
+            error={weekError}
+          />
+        )}
+        {editor === 'holidays' && (
+          <HolidaysEditor label={null} value={current.jours_feries} onChange={(v) => set('jours_feries', v)} />
+        )}
+        {TYPE_LISTS.filter((t) => t.key === editor).map((t) => (
+          <TypeListInput
+            key={t.key}
+            label={t.label}
+            description={t.description}
+            value={current[t.key]}
+            onChange={(v) => set(t.key, dedupe(v))}
+          />
+        ))}
+      </Modal>
+    </Page>
   );
 }

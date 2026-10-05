@@ -356,6 +356,9 @@ export interface AnalyseResult {
   };
   qualite: QualiteWarning[];
   correspondances: Correspondance[];
+  previsions: Previsions;
+  /** Tri : gravité desc, catégorie, montant/heures desc ; statut fusionné avec le suivi enregistré. */
+  anomalies: Anomalie[];
 }
 
 export interface AnalyseParams {
@@ -368,4 +371,90 @@ export interface AnalyseParams {
 
 export interface ApiErrorBody {
   error: { code: string; message: string };
+}
+
+// ------------------------------------------------------------------ Prévisions (SPEC_analyse §7.7)
+export interface PrevisionPoint {
+  week: string;
+  debut: string;
+  budget_cumul: number;
+  reel_cumul: number | null;
+  plan_cumul: number | null;
+  tendance_cumul: number | null;
+  heures_plan: number;
+  heures_reel: number | null;
+}
+
+export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
+
+export interface PrevisionCT {
+  ct: string;
+  ct_libelle: string;
+  budget: number;
+  consomme: number;
+  pct_consomme: number | null;
+  reste_a_faire: number;
+  atterrissage_plan: number;
+  atterrissage_tendance: number;
+  ecart_plan: number;
+  ecart_tendance: number;
+  rythme_hebdo: number;
+  semaines_restantes: number;
+  fin_plan: string;
+  statut: PrevisionStatut;
+  series: PrevisionPoint[];
+}
+
+export interface Previsions {
+  as_of: string;
+  as_of_week: string;
+  global: PrevisionCT;
+  par_ct: PrevisionCT[];
+}
+
+// ------------------------------------------------------------------ Anomalies (SPEC_analyse §7.8)
+export type AnomalieCategorie = 'ecart' | 'ct_risque' | 'derive' | 'qualite' | 'correspondance' | 'budget';
+export type AnomalieStatut = 'a_traiter' | 'traitee' | 'ignoree';
+
+export interface AnomalieSuivi {
+  key: string;
+  fingerprint: string;
+  statut: Exclude<AnomalieStatut, 'a_traiter'>;
+  commentaire: string;
+  operateur: string;
+  updated_at: string;
+  /** Empreinte changée depuis le traitement : l'anomalie est revenue à traiter. */
+  obsolete: boolean;
+}
+
+export interface Anomalie {
+  key: string;
+  categorie: AnomalieCategorie;
+  /** 3 haute · 2 moyenne · 1 basse */
+  gravite: 1 | 2 | 3;
+  titre: string;
+  detail: string;
+  flag?: Flag;
+  ct?: string;
+  ct_libelle?: string;
+  ressource?: string;
+  nom_realise?: string;
+  personne_id?: string | null;
+  montant?: number | null;
+  heures?: number | null;
+  semaines?: string[];
+  details?: string[];
+  /** Route front vers les données concernées. */
+  lien: string;
+  fingerprint: string;
+  statut: AnomalieStatut;
+  suivi?: AnomalieSuivi;
+}
+
+export interface AnomalieSuiviInput {
+  key: string;
+  fingerprint: string;
+  statut: Exclude<AnomalieStatut, 'a_traiter'>;
+  commentaire: string;
+  operateur?: string;
 }

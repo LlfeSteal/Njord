@@ -1,38 +1,41 @@
-// Barre de filtres du détail d'une version de plan (§7.3) + export CSV.
+// Ligne basse de la barre d'outils du détail d'un plan : recherche, popover de critères,
+// pastilles des filtres actifs et compteur « à vérifier » (raccourci vers statut=warn).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActiveFilters,
   Button,
   DateInput,
+  Field,
+  FilterButton,
   Group,
   SearchField,
   SegmentedControl,
   Select,
-  Spinner,
-  Text,
+  Stack,
+  StatusGlyph,
   useDebouncedValue,
+  type ActiveFilter,
 } from '../../ui';
-import { IconDownload, IconFilterOff } from '../../ui/Icons';
 import type { Facets } from '../../api/types';
-import type { Filters, FiltersPatch, FilterKey } from './useLineFilters';
+import { fmtDate } from '../../lib/format';
+import { FILTER_KEYS, type FilterKey, type Filters, type FiltersPatch } from './useLineFilters';
 
 const STATUT_LABEL: Record<string, string> = {
   ok: 'OK',
-  warn: 'Avertissement (warn)',
+  warn: 'À vérifier (warn)',
   drop: 'Rejetée (drop)',
 };
 
 interface Props {
   filters: Filters;
   update: (patch: FiltersPatch) => void;
-  reset: () => void;
-  activeCount: number;
   facets: Facets | undefined;
-  facetsLoading: boolean;
   squadLabel: (id: string) => string;
-  csvHref: string;
+  /** Lignes en avertissement de la version (compteur cliquable). */
+  nbWarn: number;
 }
 
-/** Pop-up button de filtre sur une facette (le titre du bouton est le nom du filtre). */
+/** Pop-up button étiqueté sur une facette. */
 function FacetSelect({
   label,
   name,
@@ -56,29 +59,23 @@ function FacetSelect({
   }, [values, current, render]);
   return (
     <Select
-      aria-label={label}
-      placeholder={label}
+      label={label}
+      placeholder="Tous"
+      width="100%"
       data={data}
       value={current || null}
       onChange={(v) => update({ [name]: v ?? '' })}
       searchable
       clearable
       menuWidth={290}
-      nothingFound="Aucun résultat"
     />
   );
 }
 
-export default function PlanLinesFilters({
-  filters,
-  update,
-  reset,
-  activeCount,
-  facets,
-  facetsLoading,
-  squadLabel,
-  csvHref,
-}: Props) {
+/** Critères du popover (tout sauf la recherche plein-texte). */
+const CRITERIA = FILTER_KEYS.filter((k) => k !== 'q');
+
+export default function PlanLinesFilters({ filters, update, facets, squadLabel, nbWarn }: Props) {
   // Recherche plein-texte : saisie locale, écrite dans l'URL après 300 ms.
   const [qInput, setQInput] = useState(filters.q);
   const [qDebounced] = useDebouncedValue(qInput, 300);
@@ -88,7 +85,7 @@ export default function PlanLinesFilters({
     const v = qDebounced.trim();
     if (v !== latest.current.q) latest.current.update({ q: v });
   }, [qDebounced]);
-  // Réinitialisation externe (bouton, navigation) → resynchronise le champ.
+  // Réinitialisation externe (navigation) → resynchronise le champ.
   useEffect(() => {
     setQInput((cur) => (cur.trim() === filters.q ? cur : filters.q));
   }, [filters.q]);
@@ -96,92 +93,87 @@ export default function PlanLinesFilters({
   const statutValues = facets?.statut?.length ? facets.statut : ['ok', 'warn', 'drop'];
   const inactiveValue = filters.inactive === 'true' ? 'true' : filters.inactive === 'false' ? 'false' : 'all';
   const dateError =
-    filters.date_from && filters.date_to && filters.date_to < filters.date_from
-      ? 'Date de fin antérieure au début'
-      : undefined;
+    filters.date_from && filters.date_to && filters.date_to < filters.date_from ? 'Fin antérieure au début' : undefined;
   const common = { filters, update };
 
-  // Téléchargement du CSV (le kit n'expose pas de bouton-lien externe avec `download`).
-  const downloadCsv = () => {
-    const a = document.createElement('a');
-    a.href = csvHref;
-    a.download = '';
-    a.click();
-  };
+  const clearCriteria = () => update(Object.fromEntries(CRITERIA.map((k) => [k, ''])));
+  const count = CRITERIA.filter((k) => filters[k] !== '').length;
+
+  const pill = (key: FilterKey, label: string, value: string): ActiveFilter => ({
+    key,
+    label: `${label} : ${value}`,
+    onRemove: () => update({ [key]: '' }),
+  });
+  const pills: ActiveFilter[] = [];
+  if (filters.ct) pills.push(pill('ct', 'CT', filters.ct));
+  if (filters.ressource) pills.push(pill('ressource', 'Ressource', filters.ressource));
+  if (filters.ligne_cout) pills.push(pill('ligne_cout', 'Ligne de coût', filters.ligne_cout));
+  if (filters.statut) pills.push(pill('statut', 'Statut', STATUT_LABEL[filters.statut] ?? filters.statut));
+  if (filters.squad_id) pills.push(pill('squad_id', 'Squad', squadLabel(filters.squad_id)));
+  if (filters.inactive)
+    pills.push(pill('inactive', 'Ressources', filters.inactive === 'true' ? 'inactives' : 'actives'));
+  if (filters.date_from) pills.push(pill('date_from', 'Du', fmtDate(filters.date_from)));
+  if (filters.date_to) pills.push(pill('date_to', 'Au', fmtDate(filters.date_to)));
+
+  const warnOn = filters.statut === 'warn';
 
   return (
-    <Group justify="between" align="start" gap={8}>
-      <Group gap={8}>
-        <SearchField
-          aria-label="Recherche"
-          placeholder="Nom, libellé, CT, ressource…"
-          value={qInput}
-          onChange={setQInput}
-        />
-        <FacetSelect label="CT" name="ct" values={facets?.ct} {...common} />
-        <FacetSelect label="Ressource" name="ressource" values={facets?.ressource} {...common} />
-        <FacetSelect label="Ligne de coût" name="ligne_cout" values={facets?.ligne_cout} {...common} />
-        <FacetSelect
-          label="Statut parsing"
-          name="statut"
-          values={statutValues}
-          render={(v) => STATUT_LABEL[v] ?? v}
-          {...common}
-        />
-        <FacetSelect label="Squad" name="squad_id" values={facets?.squad_id} render={squadLabel} {...common} />
-        <SegmentedControl
-          aria-label="Ressources [inactif]"
-          equal={false}
-          value={inactiveValue}
-          onChange={(v) => update({ inactive: v === 'all' ? '' : v })}
-          data={[
-            { value: 'all', label: 'Toutes' },
-            { value: 'false', label: 'Actives' },
-            { value: 'true', label: 'Inactives' },
-          ]}
-        />
-        <Group gap={6} align="start" wrap={false}>
-          <Text as="span" size="sm" tone="secondary" style={{ lineHeight: '28px' }}>
-            Période du
-          </Text>
-          <DateInput
-            aria-label="Période du"
-            width={150}
-            value={filters.date_from}
-            onChange={(v) => update({ date_from: v })}
+    <Group gap={8} wrap={false} className="plan-bottom">
+      <SearchField aria-label="Recherche" placeholder="Nom, CT, ressource…" value={qInput} onChange={setQInput} />
+      <FilterButton count={count} onReset={clearCriteria}>
+        <Stack gap={12}>
+          <FacetSelect label="CT" name="ct" values={facets?.ct} {...common} />
+          <FacetSelect label="Ressource" name="ressource" values={facets?.ressource} {...common} />
+          <FacetSelect label="Ligne de coût" name="ligne_cout" values={facets?.ligne_cout} {...common} />
+          <FacetSelect label="Squad" name="squad_id" values={facets?.squad_id} render={squadLabel} {...common} />
+          <FacetSelect
+            label="Statut du parsing"
+            name="statut"
+            values={statutValues}
+            render={(v) => STATUT_LABEL[v] ?? v}
+            {...common}
           />
-          <Text as="span" size="sm" tone="secondary" style={{ lineHeight: '28px' }}>
-            au
-          </Text>
-          <DateInput
-            aria-label="au"
-            width={150}
-            value={filters.date_to}
-            error={dateError}
-            onChange={(v) => update({ date_to: v })}
-          />
-        </Group>
-        {facetsLoading && <Spinner label="Chargement des filtres" />}
+          <Field label="Ressources">
+            <SegmentedControl
+              aria-label="Ressources"
+              fullWidth
+              value={inactiveValue}
+              onChange={(v) => update({ inactive: v === 'all' ? '' : v })}
+              data={[
+                { value: 'all', label: 'Toutes' },
+                { value: 'false', label: 'Actives' },
+                { value: 'true', label: 'Inactives' },
+              ]}
+            />
+          </Field>
+          <Group gap={8} wrap={false} align="start">
+            <DateInput label="Du" value={filters.date_from} onChange={(v) => update({ date_from: v })} clearable />
+            <DateInput
+              label="Au"
+              value={filters.date_to}
+              error={dateError}
+              onChange={(v) => update({ date_to: v })}
+              clearable
+            />
+          </Group>
+        </Stack>
+      </FilterButton>
+      <div className="plan-bottom__pills">
+        <ActiveFilters items={pills} onClearAll={pills.length > 1 ? clearCriteria : undefined} />
+      </div>
+      {nbWarn > 0 && (
         <Button
           variant="plain"
-          icon={<IconFilterOff size={15} />}
-          disabled={activeCount === 0}
-          onClick={() => {
-            setQInput('');
-            reset();
-          }}
+          size="sm"
+          className="plan-bottom__warn"
+          icon={<StatusGlyph kind="warning" tone="warning" size={13} />}
+          aria-pressed={warnOn}
+          title={warnOn ? 'Afficher toutes les lignes' : 'Afficher les lignes à vérifier'}
+          onClick={() => update({ statut: warnOn ? '' : 'warn' })}
         >
-          Réinitialiser
+          {nbWarn.toLocaleString('fr-FR')} à vérifier
         </Button>
-        {activeCount > 0 && (
-          <Text as="span" size="sm" tone="secondary" tabular>
-            {activeCount} filtre{activeCount > 1 ? 's' : ''} actif{activeCount > 1 ? 's' : ''}
-          </Text>
-        )}
-      </Group>
-      <Button icon={<IconDownload size={15} />} onClick={downloadCsv}>
-        Export CSV (lignes filtrées)
-      </Button>
+      )}
     </Group>
   );
 }

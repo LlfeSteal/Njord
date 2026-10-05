@@ -1,0 +1,81 @@
+/* Réglages (paramètres, journal) : compléments de mise en page, tokens uniquement. */
+
+/* Une colonne centrée, 720 px max, façon Réglages Système. */
+.reglages-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Résumé d'une liste à droite d'une ligne (une ligne, ellipse). */
+.reglages-summary {
+  display: inline-block;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  font-variant-numeric: tabular-nums;
+}
+
+.reglages-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Barre d'enregistrement : collante en bas, matériau translucide. */
+.reglages-savebar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  border-radius: 12px;
+  background: var(--material);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--popover-shadow);
+}
+
+.reglages-savebar__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Journal : cellules à une ligne. */
+.reglages-ellipsis {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reglages-date {
+  font-variant-numeric: tabular-nums;
+}
+
+.reglages-strong {
+  font-weight: 500;
+}
+
+.reglages-muted {
+  color: var(--text-secondary);
+}
+
+.reglages-details {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Le formulaire des champs numériques ne crée pas de boîte : ses groupes suivent l'espacement de la colonne. */
+.reglages-fields {
+  display: contents;
+}

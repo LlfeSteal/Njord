@@ -53,3 +53,17 @@ export function invalidateLifecycle(qc: QueryClient, withReferentiels = false): 
 }
 
 export const errMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** « 1 ligne » / « 3 lignes » (pluriel régulier en s). */
+export const plural = (n: number, word: string) => `${n.toLocaleString('fr-FR')} ${word}${n > 1 ? 's' : ''}`;
+
+/** Intervalle de dates court : « 01/09 → 30/11/2026 » (année omise au début si identique). */
+export function fmtRange(from?: string, to?: string): string {
+  const d = (s?: string) => (s ? s.slice(0, 10).split('-') : null);
+  const a = d(from);
+  const b = d(to);
+  if (!a && !b) return '—';
+  const full = (p: string[] | null) => (p && p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : '—');
+  if (a && b && a.length === 3 && b.length === 3 && a[0] === b[0]) return `${a[2]}/${a[1]} → ${full(b)}`;
+  return `${full(a)} → ${full(b)}`;
+}

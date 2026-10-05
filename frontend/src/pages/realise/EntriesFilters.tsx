@@ -1,35 +1,60 @@
-// Barre de filtres des écritures du réalisé (SPEC_realise §6.3).
+// Ligne basse de la barre d'outils du détail du réalisé : recherche, popover de critères,
+// pastilles des filtres actifs et compteur « à vérifier » (raccourci vers statut=warn).
 import type { Facets } from '../../api/types';
-import { Button, DateInput, Group, NumberInput, SearchField, Select, Skeleton, Stack, Switch, Text, Tooltip } from '../../ui';
-import { IconFilterOff } from '../../ui/Icons';
-import { countActiveFilters, type EntriesFilterState, type FacetKey } from './filters';
+import {
+  ActiveFilters,
+  Button,
+  DateInput,
+  Disclosure,
+  FilterButton,
+  Group,
+  NumberInput,
+  SearchField,
+  Select,
+  Stack,
+  StatusGlyph,
+  Switch,
+  type ActiveFilter,
+} from '../../ui';
+import { fmtDate, fmtEur } from '../../lib/format';
+import { countActiveFilters, EMPTY_FILTERS, STATUT_LABELS, type EntriesFilterState, type FacetKey } from './filters';
+import './realise.css';
 
-/** Filtres à liste de valeurs ; `alt` = clés de facette alternatives tolérées. */
-const FACET_FILTERS: { key: FacetKey; label: string; alt?: string[] }[] = [
-  { key: 'entite', label: 'Entité' },
-  { key: 'activite', label: 'Activité' },
-  { key: 'trigramme', label: 'Trigramme' },
+interface FacetDef {
+  key: FacetKey;
+  label: string;
+  /** Clés de facette alternatives tolérées. */
+  alt?: string[];
+}
+
+/** Critères principaux, puis critères secondaires (repliés). */
+const MAIN_FACETS: FacetDef[] = [
   { key: 'tg', label: 'TG' },
   { key: 'wp', label: 'WP' },
   { key: 'categorie', label: 'Catégorie' },
   { key: 'type', label: 'Type' },
-  { key: 'lot', label: 'Lot IFRS15', alt: ['lot_ifrs15'] },
-  { key: 'statut', label: 'Statut parsing', alt: ['statut_parsing'] },
+  { key: 'statut', label: 'Statut du parsing', alt: ['statut_parsing'] },
 ];
+const MORE_FACETS: FacetDef[] = [
+  { key: 'entite', label: 'Entité' },
+  { key: 'activite', label: 'Activité' },
+  { key: 'trigramme', label: 'Trigramme' },
+  { key: 'lot', label: 'Lot IFRS15', alt: ['lot_ifrs15'] },
+];
+const ALL_FACETS = [...MAIN_FACETS, ...MORE_FACETS];
 
-const STATUT_LABELS: Record<string, string> = {
-  ok: 'OK',
-  warn: 'Avertissement (warn)',
-  drop: 'Rejetée (drop)',
-};
-
-function facetValues(facets: Facets | undefined, key: string, alt?: string[]): string[] {
-  if (!facets) return [];
-  for (const k of [key, ...(alt ?? [])]) {
-    const v = facets[k];
-    if (v && v.length) return v.filter((x) => x !== '');
+function facetValues(facets: Facets | undefined, def: FacetDef, current: string | null): string[] {
+  let values: string[] = [];
+  for (const k of [def.key, ...(def.alt ?? [])]) {
+    const v = facets?.[k];
+    if (v && v.length) {
+      values = v.filter((x) => x !== '');
+      break;
+    }
   }
-  return [];
+  if (def.key === 'statut' && values.length === 0) values = ['ok', 'warn', 'drop'];
+  if (current && !values.includes(current)) values = [current, ...values]; // valeur venue de l'URL
+  return values;
 }
 
 /** Montant du filtre (nombre ou '' = vide) → valeur du champ numérique. */
@@ -37,16 +62,14 @@ const amount = (v: number | string): number | null => (typeof v === 'number' ? v
 
 interface Props {
   facets: Facets | undefined;
-  facetsLoading: boolean;
   filters: EntriesFilterState;
   onChange: (patch: Partial<EntriesFilterState>) => void;
-  onReset: () => void;
   q: string;
   onQChange: (q: string) => void;
   searchDescription: boolean;
   onSearchDescriptionChange: (v: boolean) => void;
-  maskSensitive: boolean;
-  onMaskSensitiveChange: (v: boolean) => void;
+  /** Lignes en avertissement de l'import (compteur cliquable). */
+  nbWarn: number;
 }
 
 export default function EntriesFilters(p: Props) {
@@ -56,98 +79,115 @@ export default function EntriesFilters(p: Props) {
     typeof f.montant_min === 'number' && typeof f.montant_max === 'number' && f.montant_min > f.montant_max
       ? 'Minimum supérieur au maximum'
       : undefined;
-  const active = countActiveFilters(f) + (p.q.trim() ? 1 : 0);
+  const count = countActiveFilters(f);
+  const clearCriteria = () => p.onChange(EMPTY_FILTERS);
+  const moreActive = MORE_FACETS.some((d) => f[d.key]);
 
-  const selects = FACET_FILTERS.map((def) => {
-    let values = facetValues(p.facets, def.key, def.alt);
-    if (def.key === 'statut' && values.length === 0 && p.facets) values = ['ok', 'warn', 'drop'];
-    return { def, values };
-  }).filter((s) => s.values.length > 0);
+  const facetSelect = (def: FacetDef) => {
+    const values = facetValues(p.facets, def, f[def.key]);
+    if (p.facets && values.length === 0) return null; // facette absente de cet import
+    return (
+    <Select
+      key={def.key}
+      label={def.label}
+      placeholder="Tous"
+      width="100%"
+      data={values.map((v) => ({
+        value: v,
+        label: def.key === 'statut' ? (STATUT_LABELS[v] ?? v) : v,
+      }))}
+      value={f[def.key]}
+      onChange={(v) => p.onChange({ [def.key]: v })}
+      searchable
+      clearable
+      nothingFound="Aucune valeur"
+      menuWidth={290}
+    />
+    );
+  };
+
+  const pills: ActiveFilter[] = [];
+  for (const def of ALL_FACETS) {
+    const v = f[def.key];
+    if (v)
+      pills.push({
+        key: def.key,
+        label: `${def.label} : ${def.key === 'statut' ? (STATUT_LABELS[v] ?? v) : v}`,
+        onRemove: () => p.onChange({ [def.key]: null }),
+      });
+  }
+  if (f.date_from) pills.push({ key: 'date_from', label: `Du : ${fmtDate(f.date_from)}`, onRemove: () => p.onChange({ date_from: '' }) });
+  if (f.date_to) pills.push({ key: 'date_to', label: `Au : ${fmtDate(f.date_to)}`, onRemove: () => p.onChange({ date_to: '' }) });
+  if (typeof f.montant_min === 'number')
+    pills.push({ key: 'montant_min', label: `≥ ${fmtEur(f.montant_min, true)}`, onRemove: () => p.onChange({ montant_min: '' }) });
+  if (typeof f.montant_max === 'number')
+    pills.push({ key: 'montant_max', label: `≤ ${fmtEur(f.montant_max, true)}`, onRemove: () => p.onChange({ montant_max: '' }) });
+
+  const warnOn = f.statut === 'warn';
 
   return (
-    <Stack gap={8}>
-      {/* Recherche plein-texte + filtres à valeurs (pop-up buttons) */}
-      <Group gap={8}>
-        <SearchField
-          aria-label="Recherche plein-texte"
-          placeholder={p.searchDescription ? 'TG, libellé TG ou description…' : 'TG ou libellé TG…'}
-          value={p.q}
-          onChange={p.onQChange}
-          width={260}
-        />
-        {p.facetsLoading
-          ? Array.from({ length: 4 }, (_, i) => <Skeleton key={i} width={96} height={28} radius={7} />)
-          : selects.map(({ def, values }) => (
-              <Select
-                key={def.key}
-                aria-label={def.label}
-                placeholder={def.label}
-                data={values.map((v) => ({ value: v, label: def.key === 'statut' ? (STATUT_LABELS[v] ?? v) : v }))}
-                value={f[def.key]}
-                onChange={(v) => p.onChange({ [def.key]: v })}
-                searchable
-                clearable
-                nothingFound="Aucune valeur"
-                menuWidth={290}
-              />
-            ))}
+    <Group gap={8} wrap={false} className="realise-bottom">
+      <SearchField
+        aria-label="Recherche plein-texte"
+        placeholder={p.searchDescription ? 'TG, libellé, description…' : 'TG ou libellé TG…'}
+        value={p.q}
+        onChange={p.onQChange}
+      />
+      <FilterButton count={count} onReset={clearCriteria}>
+        <Stack gap={12}>
+          {MAIN_FACETS.map(facetSelect)}
+          <Group gap={8} wrap={false} align="start">
+            <DateInput
+              label="Dépense du"
+              value={f.date_from}
+              onChange={(v) => p.onChange({ date_from: v })}
+              error={dateError}
+              clearable
+            />
+            <DateInput label="au" value={f.date_to} onChange={(v) => p.onChange({ date_to: v })} clearable />
+          </Group>
+          <Group gap={8} wrap={false} align="start">
+            <NumberInput
+              label="Montant min"
+              suffix="€"
+              value={amount(f.montant_min)}
+              onChange={(v) => p.onChange({ montant_min: v ?? '' })}
+              error={amountError}
+            />
+            <NumberInput
+              label="Montant max"
+              suffix="€"
+              value={amount(f.montant_max)}
+              onChange={(v) => p.onChange({ montant_max: v ?? '' })}
+            />
+          </Group>
+          <Switch
+            label="Inclure la description"
+            description="Recherche aussi dans la description (champ sensible)."
+            checked={p.searchDescription}
+            onChange={p.onSearchDescriptionChange}
+          />
+          <Disclosure summary="Autres critères" defaultOpen={moreActive}>
+            <Stack gap={12}>{MORE_FACETS.map(facetSelect)}</Stack>
+          </Disclosure>
+        </Stack>
+      </FilterButton>
+      <div className="realise-bottom__pills">
+        <ActiveFilters items={pills} onClearAll={pills.length > 1 ? clearCriteria : undefined} />
+      </div>
+      {p.nbWarn > 0 && (
         <Button
           variant="plain"
-          icon={<IconFilterOff size={15} />}
-          onClick={p.onReset}
-          disabled={active === 0}
-          style={{ marginLeft: 'auto' }}
+          size="sm"
+          className="realise-bottom__warn"
+          icon={<StatusGlyph kind="warning" tone="warning" size={13} />}
+          aria-pressed={warnOn}
+          title={warnOn ? 'Afficher toutes les écritures' : 'Afficher les écritures à vérifier'}
+          onClick={() => p.onChange({ statut: warnOn ? null : 'warn' })}
         >
-          Réinitialiser{active ? ` (${active})` : ''}
+          {p.nbWarn.toLocaleString('fr-FR')} à vérifier
         </Button>
-      </Group>
-
-      {/* Bornes de date et de montant, options de recherche */}
-      <Group gap={8} align="start">
-        <Group gap={8}>
-          <Text as="span" size="sm" tone="secondary">
-            Dépense du
-          </Text>
-          <DateInput
-            aria-label="Dépense du"
-            value={f.date_from}
-            onChange={(v) => p.onChange({ date_from: v })}
-            error={dateError}
-            width={150}
-          />
-          <Text as="span" size="sm" tone="secondary">
-            au
-          </Text>
-          <DateInput aria-label="Dépense au" value={f.date_to} onChange={(v) => p.onChange({ date_to: v })} width={150} />
-        </Group>
-        <Group gap={8}>
-          <NumberInput
-            aria-label="Montant min (€)"
-            placeholder="Montant min"
-            suffix="€"
-            value={amount(f.montant_min)}
-            onChange={(v) => p.onChange({ montant_min: v ?? '' })}
-            error={amountError}
-            width={140}
-          />
-          <NumberInput
-            aria-label="Montant max (€)"
-            placeholder="Montant max"
-            suffix="€"
-            value={amount(f.montant_max)}
-            onChange={(v) => p.onChange({ montant_max: v ?? '' })}
-            width={140}
-          />
-        </Group>
-        <Group gap={16} style={{ minHeight: 28 }}>
-          <Tooltip label="Désactiver pour ne pas chercher dans un champ sensible">
-            <Switch label="Inclure la description" checked={p.searchDescription} onChange={p.onSearchDescriptionChange} />
-          </Tooltip>
-          <Tooltip label="Nom, matricule, facture, commande, description (affichage et export)" maxWidth={300}>
-            <Switch label="Masquer les colonnes sensibles" checked={p.maskSensitive} onChange={p.onMaskSensitiveChange} />
-          </Tooltip>
-        </Group>
-      </Group>
-    </Stack>
+      )}
+    </Group>
   );
 }

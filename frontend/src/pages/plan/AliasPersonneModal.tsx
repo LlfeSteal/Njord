@@ -84,7 +84,7 @@ export default function AliasPersonneModal({ line, onClose }: { line: PlanLine |
                   <Text weight={600}>{p.display_name}</Text>
                   <PersonneStatutBadge statut={p.statut} />
                 </Group>
-                <Link to={`/referentiels?personne=${encodeURIComponent(p.id)}`} size="sm">
+                <Link to={`/personnes?personne=${encodeURIComponent(p.id)}`} size="sm">
                   <Group gap={4} wrap={false}>
                     Ouvrir la fiche <IconExternalLink size={13} />
                   </Group>

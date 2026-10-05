@@ -1,0 +1,251 @@
+/* Pages Pilotage — compléments de mise en page. Tokens uniquement (docs/STYLE.md). */
+
+/* Résultat précédent affiché pendant le recalcul. */
+.pil-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity 0.15s var(--ease);
+}
+.pil-content[aria-busy='true'] {
+  opacity: 0.6;
+}
+
+/* Rangée de chiffres clés (3 au plus). */
+.pil-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  padding: 4px 0 8px;
+}
+@media (max-width: 720px) {
+  .pil-metrics {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+/* En-tête d'une carte : titre 15/600 + lien à droite, phrase de lecture 12 px secondaire. */
+.pil-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pil-card-head__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pil-card-head__sub {
+  margin: 2px 0 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Note de méthode en pied de page. */
+.pil-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------------ Contrôle de contexte */
+.pil-ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pil-ctx__button {
+  max-width: 420px;
+  font-weight: 400;
+}
+.pil-ctx__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+.pil-ctx__part {
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pil-ctx__sep {
+  flex: none;
+  color: var(--text-secondary);
+}
+.pil-ctx__weeks {
+  flex: none;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.pil-ctx__weeks-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------ Graphiques */
+.pil-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 8px;
+  padding-left: 56px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.pil-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pil-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--pil-swatch);
+}
+.pil-swatch[data-shape='line'] {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+.pil-swatch[data-shape='dash'] {
+  width: 14px;
+  height: 0;
+  border-radius: 0;
+  background: none;
+  border-top: 2px dashed var(--pil-swatch);
+}
+
+.pil-tooltip {
+  min-width: 180px;
+  max-width: 320px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--material);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--popover-shadow);
+  color: var(--text);
+  font-size: 12px;
+}
+.pil-tooltip__title {
+  margin-bottom: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pil-tooltip__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.pil-tooltip__value {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ Tableaux */
+/* CT sur une ligne : code mono + libellé secondaire tronqué. */
+.pil-ct {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  max-width: 340px;
+  white-space: nowrap;
+}
+.pil-ct__code {
+  flex: none;
+  font-family: var(--font-mono);
+}
+.pil-ct__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+/* Consommation : barre 120 px + pourcentage à droite. */
+.pil-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+.pil-progress__pct {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Valeur signée colorée selon le ton (le signe porte aussi l'information). */
+.pil-signed[data-tone='danger'] {
+  color: var(--danger);
+}
+.pil-signed[data-tone='warning'] {
+  color: var(--warning);
+}
+.pil-signed[data-tone='success'] {
+  color: var(--success);
+}
+
+/* ------------------------------------------------------------------ Inspecteur */
+/* Classification du budget : barre empilée 6 px. */
+.pil-stack {
+  display: flex;
+  height: 6px;
+  margin: 4px 0 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--fill);
+}
+.pil-stack > span + span {
+  box-shadow: -1px 0 0 var(--card);
+}
+.pil-stack__seg[data-kind='securise'] {
+  background: var(--budget-secured);
+}
+.pil-stack__seg[data-kind='non_securise'] {
+  background: var(--budget-unsecured);
+}
+.pil-stack__seg[data-kind='non_classe'] {
+  background: var(--budget-unclassified);
+}
+.pil-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: 0;
+}
+.pil-dot[data-kind='securise'] {
+  background: var(--budget-secured);
+}
+.pil-dot[data-kind='non_securise'] {
+  background: var(--budget-unsecured);
+}
+.pil-dot[data-kind='non_classe'] {
+  background: var(--budget-unclassified);
+}
+
+/* Liens de la liste « À traiter » dans l'en-tête du groupe. */
+.pil-group-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}

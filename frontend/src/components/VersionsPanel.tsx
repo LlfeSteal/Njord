@@ -1,50 +1,52 @@
-// Liste des versions d'un kind (plan | realise) avec cycle de vie complet.
-// CONTRAT FIGÉ (props) — implémentation : agent « FE partagé ».
-// Auto-suffisant : charge versionsApi.list, bouton « Importer » (ouvre ImportWizard),
-// toggle « afficher purgées », tri actives en tête / archivées grisées,
-// actions en ligne : consulter (onOpen), archiver / réactiver, purger (PurgeModal).
+// Page « liste des versions » d'un kind (plan | realise) avec cycle de vie complet.
+// Auto-suffisante : charge versionsApi.list, action « Importer » (ImportWizard), menu ⋯ « afficher les
+// versions purgées », tri actives en tête / archivées grisées, actions en survol : consulter (onOpen),
+// archiver / réactiver, purger (PurgeModal). Clic sur une ligne = onOpen.
 import { useState, type MouseEvent, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import {
   Button,
   Card,
   EmptyState,
-  Group,
   IconButton,
-  Modal,
+  Page,
+  PageToolbar,
   SkeletonRows,
-  Stack,
-  Switch,
+  StatusGlyph,
   Table,
   Text,
-  Title,
   Tooltip,
   VisuallyHidden,
-  toast,
 } from '../ui';
 import { IconArchive, IconEye, IconImport, IconRestore, IconTrash } from '../ui/Icons';
-import { settingsApi, versionsApi } from '../api/client';
+import { versionsApi } from '../api/client';
 import type { Kind, Version } from '../api/types';
-import { fmtDateTime, fmtNumber, fmtPeriod } from '../lib/format';
+import { fmtNumber, fmtPeriod } from '../lib/format';
 import { qk } from '../lib/queryKeys';
 import { StatusBadge } from './badges';
 import ErrorAlert from './ErrorAlert';
 import ImportWizard from './ImportWizard';
-import PurgeModal from './PurgeModal';
-import { canPurgeNow, errMessage, fmtDay, invalidateLifecycle, loadOperateur, purgeAvailableFrom } from './lifecycle/lifecycleUtils';
+import { plural } from './lifecycle/lifecycleUtils';
+import { useVersionLifecycle } from './lifecycle/useVersionLifecycle';
+import './VersionsPanel.css';
 
 export interface VersionColumn {
   header: string;
   render: (v: Version) => ReactNode;
+  /** Colonne numérique (alignée à droite, tabulaire). */
+  align?: 'right';
 }
 
 export interface VersionsPanelProps {
   kind: Kind;
+  /** Titre de la page (« Plan de charge », « Réalisé »). */
   title: string;
   /** Clic sur « consulter » ou sur la ligne. */
   onOpen: (v: Version) => void;
-  /** Colonnes ajoutées après les colonnes communes (ex. layout pour le plan, montant total pour le réalisé). */
+  /** Colonnes ajoutées avant les actions (ex. montant total pour le réalisé). */
   extraColumns?: VersionColumn[];
+  /** Aide affichée dans l'état vide. */
+  emptyHelp?: ReactNode;
 }
 
 const STATUT_ORDER: Record<Version['statut'], number> = { active: 0, archivee: 1, purgee: 2 };
@@ -57,63 +59,41 @@ function sortVersions(list: Version[]): Version[] {
 
 const stop = (e: MouseEvent) => e.stopPropagation();
 
-export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }: VersionsPanelProps) {
-  const qc = useQueryClient();
+/** Glyphe de tête : rejets (danger) prioritaires sur les avertissements (warning). */
+function QualityGlyph({ v }: { v: Version }) {
+  if (!v.nb_warn && !v.nb_drop) return null;
+  const parts = [
+    v.nb_warn ? `${plural(v.nb_warn, 'ligne')} à vérifier` : '',
+    v.nb_drop ? `${plural(v.nb_drop, 'ligne')} rejetée${v.nb_drop > 1 ? 's' : ''}` : '',
+  ].filter(Boolean);
+  return v.nb_drop ? (
+    <StatusGlyph kind="danger" tone="danger" label={parts.join(' · ')} />
+  ) : (
+    <StatusGlyph kind="warning" tone="warning" label={parts.join(' · ')} />
+  );
+}
+
+export default function VersionsPanel({ kind, title, onOpen, extraColumns = [], emptyHelp }: VersionsPanelProps) {
   const [includePurged, setIncludePurged] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [toPurge, setToPurge] = useState<Version | null>(null);
-  const [toReactivate, setToReactivate] = useState<Version | null>(null);
+  const lc = useVersionLifecycle(kind);
 
   const versions = useQuery({
     queryKey: [...qk.versions(kind), { includePurged }],
     queryFn: () => versionsApi.list(kind, includePurged),
   });
-  const settings = useQuery({ queryKey: qk.settings(), queryFn: settingsApi.get });
-  const delai = settings.data?.purge_delai_jours;
 
   const list = sortVersions(versions.data ?? []);
   const currentActive = list.find((v) => v.statut === 'active') ?? null;
 
-  const onError = (title: string) => (e: unknown) => toast({ tone: 'error', title, message: errMessage(e) });
-
-  const archive = useMutation({
-    mutationFn: (v: Version) => versionsApi.archive(kind, v.id, loadOperateur() || undefined),
-    onSuccess: (v) => {
-      invalidateLifecycle(qc);
-      toast({ tone: 'success', title: 'Version archivée', message: `« ${v.intitule} » est archivée.` });
-    },
-    onError: onError("Échec de l'archivage"),
-  });
-
-  const reactivate = useMutation({
-    mutationFn: (v: Version) => versionsApi.reactivate(kind, v.id, loadOperateur() || undefined),
-    onSuccess: (v) => {
-      invalidateLifecycle(qc);
-      setToReactivate(null);
-      toast({
-        tone: 'success',
-        title: 'Version réactivée',
-        message: `« ${v.intitule} » est désormais la version active.`,
-      });
-    },
-    onError: onError('Échec de la réactivation'),
-  });
-
-  const pendingId =
-    (archive.isPending && archive.variables?.id) || (reactivate.isPending && reactivate.variables?.id) || null;
-
-  const purgeTooltip = (v: Version): string => {
-    if (delai == null || canPurgeNow(v, delai)) return 'Purger';
-    const from = purgeAvailableFrom(v, delai);
-    return `Purge possible à partir du ${from ? fmtDay(from) : '—'} (archivée depuis moins de ${delai} jour${
-      delai > 1 ? 's' : ''
-    })`;
-  };
+  const subtitle = versions.data
+    ? `${plural(list.length, 'version')} · ${currentActive ? `active : ${currentActive.intitule}` : 'aucune version active'}`
+    : undefined;
 
   const renderActions = (v: Version) => {
     if (v.statut === 'purgee') return null;
-    const busy = pendingId === v.id;
-    const purgeable = canPurgeNow(v, delai);
+    const busy = lc.pendingId === v.id;
+    const locked = lc.pendingId != null && !busy;
     return (
       <>
         <IconButton label="Consulter" aria-label={`Consulter « ${v.intitule} »`} onClick={() => onOpen(v)}>
@@ -124,8 +104,8 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }
             label="Archiver"
             aria-label={`Archiver « ${v.intitule} »`}
             loading={busy}
-            disabled={pendingId != null && !busy}
-            onClick={() => archive.mutate(v)}
+            disabled={locked}
+            onClick={() => lc.archive(v)}
           >
             <IconArchive size={15} />
           </IconButton>
@@ -136,19 +116,19 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }
               label="Réactiver"
               aria-label={`Réactiver « ${v.intitule} »`}
               loading={busy}
-              disabled={pendingId != null && !busy}
-              onClick={() => setToReactivate(v)}
+              disabled={locked}
+              onClick={() => lc.reactivate(v)}
             >
               <IconRestore size={15} />
             </IconButton>
-            {purgeable ? (
-              <IconButton label="Purger" aria-label={`Purger « ${v.intitule} »`} destructive onClick={() => setToPurge(v)}>
+            {lc.canPurge(v) ? (
+              <IconButton label="Purger" aria-label={`Purger « ${v.intitule} »`} destructive onClick={() => lc.purge(v)}>
                 <IconTrash size={15} />
               </IconButton>
             ) : (
               // Bouton désactivé : la bulle explique quand la purge deviendra possible.
-              <Tooltip label={purgeTooltip(v)} maxWidth={280}>
-                <IconButton label={purgeTooltip(v)} destructive disabled>
+              <Tooltip label={lc.purgeHint(v)} maxWidth={280}>
+                <IconButton label={lc.purgeHint(v)} destructive disabled>
                   <IconTrash size={15} />
                 </IconButton>
               </Tooltip>
@@ -176,25 +156,26 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }
             </Button>
           }
         >
-          Importez un fichier Excel (.xlsx) pour créer la première version.
+          {emptyHelp ?? 'Importez un fichier Excel (.xlsx) pour créer la première version.'}
         </EmptyState>
       </Card>
     );
   } else {
     body = (
-      <Table hover minWidth={1000 + extraColumns.length * 120}>
+      <Table hover className="versions-table" minWidth={640 + extraColumns.length * 120}>
         <thead>
           <tr>
+            <th data-glyph>
+              <VisuallyHidden>Contrôle</VisuallyHidden>
+            </th>
             <th>Intitulé</th>
-            <th>Importée le</th>
-            <th>Importeur</th>
             <th>Statut</th>
-            <th data-align="right">Lignes</th>
-            <th data-align="right">Warn</th>
-            <th data-align="right">Drop</th>
             <th>Période</th>
+            <th data-align="right">Lignes</th>
             {extraColumns.map((c) => (
-              <th key={c.header}>{c.header}</th>
+              <th key={c.header} data-align={c.align}>
+                {c.header}
+              </th>
             ))}
             <th>
               <VisuallyHidden>Actions</VisuallyHidden>
@@ -209,38 +190,28 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }
                 key={v.id}
                 onClick={purged ? undefined : () => onOpen(v)}
                 data-clickable={purged ? undefined : true}
-                data-emphasis={v.statut === 'active' || undefined}
                 data-muted={v.statut === 'archivee' || undefined}
                 data-strike={purged || undefined}
               >
-                <td>{v.intitule}</td>
-                <td data-nowrap>{fmtDateTime(v.importee_le)}</td>
-                <td>{v.importeur || '—'}</td>
-                <td>
+                <td data-glyph>{!purged && <QualityGlyph v={v} />}</td>
+                <td className="versions-table__title">
+                  {v.statut === 'active' ? (
+                    <Text as="span" weight={600}>
+                      {v.intitule}
+                    </Text>
+                  ) : (
+                    v.intitule
+                  )}
+                </td>
+                <td data-nowrap>
                   <StatusBadge statut={v.statut} />
                 </td>
-                <td data-align="right">{fmtNumber(v.nb_lignes)}</td>
-                <td data-align="right">
-                  {v.nb_warn ? (
-                    <Text as="span" tone="warning">
-                      {fmtNumber(v.nb_warn)}
-                    </Text>
-                  ) : (
-                    fmtNumber(v.nb_warn)
-                  )}
-                </td>
-                <td data-align="right">
-                  {v.nb_drop ? (
-                    <Text as="span" tone="danger">
-                      {fmtNumber(v.nb_drop)}
-                    </Text>
-                  ) : (
-                    fmtNumber(v.nb_drop)
-                  )}
-                </td>
                 <td data-nowrap>{fmtPeriod(v.periode_debut, v.periode_fin)}</td>
+                <td data-align="right">{fmtNumber(v.nb_lignes)}</td>
                 {extraColumns.map((c) => (
-                  <td key={c.header}>{c.render(v)}</td>
+                  <td key={c.header} data-align={c.align} data-nowrap>
+                    {c.render(v)}
+                  </td>
                 ))}
                 <td data-actions onClick={stop}>
                   {renderActions(v)}
@@ -254,61 +225,30 @@ export default function VersionsPanel({ kind, title, onOpen, extraColumns = [] }
   }
 
   return (
-    <Stack gap={12}>
-      <Group justify="between" gap={8}>
-        <Title order={3}>{title}</Title>
-        <Group gap={12}>
-          <Switch label="Afficher les versions purgées" checked={includePurged} onChange={setIncludePurged} />
-          <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setWizardOpen(true)}>
-            Importer un fichier
-          </Button>
-        </Group>
-      </Group>
-
+    <Page
+      toolbar={
+        <PageToolbar
+          title={title}
+          subtitle={subtitle}
+          actions={
+            <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setWizardOpen(true)}>
+              Importer
+            </Button>
+          }
+          menu={[
+            {
+              label: 'Afficher les versions purgées',
+              checked: includePurged,
+              onSelect: () => setIncludePurged((x) => !x),
+            },
+          ]}
+        />
+      }
+    >
       {body}
 
       <ImportWizard kind={kind} opened={wizardOpen} onClose={() => setWizardOpen(false)} />
-      <PurgeModal kind={kind} version={toPurge} onClose={() => setToPurge(null)} />
-
-      <Modal
-        opened={toReactivate != null}
-        onClose={() => {
-          if (!reactivate.isPending) setToReactivate(null);
-        }}
-        title="Réactiver la version"
-        size="sm"
-        dismissable={!reactivate.isPending}
-        footer={
-          <>
-            <Button onClick={() => setToReactivate(null)} disabled={reactivate.isPending}>
-              Annuler
-            </Button>
-            <Button
-              variant="primary"
-              loading={reactivate.isPending}
-              onClick={() => toReactivate && reactivate.mutate(toReactivate)}
-            >
-              Réactiver
-            </Button>
-          </>
-        }
-      >
-        {toReactivate && (
-          <Stack gap={8}>
-            <Text>
-              La version « <b>{toReactivate.intitule}</b> » redeviendra la version active et sera utilisée par
-              défaut par l'analyse.
-            </Text>
-            {currentActive && currentActive.id !== toReactivate.id ? (
-              <Text>
-                La version active « <b>{currentActive.intitule}</b> » sera archivée.
-              </Text>
-            ) : (
-              <Text tone="secondary">Aucune autre version n'est actuellement active.</Text>
-            )}
-          </Stack>
-        )}
-      </Modal>
-    </Stack>
+      {lc.modals}
+    </Page>
   );
 }

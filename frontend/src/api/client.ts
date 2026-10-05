@@ -3,6 +3,8 @@ import type {
   AnalyseContext,
   AnalyseParams,
   AnalyseResult,
+  AnomalieSuivi,
+  AnomalieSuiviInput,
   AuditEntry,
   Facets,
   ImportReport,
@@ -194,4 +196,8 @@ export const analyseApi = {
     csvUrl('/analyse/realise-enrichi.csv', p as Query),
   confirmAlias: (personne_id: string, alias: string) =>
     post<Personne>('/analyse/alias/confirm', { personne_id, alias }),
+  /** Marque une anomalie traitée / ignorée (upsert). */
+  putSuivi: (body: AnomalieSuiviInput) => put<AnomalieSuivi>('/analyse/anomalies/suivi', body),
+  /** Rouvre une anomalie (supprime son suivi). */
+  deleteSuivi: (key: string) => del<void>('/analyse/anomalies/suivi' + qs({ key })),
 };

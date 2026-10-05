@@ -1,18 +1,24 @@
-// Coquille : barre d'outils collante translucide (icône, titre, navigation, apparence) + contenu.
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, SegmentedControl, useAppearance, type Appearance } from '../ui';
-import { IconAuto, IconMoon, IconSun, IconTimeline } from '../ui/Icons';
+// Coquille : barre latérale façon macOS (Pilotage · Données · Réglages) + page courante.
+import { Outlet } from 'react-router-dom';
+import { AppShell, Menu, Sidebar, useAppearance, type Appearance } from '../ui';
+import {
+  IconAuto,
+  IconCalendar,
+  IconFileSpreadsheet,
+  IconMoon,
+  IconSliders,
+  IconSun,
+  IconTimeline,
+  IconUser,
+  IconUsers,
+  IconGauge,
+  IconInbox,
+  IconChartBar,
+  IconEuro,
+  IconTrend,
+} from '../ui/Icons';
+import { useAnalyse } from '../pages/pilotage/shared/context';
 import './AppLayout.css';
-
-type TabKey = 'plan' | 'realise' | 'analyse' | 'referentiels' | 'parametres';
-
-const TABS: { value: TabKey; label: string }[] = [
-  { value: 'plan', label: 'Plan de charge' },
-  { value: 'realise', label: 'Réalisé' },
-  { value: 'analyse', label: 'Analyse' },
-  { value: 'referentiels', label: 'Référentiels' },
-  { value: 'parametres', label: 'Paramètres' },
-];
 
 const APPEARANCES: { value: Appearance; label: string; icon: typeof IconSun }[] = [
   { value: 'auto', label: 'Automatique', icon: IconAuto },
@@ -21,58 +27,70 @@ const APPEARANCES: { value: Appearance; label: string; icon: typeof IconSun }[] 
 ];
 
 export default function AppLayout() {
-  const location = useLocation();
-  const navigate = useNavigate();
   const { appearance, setAppearance } = useAppearance();
-  const segment = location.pathname.split('/')[1];
-  const current: TabKey = TABS.some((t) => t.value === segment) ? (segment as TabKey) : 'plan';
+  const { result } = useAnalyse();
+  const aTraiter = result.data?.anomalies?.filter((a) => a.statut === 'a_traiter').length ?? 0;
   const CurrentIcon = APPEARANCES.find((a) => a.value === appearance)?.icon ?? IconAuto;
 
-  return (
-    <div className="app">
-      <header className="app-toolbar">
+  const sidebar = (
+    <Sidebar
+      aria-label="Navigation principale"
+      header={
         <div className="app-brand">
           <span className="app-icon" aria-hidden>
-            <IconTimeline size={18} stroke={2.4} />
+            <IconTimeline size={16} stroke={2.4} />
           </span>
-          <div className="app-brand-text">
-            <span className="app-title">Njord</span>
-            <span className="app-subtitle">Analyse des imputations</span>
-          </div>
+          <span className="app-title">Njord</span>
         </div>
-        <nav className="app-nav" aria-label="Modules">
-          <SegmentedControl
-            aria-label="Modules"
-            size="lg"
-            equal={false}
-            value={current}
-            onChange={(v) => navigate('/' + v)}
-            data={TABS}
-          />
-        </nav>
-        <div className="app-actions">
-          <Menu
-            placement="bottom-end"
-            target={(p) => (
-              <button {...p} type="button" className="app-appearance" aria-label="Apparence" title="Apparence">
-                <CurrentIcon size={16} />
-              </button>
-            )}
-            items={[
-              { type: 'header', label: 'Apparence' },
-              ...APPEARANCES.map((a) => ({
-                label: a.label,
-                icon: <a.icon size={15} />,
-                checked: appearance === a.value,
-                onSelect: () => setAppearance(a.value),
-              })),
-            ]}
-          />
-        </div>
-      </header>
-      <main className="app-main">
-        <Outlet />
-      </main>
-    </div>
+      }
+      sections={[
+        {
+          title: 'Pilotage',
+          items: [
+            { to: '/', end: true, label: "Vue d'ensemble", icon: <IconGauge size={16} /> },
+            { to: '/anomalies', label: 'Anomalies', icon: <IconInbox size={16} />, badge: aTraiter },
+            { to: '/ecarts', label: 'Écarts', icon: <IconChartBar size={16} /> },
+            { to: '/budget', label: 'Budget', icon: <IconEuro size={16} /> },
+            { to: '/previsions', label: 'Prévisions', icon: <IconTrend size={16} /> },
+          ],
+        },
+        {
+          title: 'Données',
+          items: [
+            { to: '/plan', label: 'Plan de charge', icon: <IconCalendar size={16} /> },
+            { to: '/realise', label: 'Réalisé', icon: <IconFileSpreadsheet size={16} /> },
+            { to: '/personnes', label: 'Personnes', icon: <IconUser size={16} /> },
+            { to: '/squads', label: 'Squads', icon: <IconUsers size={16} /> },
+          ],
+        },
+        { items: [{ to: '/reglages', label: 'Réglages', icon: <IconSliders size={16} /> }] },
+      ]}
+      footer={
+        <Menu
+          placement="top-start"
+          target={(p) => (
+            <button {...p} type="button" className="app-appearance" aria-label="Apparence" title="Apparence">
+              <CurrentIcon size={15} />
+              <span>Apparence</span>
+            </button>
+          )}
+          items={[
+            { type: 'header', label: 'Apparence' },
+            ...APPEARANCES.map((a) => ({
+              label: a.label,
+              icon: <a.icon size={15} />,
+              checked: appearance === a.value,
+              onSelect: () => setAppearance(a.value),
+            })),
+          ]}
+        />
+      }
+    />
+  );
+
+  return (
+    <AppShell sidebar={sidebar}>
+      <Outlet />
+    </AppShell>
   );
 }

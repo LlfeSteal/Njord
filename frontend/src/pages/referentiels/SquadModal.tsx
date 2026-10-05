@@ -1,11 +1,14 @@
-// Création / édition d'une squad (nom, entité, parent) + ajout d'alias (§6.1).
+// Création / édition d'une squad (nom, entité, parent) + ajout d'alias (§6.1). Actions en pied de fenêtre.
 import { useMemo, useState, type FormEvent } from 'react';
-import { Button, Divider, Group, Modal, Pill, Select, Stack, Text, TextInput } from '../../ui';
-import { IconPlus } from '../../ui/Icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Button, Modal, Pill, Select, Stack, Text, TextInput } from '../../ui';
+import { IconPlus } from '../../ui/Icons';
 import { referentielApi } from '../../api/client';
 import type { Squad } from '../../api/types';
 import { descendantIds, flattenSquads, invalidateReferentiels, notifyError, notifySuccess } from './hooks';
+import './referentiels.css';
+
+const FORM_ID = 'squad-form';
 
 interface Props {
   /** null = fermée, 'new' = création, sinon id du squad édité. */
@@ -15,6 +18,18 @@ interface Props {
   /** Après création : la modale bascule en édition (pour ajouter des alias). */
   onCreated: (s: Squad) => void;
 }
+
+interface Draft {
+  nom: string;
+  entite: string;
+  parentId: string | null;
+}
+
+const draftOf = (s: Squad | null): Draft => ({
+  nom: s?.nom_canonique ?? '',
+  entite: s?.entite_rattachee ?? '',
+  parentId: s?.parent_id ?? null,
+});
 
 function useSquadMutation<V>(fn: (v: V) => Promise<Squad>, success: (s: Squad, v: V) => string, onDone?: (s: Squad) => void) {
   const qc = useQueryClient();
@@ -30,38 +45,22 @@ function useSquadMutation<V>(fn: (v: V) => Promise<Squad>, success: (s: Squad, v
 }
 
 export default function SquadModal({ editing, squads, onClose, onCreated }: Props) {
-  const squad = editing && editing !== 'new' ? (squads.find((s) => s.id === editing) ?? null) : null;
-  return (
-    <Modal
-      opened={editing !== null}
-      onClose={onClose}
-      title={squad ? `Squad « ${squad.nom_canonique} »` : 'Nouvelle squad'}
-      size="lg"
-    >
-      {editing !== null && (
-        <Stack gap={16}>
-          <SquadForm key={editing} squad={squad} squads={squads} onClose={onClose} onCreated={onCreated} />
-          {squad && <SquadAliasSection squad={squad} />}
-        </Stack>
-      )}
-    </Modal>
-  );
-}
+  // Squad tout juste créée : utilisée tant que la liste rechargée ne la contient pas encore.
+  const [created, setCreated] = useState<Squad | null>(null);
+  const squad =
+    editing && editing !== 'new'
+      ? (squads.find((s) => s.id === editing) ?? (created?.id === editing ? created : null))
+      : null;
 
-function SquadForm({
-  squad,
-  squads,
-  onClose,
-  onCreated,
-}: {
-  squad: Squad | null;
-  squads: Squad[];
-  onClose: () => void;
-  onCreated: (s: Squad) => void;
-}) {
-  const [nom, setNom] = useState(squad?.nom_canonique ?? '');
-  const [entite, setEntite] = useState(squad?.entite_rattachee ?? '');
-  const [parentId, setParentId] = useState<string | null>(squad?.parent_id ?? null);
+  // Brouillon réinitialisé à chaque changement de squad éditée (ajustement pendant le rendu).
+  const [draft, setDraft] = useState<Draft>(() => draftOf(squad));
+  const [draftFor, setDraftFor] = useState(editing);
+  if (draftFor !== editing) {
+    setDraftFor(editing);
+    setDraft(draftOf(squad));
+  }
+  const { nom, entite, parentId } = draft;
+  const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
   // Parent possible : tout squad sauf lui-même et ses descendants (pas de cycle).
   const parentOptions = useMemo(() => {
@@ -74,7 +73,10 @@ function SquadForm({
   const create = useSquadMutation(
     (b: Parameters<typeof referentielApi.createSquad>[0]) => referentielApi.createSquad(b),
     (s) => `Squad « ${s.nom_canonique} » créée — vous pouvez lui ajouter des alias.`,
-    onCreated,
+    (s) => {
+      setCreated(s);
+      onCreated(s);
+    },
   );
   const update = useSquadMutation(
     (b: Parameters<typeof referentielApi.updateSquad>[1]) => referentielApi.updateSquad(squad!.id, b),
@@ -101,34 +103,46 @@ function SquadForm({
   };
 
   return (
-    <form onSubmit={submit}>
-      <Stack gap={8}>
-        <TextInput label="Nom canonique" value={nom} onChange={setNom} required autoFocus />
-        <TextInput label="Entité rattachée" placeholder="Optionnel" value={entite} onChange={setEntite} />
-        <Select
-          label="Squad parente"
-          placeholder="Aucune (racine)"
-          data={parentOptions}
-          value={parentId}
-          onChange={setParentId}
-          searchable
-          clearable
-          nothingFound="Aucune squad"
-        />
-        {/* Actions dans le corps : en édition, la section Alias suit le formulaire. */}
-        <Group justify="end" gap={8} mt={4}>
+    <Modal
+      opened={editing !== null}
+      onClose={onClose}
+      title={squad ? `Squad « ${squad.nom_canonique} »` : 'Nouvelle squad'}
+      size="md"
+      footer={
+        <>
           <Button onClick={onClose}>{squad ? 'Fermer' : 'Annuler'}</Button>
           <Button
             type="submit"
+            form={FORM_ID}
             variant="primary"
             disabled={!dirty || !nom.trim()}
             loading={create.isPending || update.isPending}
           >
             {squad ? 'Enregistrer' : 'Créer'}
           </Button>
-        </Group>
+        </>
+      }
+    >
+      <Stack gap={16}>
+        <form id={FORM_ID} onSubmit={submit}>
+          <Stack gap={8}>
+            <TextInput label="Nom canonique" value={nom} onChange={(v) => patch({ nom: v })} required autoFocus />
+            <TextInput label="Entité rattachée" placeholder="Optionnel" value={entite} onChange={(v) => patch({ entite: v })} />
+            <Select
+              label="Squad parente"
+              placeholder="Aucune (racine)"
+              data={parentOptions}
+              value={parentId}
+              onChange={(v) => patch({ parentId: v })}
+              searchable
+              clearable
+              nothingFound="Aucune squad"
+            />
+          </Stack>
+        </form>
+        {squad && <SquadAliasSection squad={squad} />}
       </Stack>
-    </form>
+    </Modal>
   );
 }
 
@@ -147,30 +161,28 @@ function SquadAliasSection({ squad }: { squad: Squad }) {
   };
   return (
     <Stack gap={8}>
-      <Divider label="Alias" />
+      <Text size="sm" weight={500} tone="secondary">
+        Alias
+      </Text>
       {alias.length ? (
-        <Group gap={4}>
+        <div className="ref-pills">
           {alias.map((a) => (
             <Pill key={a}>{a}</Pill>
           ))}
-        </Group>
+        </div>
       ) : (
         <Text tone="secondary">Aucun alias.</Text>
       )}
-      <form onSubmit={submit}>
-        <Group gap={8} align="end" wrap={false}>
-          <div style={{ flex: 1 }}>
-            <TextInput
-              aria-label="Nouvel alias de squad"
-              placeholder="Variante du nom vue dans les fichiers"
-              value={value}
-              onChange={setValue}
-            />
-          </div>
-          <Button type="submit" icon={<IconPlus size={15} />} disabled={!value.trim()} loading={add.isPending}>
-            Ajouter
-          </Button>
-        </Group>
+      <form onSubmit={submit} className="ref-add">
+        <TextInput
+          aria-label="Nouvel alias de squad"
+          placeholder="Variante du nom vue dans les fichiers"
+          value={value}
+          onChange={setValue}
+        />
+        <Button type="submit" icon={<IconPlus size={15} />} disabled={!value.trim()} loading={add.isPending}>
+          Ajouter
+        </Button>
       </form>
     </Stack>
   );

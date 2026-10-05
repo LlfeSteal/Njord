@@ -1,106 +1,108 @@
-// Table des lignes d'une version de plan (tri cliquable, statuts inactif / warn / drop).
-import { Group, IconButton, SortHeader, Table, Text, Tooltip, VisuallyHidden } from '../../ui';
+// Table des lignes d'une version de plan : une ligne par cellule, anomalies teintées avec glyphe de tête,
+// totaux en pied. Le détail complet d'une ligne s'ouvre dans l'inspecteur (clic sur la ligne).
+import type { MouseEvent } from 'react';
+import { IconButton, SortHeader, StatusGlyph, Table, Text, Tooltip, VisuallyHidden } from '../../ui';
 import { IconUserPlus } from '../../ui/Icons';
 import type { PlanLine } from '../../api/types';
-import { InactiveBadge, ParsingBadge } from '../../components/badges';
-import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../lib/format';
+import { InactiveBadge } from '../../components/badges';
+import { fmtEur, fmtHours, fmtPct } from '../../lib/format';
+import { fmtRange, plural } from '../../components/lifecycle/lifecycleUtils';
 import type { SortKey, SortOrder } from './useLineFilters';
-
-const KIND_LABEL: Record<PlanLine['ressource_kind'], string> = {
-  internal: 'interne',
-  external: 'externe',
-  unknown: 'inconnue',
-};
+import './plan.css';
 
 interface Props {
   items: PlanLine[];
+  total: number;
+  totals: { charge_totale: number; pps: number };
   sort: SortKey;
   order: SortOrder;
   onSort: (k: SortKey) => void;
+  /** Nom de la squad la plus interne / chemin complet du groupe. */
   squadName: (id: string | null) => string;
+  squadPath: (id: string | null) => string;
   onAlias: (l: PlanLine) => void;
+  onSelect: (l: PlanLine) => void;
+  selectedId: number | null;
   dimmed?: boolean;
 }
 
-function Th({
-  label,
-  sortKey,
-  sort,
-  order,
-  onSort,
-  alignRight,
-}: {
-  label: string;
-  sortKey?: SortKey;
-  sort: SortKey;
-  order: SortOrder;
-  onSort: (k: SortKey) => void;
-  alignRight?: boolean;
-}) {
-  if (!sortKey)
-    return (
-      <th data-nowrap data-align={alignRight ? 'right' : undefined}>
-        {label}
-      </th>
-    );
+const COLS = 9; // glyphe + 7 colonnes + actions
+
+const stop = (e: MouseEvent) => e.stopPropagation();
+
+/** Glyphe de tête d'une ligne en anomalie ; motif en bulle d'aide. */
+export function ParsingGlyph({ line: l, size }: { line: PlanLine; size?: number }) {
+  if (l.statut_parsing === 'ok') return null;
+  const warn = l.statut_parsing === 'warn';
+  const label = l.motif_rejet || (warn ? 'Ligne à vérifier' : 'Ligne rejetée');
+  return <StatusGlyph kind={warn ? 'warning' : 'danger'} tone={warn ? 'warning' : 'danger'} size={size} label={label} />;
+}
+
+/** Ressource sur une ligne : « CODE (NOM Prénom) » + mention inactif. */
+export function RessourceLabel({ line: l }: { line: PlanLine }) {
   return (
-    <SortHeader
-      active={sort === sortKey}
-      dir={order}
-      onSort={() => onSort(sortKey)}
-      align={alignRight ? 'right' : undefined}
-    >
-      {label}
-    </SortHeader>
+    <span className="plan-res">
+      <span className="plan-res__code">{l.ressource}</span>
+      {l.nom_prenom && <span className="plan-res__name"> ({l.nom_prenom})</span>}
+      {l.inactive && (
+        <span className="plan-res__inactive">
+          <InactiveBadge />
+        </span>
+      )}
+    </span>
   );
 }
 
 function AliasAction({ line: l, onAlias }: { line: PlanLine; onAlias: (l: PlanLine) => void }) {
   if (l.personne_id)
     return (
-      <IconButton label={`Créer un alias personne (ligne ${l.row_num})`} onClick={() => onAlias(l)}>
+      <IconButton label="Créer un alias personne" onClick={() => onAlias(l)}>
         <IconUserPlus size={15} />
       </IconButton>
     );
   // Bouton désactivé : la bulle explique pourquoi.
   return (
     <Tooltip label="Ressource non rattachée à une fiche personne">
-      <IconButton label={`Créer un alias personne (ligne ${l.row_num})`} disabled>
+      <IconButton label="Créer un alias personne" disabled>
         <IconUserPlus size={15} />
       </IconButton>
     </Tooltip>
   );
 }
 
-/** « NOM Prénom » extrait du libellé ; le libellé brut reste consultable en bulle d'aide. */
-function NomPrenomCell({ line }: { line: PlanLine }) {
-  const value = line.nom_prenom || '—';
-  if (!line.libelle || line.libelle === line.nom_prenom) return <>{value}</>;
-  return (
-    <Tooltip label={`Libellé : ${line.libelle}`}>
-      <span>{value}</span>
-    </Tooltip>
+export default function PlanLinesTable({
+  items,
+  total,
+  totals,
+  sort,
+  order,
+  onSort,
+  squadName,
+  squadPath,
+  onAlias,
+  onSelect,
+  selectedId,
+  dimmed,
+}: Props) {
+  const sh = (k: SortKey, label: string, align?: 'right') => (
+    <SortHeader active={sort === k} dir={order} onSort={() => onSort(k)} align={align}>
+      {label}
+    </SortHeader>
   );
-}
-
-export default function PlanLinesTable({ items, sort, order, onSort, squadName, onAlias, dimmed }: Props) {
-  const th = { sort, order, onSort };
   return (
-    <Table striped hover minWidth={1350} style={dimmed ? { opacity: 0.6 } : undefined}>
+    <Table striped className="plan-table" minWidth={900} style={dimmed ? { opacity: 0.6 } : undefined}>
       <thead>
         <tr>
-          <Th label="N°" sortKey="row_num" {...th} />
-          <Th label="CT" sortKey="ct" {...th} />
-          <Th label="Ressource" sortKey="ressource" {...th} />
-          <Th label="Nom Prénom" {...th} />
-          <Th label="Squad / groupe" {...th} />
-          <Th label="Ligne de coût" {...th} />
-          <Th label="Charge totale" sortKey="charge_totale" alignRight {...th} />
-          <Th label="PPS" sortKey="pps" alignRight {...th} />
-          <Th label="%" alignRight {...th} />
-          <Th label="Unité" {...th} />
-          <Th label="Dates" sortKey="date_debut" {...th} />
-          <Th label="Statut" {...th} />
+          <th data-glyph>
+            <VisuallyHidden>Contrôle</VisuallyHidden>
+          </th>
+          {sh('ct', 'CT')}
+          {sh('ressource', 'Ressource')}
+          <th>Squad</th>
+          {sh('charge_totale', 'Charge', 'right')}
+          {sh('pps', 'PPS', 'right')}
+          <th data-align="right">%</th>
+          {sh('date_debut', 'Dates')}
           <th>
             <VisuallyHidden>Actions</VisuallyHidden>
           </th>
@@ -109,50 +111,42 @@ export default function PlanLinesTable({ items, sort, order, onSort, squadName, 
       <tbody>
         {items.length === 0 && (
           <tr>
-            <td colSpan={13}>
-              <Text tone="secondary" align="center" style={{ padding: '12px 0' }}>
+            <td colSpan={COLS}>
+              <Text tone="secondary" align="center">
                 Aucune ligne ne correspond aux filtres.
               </Text>
             </td>
           </tr>
         )}
         {items.map((l) => {
-          const dropped = l.statut_parsing === 'drop';
-          const squad = squadName(l.squad_id);
+          const squad = squadName(l.squad_id) || l.groupe;
+          const path = squadPath(l.squad_id) || l.groupe;
+          const tone = l.statut_parsing === 'warn' ? 'warning' : l.statut_parsing === 'drop' ? 'danger' : undefined;
           return (
-            <tr key={l.id} data-strike={dropped || undefined}>
-              <td>
-                <Text as="span" tone="secondary" tabular>
-                  {l.row_num}
-                </Text>
+            <tr
+              key={l.id}
+              data-tone={tone}
+              data-clickable
+              data-selected={selectedId === l.id || undefined}
+              onClick={() => onSelect(l)}
+            >
+              <td data-glyph>
+                <ParsingGlyph line={l} />
               </td>
               <td data-mono data-nowrap>
                 {l.ct}
               </td>
-              <td>
-                <Group gap={6} wrap={false}>
-                  <Text as="span" mono style={{ whiteSpace: 'nowrap' }}>
-                    {l.ressource}
-                  </Text>
-                  {l.inactive && <InactiveBadge />}
-                </Group>
-                <Text size="sm" tone="secondary">
-                  {KIND_LABEL[l.ressource_kind] ?? l.ressource_kind}
-                </Text>
+              <td data-nowrap>
+                <RessourceLabel line={l} />
               </td>
-              <td>
-                <NomPrenomCell line={l} />
-              </td>
-              <td>
-                {squad || (l.groupe ? '' : '—')}
-                {l.groupe && l.groupe !== squad && (
-                  <Text size="sm" tone="secondary">
-                    {l.groupe}
-                  </Text>
+              <td className="plan-table__squad">
+                {squad ? (
+                  <Tooltip label={path} disabled={!path || path === squad} delay={300}>
+                    <span className="plan-table__ellipsis">{squad}</span>
+                  </Tooltip>
+                ) : (
+                  '—'
                 )}
-              </td>
-              <td>
-                <Text size="sm">{l.ligne_cout}</Text>
               </td>
               <td data-align="right" data-nowrap>
                 {fmtHours(l.charge_totale)}
@@ -163,28 +157,28 @@ export default function PlanLinesTable({ items, sort, order, onSort, squadName, 
               <td data-align="right" data-nowrap>
                 {fmtPct(l.pourcentage)}
               </td>
-              <td data-mono data-nowrap>
-                {l.unite || '—'}
-              </td>
-              <td data-nowrap>
-                {fmtDate(l.date_debut)} → {fmtDate(l.date_fin)}
-              </td>
-              <td>
-                {l.statut_parsing === 'ok' ? (
-                  <Text as="span" size="sm" tone="secondary">
-                    ok
-                  </Text>
-                ) : (
-                  <ParsingBadge statut={l.statut_parsing} motif={l.motif_rejet || undefined} />
-                )}
-              </td>
-              <td data-actions>
+              <td data-nowrap>{fmtRange(l.date_debut, l.date_fin)}</td>
+              <td data-actions onClick={stop}>
                 <AliasAction line={l} onAlias={onAlias} />
               </td>
             </tr>
           );
         })}
       </tbody>
+      <tfoot>
+        <tr>
+          <td colSpan={4} data-nowrap>
+            Total · {plural(total, 'ligne')}
+          </td>
+          <td data-align="right" data-nowrap>
+            {fmtHours(totals.charge_totale)}
+          </td>
+          <td data-align="right" data-nowrap>
+            {fmtEur(totals.pps)}
+          </td>
+          <td colSpan={3} />
+        </tr>
+      </tfoot>
     </Table>
   );
 }

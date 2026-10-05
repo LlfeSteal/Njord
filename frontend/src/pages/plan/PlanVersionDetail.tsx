@@ -1,42 +1,61 @@
-// Détail d'une version de plan de charge (§7.3) : en-tête, filtres, table paginée, totaux, export, alias.
+// Détail d'une version de plan de charge : barre d'outils (retour, statut, compteurs, filtres),
+// table paginée avec totaux en pied, inspecteur (ligne sélectionnée ou infos de la version).
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Banner,
   Card,
-  Group,
-  Link,
+  EmptyState,
+  IconButton,
   LoadingBlock,
+  Page,
+  PageToolbar,
   Pagination,
   Select,
   SkeletonRows,
-  Spinner,
   Stack,
-  Tag,
-  Text,
-  Title,
+  type MenuEntry,
 } from '../../ui';
-import { IconArrowLeft } from '../../ui/Icons';
+import { IconDownload, IconInfo } from '../../ui/Icons';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { planApi, versionsApi } from '../../api/client';
 import type { PlanLine } from '../../api/types';
 import { StatusBadge } from '../../components/badges';
 import ErrorAlert from '../../components/ErrorAlert';
-import { fmtDateTime, fmtEur, fmtHours, fmtNumber, fmtPeriod } from '../../lib/format';
+import VersionInfoInspector from '../../components/lifecycle/VersionInfoInspector';
+import { useVersionLifecycle } from '../../components/lifecycle/useVersionLifecycle';
+import { plural } from '../../components/lifecycle/lifecycleUtils';
+import { fmtDateTime, fmtNumber, fmtPeriod } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 import { useSquadIndex } from '../referentiels/hooks';
 import AliasPersonneModal from './AliasPersonneModal';
+import PlanLineInspector from './PlanLineInspector';
 import PlanLinesFilters from './PlanLinesFilters';
 import PlanLinesTable from './PlanLinesTable';
 import { PAGE_SIZES, useLineFilters, type SortKey } from './useLineFilters';
+import './plan.css';
 
 const NUMERIC_SORTS: SortKey[] = ['charge_totale', 'pps'];
+const BACK = { to: '/plan', label: 'Plans de charge' };
+
+type Panel = { type: 'info' } | { type: 'line'; line: PlanLine } | null;
+
+/** Téléchargement d'un fichier servi par l'API (équivalent d'un <a href download>). */
+function download(href: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 export default function PlanVersionDetail() {
   const { versionId = '' } = useParams();
-  const { filters, sort, order, limit, page, update, reset, query, activeCount } = useLineFilters();
+  const { filters, sort, order, limit, page, update, query } = useLineFilters();
   const squads = useSquadIndex();
+  const lc = useVersionLifecycle('plan');
   const [aliasLine, setAliasLine] = useState<PlanLine | null>(null);
+  const [panel, setPanel] = useState<Panel>(null);
 
   const version = useQuery({
     queryKey: qk.version('plan', versionId),
@@ -71,76 +90,96 @@ export default function PlanVersionDetail() {
     else update({ sort: k, order: NUMERIC_SORTS.includes(k) ? 'desc' : 'asc' });
   };
 
-  const back = (
-    <Link to="/plan">
-      <Group gap={4} wrap={false}>
-        <IconArrowLeft size={14} /> Plans de charge
-      </Group>
-    </Link>
-  );
-
   if (version.isLoading) return <LoadingBlock />;
   if (version.error || !v) {
     return (
-      <Stack gap={12} align="start">
-        {back}
+      <Page toolbar={<PageToolbar back={BACK} title="Version introuvable" />}>
         <ErrorAlert error={version.error ?? 'Version introuvable'} title="Version introuvable" />
-      </Stack>
+      </Page>
     );
   }
 
+  const subtitle = [
+    plural(v.nb_lignes, 'ligne'),
+    v.nb_warn ? `${fmtNumber(v.nb_warn)} à vérifier` : '',
+    v.nb_drop ? `${fmtNumber(v.nb_drop)} rejetée${v.nb_drop > 1 ? 's' : ''}` : '',
+    fmtPeriod(v.periode_debut, v.periode_fin),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const lifecycleEntries = lc.menuEntries(v);
+  const menu: MenuEntry[] = [
+    ...(!purged
+      ? [
+          {
+            label: 'Exporter les lignes filtrées (CSV)',
+            icon: <IconDownload size={15} />,
+            onSelect: () => download(planApi.linesCsvUrl(versionId, query)),
+          },
+        ]
+      : []),
+    ...(lifecycleEntries.length && !purged ? [{ type: 'separator' as const }] : []),
+    ...lifecycleEntries,
+  ];
+
+  const infoOpen = panel?.type === 'info';
+  const selected = panel?.type === 'line' ? panel.line : null;
+
+  const inspector = infoOpen ? (
+    <VersionInfoInspector version={v} opened onClose={() => setPanel(null)} lifecycle={lc} />
+  ) : (
+    <PlanLineInspector
+      line={selected}
+      onClose={() => setPanel(null)}
+      squadName={squads.name}
+      squadPath={squads.label}
+      onAlias={setAliasLine}
+    />
+  );
+
   return (
-    <Stack gap={12}>
-      <Stack gap={4}>
-        {back}
-        <Group gap={8} mt={4}>
-          <Title order={2}>{v.intitule}</Title>
-          <StatusBadge statut={v.statut} />
-        </Group>
-        <Text size="sm" tone="secondary">
-          Période : {fmtPeriod(v.periode_debut, v.periode_fin)} · Importée le {fmtDateTime(v.importee_le)}
-          {v.importeur ? ` par ${v.importeur}` : ''}
-          {v.filename ? ` · ${v.filename}` : ''}
-          {v.layout ? ` · Layout ${v.layout}` : ''}
-        </Text>
-        <Group gap={16} mt={4}>
-          <Text as="span" tabular>
-            {fmtNumber(v.nb_lignes)} lignes
-          </Text>
-          <Tag tone="warning" glyph="warning">
-            {fmtNumber(v.nb_warn)} warn
-          </Tag>
-          <Tag tone="danger" glyph="danger">
-            {fmtNumber(v.nb_drop)} drop
-          </Tag>
-        </Group>
-      </Stack>
-
-      {v.statut === 'archivee' && (
-        <Banner tone="info">
-          Version archivée{v.archivee_le ? ` le ${fmtDateTime(v.archivee_le)}` : ''} — consultable et exportable. Elle
-          n'est plus utilisée par défaut par l'onglet Analyse.
-        </Banner>
-      )}
-      {purged && (
-        <Banner tone="warning">
-          Version purgée{v.purgee_le ? ` le ${fmtDateTime(v.purgee_le)}` : ''} : ses lignes ont été définitivement
-          supprimées.
-        </Banner>
-      )}
-
-      {!purged && (
-        <>
-          <PlanLinesFilters
-            filters={filters}
-            update={update}
-            reset={reset}
-            activeCount={activeCount}
-            facets={facets.data}
-            facetsLoading={facets.isLoading}
-            squadLabel={squads.label}
-            csvHref={planApi.linesCsvUrl(versionId, query)}
-          />
+    <Page
+      wide
+      inspector={inspector}
+      toolbar={
+        <PageToolbar
+          back={BACK}
+          title={v.intitule}
+          accessory={<StatusBadge statut={v.statut} />}
+          subtitle={subtitle}
+          actions={
+            <IconButton
+              label="Infos"
+              aria-pressed={infoOpen}
+              onClick={() => setPanel(infoOpen ? null : { type: 'info' })}
+            >
+              <IconInfo size={16} />
+            </IconButton>
+          }
+          menu={menu.length ? menu : undefined}
+          bottom={
+            purged ? undefined : (
+              <PlanLinesFilters
+                filters={filters}
+                update={update}
+                facets={facets.data}
+                squadLabel={squads.label}
+                nbWarn={v.nb_warn}
+              />
+            )
+          }
+        />
+      }
+    >
+      {purged ? (
+        <Card>
+          <EmptyState title="Version purgée">
+            Ses lignes ont été définitivement supprimées{v.purgee_le ? ` le ${fmtDateTime(v.purgee_le)}` : ''}.
+          </EmptyState>
+        </Card>
+      ) : (
+        <Stack gap={12}>
           <ErrorAlert error={facets.error} title="Filtres indisponibles" />
           <ErrorAlert error={lines.error} title="Chargement des lignes impossible" />
 
@@ -150,60 +189,42 @@ export default function PlanVersionDetail() {
             lines.data && (
               <PlanLinesTable
                 items={lines.data.items}
+                total={total}
+                totals={lines.data.totals}
                 sort={sort}
                 order={order}
                 onSort={onSort}
                 squadName={squads.name}
+                squadPath={squads.label}
                 onAlias={setAliasLine}
+                onSelect={(line) => setPanel({ type: 'line', line })}
+                selectedId={selected?.id ?? null}
                 dimmed={lines.isPlaceholderData}
               />
             )
           )}
 
-          {lines.data && (
-            <Card
-              padding={12}
-              style={{ position: 'sticky', bottom: 0, zIndex: 5 }}
-              aria-label="Totaux sur le filtre courant"
-            >
-              <Group justify="between" gap={8}>
-                <Group gap={16}>
-                  <Text as="span" tabular>
-                    <strong>{fmtNumber(total)}</strong> ligne{total > 1 ? 's' : ''}
-                  </Text>
-                  <Text as="span" tabular>
-                    Σ charge totale : <strong>{fmtHours(lines.data.totals.charge_totale)}</strong>
-                  </Text>
-                  <Text as="span" tabular>
-                    Σ PPS : <strong>{fmtEur(lines.data.totals.pps)}</strong>
-                  </Text>
-                  {lines.isFetching && <Spinner />}
-                  <Text as="span" size="sm" tone="secondary">
-                    {activeCount > 0 ? 'sur toutes les lignes filtrées' : 'sur toute la version'}
-                  </Text>
-                </Group>
-                <Group gap={8}>
-                  <Select
-                    aria-label="Lignes par page"
-                    data={PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} / page` }))}
-                    value={String(limit)}
-                    onChange={(val) => val && update({ limit: val })}
-                  />
-                  {totalPages > 1 && (
-                    <Pagination
-                      page={Math.min(page, totalPages)}
-                      total={totalPages}
-                      onChange={(p) => update({ page: String(p) })}
-                    />
-                  )}
-                </Group>
-              </Group>
-            </Card>
+          {lines.data && total > 0 && (
+            <div className="plan-foot">
+              <Pagination
+                page={Math.min(page, totalPages)}
+                total={totalPages}
+                onChange={(p) => update({ page: String(p) })}
+                summary={`${fmtNumber((page - 1) * limit + 1)}–${fmtNumber(Math.min(page * limit, total))} sur ${plural(total, 'ligne')}`}
+              />
+              <Select
+                aria-label="Lignes par page"
+                data={PAGE_SIZES.map((n) => ({ value: String(n), label: `${n} / page` }))}
+                value={String(limit)}
+                onChange={(val) => val && update({ limit: val })}
+              />
+            </div>
           )}
-        </>
+        </Stack>
       )}
 
       <AliasPersonneModal line={aliasLine} onClose={() => setAliasLine(null)} />
-    </Stack>
+      {lc.modals}
+    </Page>
   );
 }

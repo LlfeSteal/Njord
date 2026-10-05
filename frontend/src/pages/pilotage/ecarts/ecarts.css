@@ -1,0 +1,25 @@
+/* Page Écarts — compléments de mise en page, tokens uniquement (docs/STYLE.md). */
+
+/* Résultat précédent affiché pendant le recalcul. */
+.ecarts-content {
+  transition: opacity 0.15s var(--ease);
+}
+.ecarts-content[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+/* Ressource sur une ligne : libellé tronqué, puis l'étiquette « inactif ». */
+.ecarts-ressource {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  min-width: 0;
+  vertical-align: middle;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ecarts-content {
+    transition: none;
+  }
+}

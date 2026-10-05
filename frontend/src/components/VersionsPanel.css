@@ -1,0 +1,17 @@
+/* Liste des versions : actions révélées au survol ou au focus de la ligne (cellule macOS). */
+@media (hover: hover) {
+  .versions-table td[data-actions] > * {
+    opacity: 0;
+    transition: opacity 0.15s var(--ease);
+  }
+  .versions-table tr:hover td[data-actions] > *,
+  .versions-table tr:focus-within td[data-actions] > * {
+    opacity: 1;
+  }
+}
+.versions-table__title {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

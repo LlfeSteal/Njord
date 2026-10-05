@@ -1,0 +1,27 @@
+/* Détail d'un import du réalisé : ligne basse de la barre, pied de table, sélecteur de colonnes. */
+.realise-bottom {
+  min-width: 0;
+}
+.realise-bottom__pills {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.realise-bottom__warn {
+  flex: none;
+}
+
+.realise-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.realise-foot > :first-child {
+  flex: 1 1 auto;
+}
+
+.realise-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}

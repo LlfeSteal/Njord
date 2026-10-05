@@ -30,19 +30,28 @@ Purge = suppression des lignes + version passée en `purgee` (pierre tombale vis
 
 ## Frontend — structure
 
-| Chemin | Rôle | Propriétaire |
-|---|---|---|
-| `src/api/types.ts`, `src/api/client.ts` | Types & client typé (`versionsApi`, `planApi`, `realiseApi`, `referentielApi`, `settingsApi`, `analyseApi`) | intégrateur |
-| `src/lib/format.ts`, `src/lib/queryKeys.ts` | Formatage fr-FR, clés TanStack Query | intégrateur |
-| `src/styles/theme.css` | Tokens clair/sombre + base (cf. `docs/STYLE.md`) | intégrateur |
-| `src/ui/` | Kit UI : un `.tsx` + un `.css` par composant, exportés par `src/ui/index.ts` ; icônes `src/ui/Icons.tsx`. Props = contrat figé | intégrateur |
-| `src/components/AppLayout.tsx`, `badges.tsx`, `ErrorAlert.tsx` | Coquille (barre d'outils, navigation, apparence), statuts version/parsing/flag | intégrateur |
-| `src/components/VersionsPanel.tsx`, `ImportWizard.tsx`, `PurgeModal.tsx` | Cycle de vie générique (props figées) | agent FE partagé |
-| `src/pages/plan/` (`/plan/*`), `src/pages/referentiels/` | Onglets Plan de charge & Référentiels | agent FE Plan |
-| `src/pages/realise/` (`/realise/*`), `src/pages/parametres/` | Onglets Réalisé & Paramètres | agent FE Réalisé |
-| `src/pages/analyse/` (`/analyse/*`) | Onglet Analyse (sous-onglets) | agent FE Analyse |
+Navigation en barre latérale (`src/components/AppLayout.tsx`), routes dans `src/App.tsx` :
 
-Chaque `src/pages/<module>/index.tsx` exporte par défaut le composant monté sur `/<module>/*` et gère ses sous-routes relatives (`<Routes><Route index …/><Route path=":versionId" …/></Routes>`). Après import / archivage / purge / alias : invalider `['versions']`, `['analyse']` (et `['personnes']` si besoin).
+| Route | Page | Dossier |
+|---|---|---|
+| `/` | Vue d'ensemble (budget, à traiter, prévision) | `src/pages/pilotage/overview/` |
+| `/anomalies` | Boîte de réception des anomalies | `src/pages/pilotage/anomalies/` |
+| `/ecarts` | Écarts d'imputation | `src/pages/pilotage/ecarts/` |
+| `/budget` | Budget par CT | `src/pages/pilotage/budget/` |
+| `/previsions` | Atterrissage et charge à venir | `src/pages/pilotage/previsions/` |
+| `/plan/*`, `/realise/*` | Versions importées et leurs lignes | `src/pages/plan/`, `src/pages/realise/` |
+| `/personnes`, `/squads` | Référentiels | `src/pages/referentiels/` |
+| `/reglages/*` | Paramètres et journal | `src/pages/parametres/` |
+
+| Chemin | Rôle |
+|---|---|
+| `src/api/types.ts`, `src/api/client.ts` | Types & client typé (contrat) |
+| `src/lib/format.ts`, `src/lib/queryKeys.ts` | Formatage fr-FR, clés TanStack Query |
+| `src/styles/theme.css`, `src/ui/` | Tokens et kit UI (gabarit `Page`/`PageToolbar`/`Inspector`, `Sidebar`, listes, filtres…) — cf. `docs/STYLE.md` |
+| `src/pages/pilotage/shared/context.ts` | Sélection d'analyse partagée (versions × période) + `useAnalyse()` |
+| `src/components/` | Coquille, statuts, cycle de vie des versions (VersionsPanel, ImportWizard, PurgeModal) |
+
+Après import / archivage / purge / alias / suivi d'anomalie : invalider `['versions']`, `['analyse']` (et `['personnes']` si besoin).
 
 ## Règles de travail en parallèle
 - Ne modifier que ses répertoires. `go.mod`, `package.json`, `domain`, `store`, `api/types.ts`, `api/client.ts` : **lecture seule** — besoin d'un changement → le signaler dans le rapport final.

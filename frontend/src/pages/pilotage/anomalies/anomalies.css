@@ -1,0 +1,180 @@
+/* Boîte des anomalies façon Mail — tokens uniquement (docs/STYLE.md). */
+
+/* Résultat précédent affiché pendant le recalcul. */
+.anom-split,
+.anom-card {
+  transition: opacity 0.15s var(--ease);
+}
+.anom-split[aria-busy='true'],
+.anom-card[aria-busy='true'] {
+  opacity: 0.55;
+}
+
+/* ---------------------------------------------------------------- Maître-détail (écran large) */
+.anom-split {
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  min-height: 320px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.anom-split__list {
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 0.5px solid var(--separator);
+}
+.anom-split__detail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.anom-split__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.anom-split__footer {
+  padding: 12px 24px;
+  border-top: 0.5px solid var(--separator);
+}
+/* Ligne de lecture confortable. */
+.anom-split__read {
+  max-width: 680px;
+}
+
+/* Liste seule (écran étroit) : le détail passe dans l'Inspector. */
+.anom-card {
+  padding-bottom: 8px;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- Liste */
+.anom-list {
+  padding-bottom: 8px;
+}
+.anom-list:focus-visible {
+  outline: none;
+}
+.anom-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px 4px;
+  background: var(--card);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.anom-group__count {
+  font-variant-numeric: tabular-nums;
+}
+.anom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.15s var(--ease);
+}
+.anom-row:hover {
+  background: var(--row-hover);
+}
+.anom-row[data-selected] {
+  background: var(--accent-tint);
+}
+/* Focus clavier : anneau sur la ligne sélectionnée plutôt que sur toute la liste. */
+.anom-list:focus-visible .anom-row[data-selected] {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 50%, transparent);
+}
+.anom-row__glyph {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 16px;
+}
+.anom-row__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.anom-row__title,
+.anom-row__sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.anom-row__title {
+  color: var(--text);
+  font-size: 13px;
+}
+.anom-row__sub {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.anom-row[data-done] .anom-row__title {
+  color: var(--text-secondary);
+}
+.anom-row__mark {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- Détail */
+.anom-detail__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.anom-detail__glyph {
+  display: inline-flex;
+  flex: none;
+  padding-top: 1px;
+}
+.anom-detail__titles {
+  min-width: 0;
+}
+.anom-detail__title {
+  margin: 0 0 2px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.anom-detail__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.anom-detail__comment {
+  white-space: pre-wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anom-split,
+  .anom-card,
+  .anom-row {
+    transition: none;
+  }
+}

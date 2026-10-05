@@ -1,12 +1,27 @@
-// Journal d'audit (GET /audit?objet_type=&limit=), récents d'abord.
-import { useState } from 'react';
+// Journal d'audit (GET /audit?objet_type=&limit=), récents d'abord ; détail d'une entrée dans l'inspecteur.
+import { useState, type KeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { settingsApi } from '../../api/client';
+import type { AuditEntry } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
-import { Code, EmptyState, Group, Select, SkeletonRows, Spinner, Stack, Table, Text, Tooltip } from '../../ui';
+import {
+  EmptyState,
+  Group,
+  Inspector,
+  InspectorSection,
+  KeyValue,
+  Page,
+  Select,
+  SkeletonRows,
+  Spinner,
+  Table,
+  Text,
+} from '../../ui';
 import { IconHistory } from '../../ui/Icons';
 import { fmtDateTime } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
+import ReglagesToolbar from './ReglagesToolbar';
+import './reglages.css';
 
 const OBJET_TYPES: { value: string; label: string }[] = [
   { value: 'plan_version', label: 'Version de plan' },
@@ -22,15 +37,31 @@ const LIMITS = ['100', '200', '500', '1000'];
 export default function AuditLog() {
   const [objetType, setObjetType] = useState<string | null>(null);
   const [limit, setLimit] = useState(200);
+  const [selected, setSelected] = useState<AuditEntry | null>(null);
   const auditQ = useQuery({
     queryKey: [...qk.audit(objetType ?? undefined), limit],
     queryFn: () => settingsApi.audit(objetType ?? undefined, limit),
   });
   const rows = auditQ.data ?? [];
 
+  const subtitle = auditQ.data
+    ? `${rows.length} entrée${rows.length > 1 ? 's' : ''}${rows.length >= limit ? ' (limite atteinte)' : ''}`
+    : undefined;
+
+  const onRowKey = (e: KeyboardEvent, r: AuditEntry) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setSelected(r);
+    }
+  };
+
   return (
-    <Stack gap={8}>
-      <Group gap={8}>
+    <Page
+      toolbar={<ReglagesToolbar subtitle={subtitle} />}
+      inspector={<AuditInspector entry={selected} onClose={() => setSelected(null)} />}
+    >
+      {/* Filtres sur une ligne. */}
+      <Group gap={8} wrap={false}>
         <Select
           aria-label="Type d'objet"
           placeholder="Type d'objet"
@@ -46,66 +77,83 @@ export default function AuditLog() {
           onChange={(v) => v && setLimit(Number(v))}
         />
         {auditQ.isFetching && <Spinner size={12} />}
-        {auditQ.data && (
-          <Text size="sm" tone="secondary" tabular style={{ marginLeft: 'auto' }}>
-            {rows.length} entrée{rows.length > 1 ? 's' : ''}
-            {rows.length >= limit ? ' (limite atteinte)' : ''}
-          </Text>
-        )}
       </Group>
 
       <ErrorAlert error={auditQ.error} title="Impossible de charger le journal" />
 
-      <Table striped hover minWidth={760}>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Opérateur</th>
-            <th>Action</th>
-            <th>Objet</th>
-            <th>Identifiant</th>
-            <th>Détails</th>
-          </tr>
-        </thead>
-        <tbody>
-          {auditQ.isLoading ? (
+      {auditQ.isLoading ? (
+        <SkeletonRows rows={6} />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<IconHistory size={40} />} title="Aucune entrée dans le journal." />
+      ) : (
+        <Table hover minWidth={720}>
+          <thead>
             <tr>
-              <td colSpan={6}>
-                <SkeletonRows rows={5} />
-              </td>
+              <th style={{ width: 150 }}>Date</th>
+              <th style={{ width: '15%' }}>Opérateur</th>
+              <th style={{ width: '18%' }}>Action</th>
+              <th style={{ width: 150 }}>Objet</th>
+              <th>Détails</th>
             </tr>
-          ) : rows.length === 0 ? (
-            <tr>
-              <td colSpan={6}>
-                <EmptyState icon={<IconHistory size={40} />} title="Aucune entrée dans le journal." />
-              </td>
-            </tr>
-          ) : (
-            rows.map((r) => (
-              <tr key={r.id}>
-                <td data-nowrap>{fmtDateTime(r.at)}</td>
-                <td>{r.operateur || '—'}</td>
-                <td data-nowrap>
-                  <Text as="span" weight={500}>
-                    {r.action}
-                  </Text>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.id}
+                data-clickable
+                data-selected={selected?.id === r.id || undefined}
+                tabIndex={0}
+                onClick={() => setSelected(r)}
+                onKeyDown={(e) => onRowKey(e, r)}
+              >
+                <td data-nowrap className="reglages-date">
+                  {fmtDateTime(r.at)}
                 </td>
+                <td className="reglages-ellipsis">{r.operateur || '—'}</td>
+                <td className="reglages-ellipsis reglages-strong">{r.action}</td>
                 <td data-nowrap>{OBJET_LABEL[r.objet_type] ?? r.objet_type}</td>
-                <td>
-                  {r.objet_id ? (
-                    <Tooltip label={r.objet_id} disabled={r.objet_id.length <= 10}>
-                      <Code>{r.objet_id.length > 10 ? `${r.objet_id.slice(0, 8)}…` : r.objet_id}</Code>
-                    </Tooltip>
-                  ) : (
-                    '—'
-                  )}
+                <td className="reglages-ellipsis reglages-muted" title={r.details || undefined}>
+                  {r.details || '—'}
                 </td>
-                <td style={{ maxWidth: 420, wordBreak: 'break-word' }}>{r.details || '—'}</td>
               </tr>
-            ))
-          )}
-        </tbody>
-      </Table>
-    </Stack>
+            ))}
+          </tbody>
+        </Table>
+      )}
+    </Page>
+  );
+}
+
+function AuditInspector({ entry, onClose }: { entry: AuditEntry | null; onClose: () => void }) {
+  return (
+    <Inspector
+      opened={!!entry}
+      onClose={onClose}
+      title={entry?.action ?? ''}
+      subtitle={entry ? fmtDateTime(entry.at) : undefined}
+    >
+      {entry && (
+        <>
+          <InspectorSection>
+            <KeyValue
+              items={[
+                { label: 'Date', value: fmtDateTime(entry.at) },
+                { label: 'Opérateur', value: entry.operateur || '—' },
+                { label: 'Action', value: entry.action },
+                { label: 'Objet', value: OBJET_LABEL[entry.objet_type] ?? entry.objet_type },
+                { label: 'Identifiant', value: entry.objet_id || '—', mono: !!entry.objet_id },
+              ]}
+            />
+          </InspectorSection>
+          <InspectorSection title="Détails">
+            {entry.details ? (
+              <Text className="reglages-details">{entry.details}</Text>
+            ) : (
+              <Text tone="secondary">Aucun détail.</Text>
+            )}
+          </InspectorSection>
+        </>
+      )}
+    </Inspector>
   );
 }

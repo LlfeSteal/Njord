@@ -1,0 +1,67 @@
+/* Détail d'un plan de charge : cellules sur une ligne, actions au survol, ligne basse de la barre. */
+.plan-res {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  white-space: nowrap;
+}
+.plan-res__code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.plan-res__name {
+  white-space: pre;
+}
+.plan-res__inactive {
+  margin-left: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.plan-res__inactive .ui-tag__label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.plan-table__squad {
+  max-width: 200px;
+}
+.plan-table__ellipsis {
+  display: block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .plan-table td[data-actions] > * {
+    opacity: 0;
+    transition: opacity 0.15s var(--ease);
+  }
+  .plan-table tr:hover td[data-actions] > *,
+  .plan-table tr[data-selected] td[data-actions] > *,
+  .plan-table tr:focus-within td[data-actions] > * {
+    opacity: 1;
+  }
+}
+
+.plan-bottom {
+  min-width: 0;
+}
+.plan-bottom__pills {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.plan-bottom__warn {
+  flex: none;
+}
+
+.plan-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.plan-foot > :first-child {
+  flex: 1 1 auto;
+}

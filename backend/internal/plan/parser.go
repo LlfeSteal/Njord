@@ -111,13 +111,6 @@ func looseHeader(row []string) bool {
 	return n >= 4
 }
 
-// AllowedPct are the Pourcentage values of SPEC §8 règle 3 (strict : toute autre
-// valeur → warn, ligne conservée).
-var AllowedPct = map[int]bool{20: true, 30: true, 40: true, 50: true, 70: true, 80: true, 100: true}
-
-// PctAllowed implements §8 règle 3.
-func PctAllowed(p int) bool { return AllowedPct[p] }
-
 var layoutBKeywords = []string{"OEUVRE", "CAPACITE", "MISSION", "PROVISION", "ACHATS", "STOCK"}
 
 // Motif categories (keys of MotifsCount).
@@ -129,7 +122,6 @@ const (
 	motifChargeNum   = "charge totale non numérique"
 	motifDateDebut   = "date de début non convertible"
 	motifDateFin     = "date de fin non convertible"
-	motifPct         = "pourcentage hors valeurs autorisées"
 	motifPctNum      = "pourcentage non numérique"
 	motifPPS         = "PPS non numérique"
 	motifDates       = "date de fin antérieure à la date de début"
@@ -473,10 +465,8 @@ func parseDataRow(row []string, rowNum, idxQte, idxTaux, idxDepuis, idxPendant i
 		li.add(domain.ParsingWarn, motifPPS, "PPS absent ou non numérique (0 retenu)")
 	}
 	if v, err := xlsxutil.ParseNumber(at(7)); err == nil {
+		// SPEC §8 règle 3 (valeurs autorisées) supprimée : tout pourcentage numérique est accepté.
 		pl.Pourcentage = int(math.Round(v))
-		if !PctAllowed(pl.Pourcentage) && layout != "" {
-			li.add(domain.ParsingWarn, motifPct, fmt.Sprintf("pourcentage %s hors valeurs autorisées (20, 30, 40, 50, 70, 80, 100)", formatNum(v)))
-		}
 	} else if layout != "" {
 		li.add(domain.ParsingWarn, motifPctNum, fmt.Sprintf("pourcentage non numérique (« %s »)", at(7)))
 	}

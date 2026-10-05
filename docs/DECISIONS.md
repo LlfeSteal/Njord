@@ -8,6 +8,7 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 3. **Heures MO** : `heures = QUANTITE` seulement si `TYPE ∈ mo_types` **et** `CATEGORIE = "MAIN D'OEUVRE"` ; sinon `heures = 0, eur = TOTAL EN €`. (Dans la démo, des lignes `CAPACITE SUR SITE` de catégorie `PRESTATION` portent des montants dans `Quantité`.) Les lignes MO ont `eur = 0` (spec §3.1, évite le double comptage) ; leur coût est exposé à titre informatif (`BudgetCT.cout_mo_eur`).
 
 4. **Refonte visuelle** (2026-10-05) : le front suit le guide `docs/STYLE.md` (HIG Apple transposées au web, adapté du guide Nornir). **Mantine et `@tabler/icons-react` sont retirés** au profit d'un kit maison `src/ui/` (CSS natif + tokens, thème Automatique / Clair / Sombre). Les flags et statuts n'utilisent plus d'emoji : glyphes dont la forme porte le sens, couleurs à sens unique (vert conforme, orange hors plan, rouge sur-imputation, violet sous-imputation, gris absence).
+5. **Règle SPEC §8 r3 supprimée** (2026-10-05) : la liste des pourcentages autorisés {20,30,40,50,70,80,100} n'est plus contrôlée (60 % y manquait) ; toute valeur numérique est acceptée sans warn.
 
 ## Format démo — Plan de charge
 - Onglet `Style par défaut`, en-tête ligne 3, 16 colonnes (12 de la spec + `Quantité affectée`, `Taux fixe`, `Depuis`, `Pendant`). Les colonnes en plus ne font pas échouer le contrôle d'en-tête : la règle « 12 colonnes conformes » = les 12 colonnes attendues présentes **dans l'ordre** en tête de ligne.
@@ -16,7 +17,7 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 - CT de 9 **ou 10** caractères acceptés (`Y99F900010`).
 - Ressource : `[inactif]` → strip + `inactive`; motif `^[A-Z0-9_]{1,12}$` sans `_` long → `internal` (ex. `DURANDC`, `R_001`) ; préfixe `2GI_` / `RES_ext_` ou longueur > 12 → `external` ; sinon `unknown` (warn).
 
-- **Pourcentage** (§8 r3) appliqué strictement : ∉ {20,30,40,50,70,80,100} → warn. Sur la démo : 5 warn (60 % l. 18/40/54, 10 % l. 23, 200 % l. 50), 31 ok.
+- **Pourcentage** : pas de contrôle de valeur (voir « Validé par l'utilisateur » n° 5). Seul un pourcentage non numérique reste en warn. Sur la démo : 36 ok, 0 warn.
 - **Alias de squad** issus des libellés (`… / Squad Alpha`) : rattachés au groupe du chemin dont le nom contient tous les tokens de l'alias (sinon groupe le plus interne) → « Squad Alpha » → « Squad Alpha — Plateforme », « Cellule Qualité » → « Cellule Transverse Qualité ».
 - Layout B : les colonnes démo additionnelles ne sont pas lues (position ambiguë avec la colonne poubelle).
 - PPS vide/non numérique → warn (0) ; charge non numérique → drop ; pourcentage non numérique → warn.

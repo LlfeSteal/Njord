@@ -35,7 +35,7 @@ Permettre à un utilisateur métier de **gérer le cycle de vie complet** d'un p
 | 4 | Ligne de coût | `enum` | ✓ | 2+ | `MAIN D'OEUVRE SUR SITE` \| `CAPACITE SUR SITE` | classification |
 | 5 | Charge totale | `float` h | ✓ | 70–800 | 219.0 | heures période complète |
 | 6 | .PPS | `float` € | ✓ | 0 possible | 25093.02 | budget associé |
-| 7 | Pourcentage | `int` | ✓ | 7 | 40 | ∈ {20,30,40,50,70,80,100} |
+| 7 | Pourcentage | `int` | ✓ | 7 | 40 | entier (toute valeur acceptée) |
 | 8 | Unité | `str` | ✓ | ~25 | `U_####` | org unit |
 | 9 | Calcul de la durée | `str` | ✓ | 1 | `Dates fixes` | constant |
 | 10 | Date début | `date` | ✓ | — | `2026-09-01` | sériel Excel à convertir |
@@ -197,7 +197,7 @@ Appliqués **à l'import uniquement**, le module Analyse gère ses propres contr
 |---|---|---|
 | 1 | en-tête 12 colonnes conformes | sinon rejet total |
 | 2 | layout détecté ≠ inconnu | sinon `statut_parsing = drop` |
-| 3 | `pct ∈ {20,30,40,50,70,80,100}` | sinon `warn`, ligne conservée |
+| 3 | ~~`pct ∈ {20,30,40,50,70,80,100}`~~ | **supprimée** (2026-10-05) : toute valeur numérique acceptée |
 | 4 | `charge_totale ≥ 0` | sinon `drop` |
 | 5 | `date_fin ≥ date_début` | sinon `warn` |
 | 6 | `(CT, Ressource, date_début, date_fin)` unique dans la version | doublon → `warn` + agrégation implicite |

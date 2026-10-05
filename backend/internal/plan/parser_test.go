@@ -2,7 +2,6 @@ package plan
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -37,7 +36,7 @@ func TestParseDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Total != 36 || res.OK != 31 || res.Warn != 5 || res.Drop != 0 {
+	if res.Total != 36 || res.OK != 36 || res.Warn != 0 || res.Drop != 0 {
 		t.Fatalf("compteurs total=%d ok=%d warn=%d drop=%d", res.Total, res.OK, res.Warn, res.Drop)
 	}
 	if res.Layout != "A" {
@@ -49,16 +48,12 @@ func TestParseDemo(t *testing.T) {
 	if res.HeaderRow != 3 || res.SourceFormat != domain.FormatDemo {
 		t.Errorf("header row %d format %s", res.HeaderRow, res.SourceFormat)
 	}
-	// Pourcentages hors SPEC §8 r3 : 60 (l. 18, 40, 54), 10 (l. 23), 200 (l. 50).
-	gotRows := []int{}
-	for _, is := range res.Issues {
-		gotRows = append(gotRows, is.RowNum)
-	}
-	if fmt.Sprint(gotRows) != "[18 23 40 50 54]" {
+	// Plus de contrôle des valeurs de pourcentage (ex-SPEC §8 r3) : 60, 10 et 200 % sont acceptés.
+	if len(res.Issues) != 0 {
 		t.Fatalf("issues %+v", res.Issues)
 	}
 	l23 := lineByRow(res, 23)
-	if l23 == nil || l23.Pourcentage != 10 || !strings.Contains(l23.MotifRejet, "pourcentage") || !strings.Contains(l23.Libelle, "FONTAINE") {
+	if l23 == nil || l23.Pourcentage != 10 || l23.StatutParsing != domain.ParsingOK || l23.MotifRejet != "" || !strings.Contains(l23.Libelle, "FONTAINE") {
 		t.Errorf("ligne 23 %+v", l23)
 	}
 	alpha := "Squad Alpha — Plateforme"
@@ -137,7 +132,7 @@ func specRows() [][]any {
 		{"CT_A1", "R_001", "DUPONT Jean / Squad Alpha", "Standard", "MAIN D'OEUVRE SUR SITE", 219.0, 25093.02, 40, "U_0001", "Dates fixes", 46266, 46418},
 		// 3: layout B ok (pas de Type d'affectation, poubelle 1 en fin)
 		{"CT_A1", "R_002", "Squad Beta / MARTIN Léa", "CAPACITE SUR SITE", 100.5, 1000, 50, "U_0002", "Dates fixes", 46266, 46356, 1},
-		// 4: [inactif] + pourcentage invalide
+		// 4: [inactif] + pourcentage hors ex-liste SPEC (accepté)
 		{"CT_B2", "[inactif] R_003", "Paul Petit", "Standard", "MAIN D'OEUVRE SUR SITE", 50, 0, 10, "U_0001", "Dates fixes", 46266, 46356},
 		// 5: CT vide
 		{"", "R_004", "X", "Standard", "MAIN D'OEUVRE SUR SITE", 10, 0, 20, "U_0001", "Dates fixes", 46266, 46356},
@@ -180,7 +175,7 @@ func TestParseSpecSynthetic(t *testing.T) {
 	}{
 		2:  {domain.ParsingOK, ""},
 		3:  {domain.ParsingOK, ""},
-		4:  {domain.ParsingWarn, "pourcentage 10"},
+		4:  {domain.ParsingOK, ""},
 		5:  {domain.ParsingDrop, "CT vide"},
 		6:  {domain.ParsingDrop, "négative"},
 		7:  {domain.ParsingWarn, "doublon"},
@@ -200,7 +195,7 @@ func TestParseSpecSynthetic(t *testing.T) {
 			t.Errorf("ligne %d : %s %q, attendu %s %q", row, l.StatutParsing, l.MotifRejet, e.st, e.motif)
 		}
 	}
-	if res.OK != 2 || res.Warn != 4 || res.Drop != 5 {
+	if res.OK != 3 || res.Warn != 3 || res.Drop != 5 {
 		t.Errorf("ok=%d warn=%d drop=%d", res.OK, res.Warn, res.Drop)
 	}
 	b := lineByRow(res, 3)
@@ -227,7 +222,7 @@ func TestParseSpecSynthetic(t *testing.T) {
 	if res.PctInactifs != 20 {
 		t.Errorf("pct inactifs %v", res.PctInactifs)
 	}
-	if res.MotifsCount[motifDoublon] != 2 || res.MotifsCount[motifPct] != 1 {
+	if res.MotifsCount[motifDoublon] != 2 {
 		t.Errorf("motifs %v", res.MotifsCount)
 	}
 	for _, l := range res.Lines {

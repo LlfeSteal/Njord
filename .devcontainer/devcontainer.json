@@ -1,0 +1,44 @@
+{
+  "name": "Nornir — Go + Vite",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+  "remoteUser": "vscode",
+  // 5173: Vite dev server. 8080: Go/Gin API. 80: docker compose nginx.
+  "forwardPorts": [5173, 8080, 80],
+  "portsAttributes": {
+    "5173": {
+      "label": "Frontend — dev (Vite)",
+      "onAutoForward": "notify"
+    },
+    "8080": {
+      "label": "Backend — API Go",
+      "onAutoForward": "silent"
+    },
+    "80": {
+      "label": "Docker compose — nginx",
+      "onAutoForward": "silent"
+    }
+  },
+  "mounts": [
+    "source=claude-code-config,target=/home/vscode/.claude,type=volume"
+  ],
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude/"
+  },
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude && rtk init -g --auto-patch",
+  // The Docker-in-Docker daemon starts with the container: wait until it answers
+  // so the first `docker compose` doesn't hit a missing socket.
+  "postStartCommand": "timeout 30 sh -c 'until docker info >/dev/null 2>&1; do sleep 1; done' || echo 'docker daemon not ready yet'"
+}

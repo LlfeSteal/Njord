@@ -1,0 +1,49 @@
+# Architecture Njord
+
+Application web d'analyse des imputations des collaborateurs : **Plan de charge** (prévu) × **Réalisé** (imputé) → **Analyse** (écarts, budget, KPI). Specs : `SPEC_Plandecharge.md`, `SPEC_realise.md`, `SPEC_analyse.md`. Contrat : `docs/API.md`. Écarts aux specs : `docs/DECISIONS.md`.
+
+## Stack
+- **Backend** `backend/` — Go 1.22, module `njord`, Gin, SQLite (`modernc.org/sqlite`, sans cgo), `excelize/v2`. `go run ./cmd/njord --addr :8080 --db ./data/njord.db [--static ../frontend/dist]`.
+- **Frontend** `frontend/` — React 18 + TypeScript + Vite, Mantine v7 (`@mantine/core`, `dropzone`, `notifications`, `charts`), TanStack Query v5, react-router v6, Recharts, `@tabler/icons-react`, dayjs. Dev : `npm run dev` (:5173, proxy `/api` → :8080).
+- **Déploiement** `docker-compose.yml` : backend + nginx (front buildé, proxy `/api`).
+
+## Backend — packages
+
+| Package | Rôle | Propriétaire |
+|---|---|---|
+| `internal/domain` | Types partagés = contrat JSON | intégrateur |
+| `internal/store` | SQLite, schéma complet (`schema.go`), cycle de vie générique des versions (`CreateVersion`, `Archive`, `Reactivate`, `Purge`, `ListVersions`, `GetVersion`, `ActiveVersion`), `GetSettings`/`PutSettings`, `Audit`/`ListAudit`, `Tx` | intégrateur |
+| `internal/xlsxutil` | `FindTable` (onglet + ligne d'en-tête par matcher), `NormHeader`, `IndexOf`, `Cell`, `NullDash`, `ParseNumber`, `ParseDate`/`SerialToDate`, `CodeAndLabel`, `StripAccents` | intégrateur |
+| `internal/names` | `Normalize` (clé personne), `NormalizeSquad`, `SplitLibelle`, `PersonKey`, `LooksLikeSquad` | intégrateur |
+| `internal/httpx` | `Error`, `BadRequest`, `Unprocessable`, `FormFile`, `Operateur`, `Pagination`, `QueryBool`, `FormBool`, `CSV`, `FormatFloat` | intégrateur |
+| `internal/core` | `/health`, `/settings`, `/audit` | intégrateur |
+| `internal/plan` | Parser PDC, import, lignes, CSV, facets ; crée personnes/squads à l'import | agent Plan |
+| `internal/referentiel` | Endpoints `/personnes`, `/squads` | agent Plan |
+| `internal/realise` | Parser réalisé, import, écritures, CSV, facets | agent Réalisé |
+| `internal/analyse` | Moteur pur `Run(Input, Settings)`, repo lecture SQL, endpoints, exports | agent Analyse |
+
+Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `personnes`, `personne_matricules`, `personne_alias`, `squads` directement et n'écrit que dans `personne_alias` (source `confirme`) et `analyse_last_result`.
+
+Tables : `versions` (plan & réalisé, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `personnes`, `personne_matricules` (codes ressource PDC + matricules réalisé, uniques), `personne_alias` (`import`|`manuel`|`confirme`), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
+
+Purge = suppression des lignes + version passée en `purgee` (pierre tombale visible avec « afficher purgées ») ; référentiels jamais supprimés.
+
+## Frontend — structure
+
+| Chemin | Rôle | Propriétaire |
+|---|---|---|
+| `src/api/types.ts`, `src/api/client.ts` | Types & client typé (`versionsApi`, `planApi`, `realiseApi`, `referentielApi`, `settingsApi`, `analyseApi`) | intégrateur |
+| `src/lib/format.ts`, `src/lib/queryKeys.ts` | Formatage fr-FR, clés TanStack Query | intégrateur |
+| `src/components/AppLayout.tsx`, `badges.tsx`, `ErrorAlert.tsx` | Coquille à onglets, badges statut/parsing/flag | intégrateur |
+| `src/components/VersionsPanel.tsx`, `ImportWizard.tsx`, `PurgeModal.tsx` | Cycle de vie générique (props figées) | agent FE partagé |
+| `src/pages/plan/` (`/plan/*`), `src/pages/referentiels/` | Onglets Plan de charge & Référentiels | agent FE Plan |
+| `src/pages/realise/` (`/realise/*`), `src/pages/parametres/` | Onglets Réalisé & Paramètres | agent FE Réalisé |
+| `src/pages/analyse/` (`/analyse/*`) | Onglet Analyse (sous-onglets) | agent FE Analyse |
+
+Chaque `src/pages/<module>/index.tsx` exporte par défaut le composant monté sur `/<module>/*` et gère ses sous-routes relatives (`<Routes><Route index …/><Route path=":versionId" …/></Routes>`). Après import / archivage / purge / alias : invalider `['versions']`, `['analyse']` (et `['personnes']` si besoin).
+
+## Règles de travail en parallèle
+- Ne modifier que ses répertoires. `go.mod`, `package.json`, `domain`, `store`, `api/types.ts`, `api/client.ts` : **lecture seule** — besoin d'un changement → le signaler dans le rapport final.
+- Aucune nouvelle dépendance.
+- Backend : `cd backend && go build ./... && go test ./internal/<pkg>/...`. Frontend : `cd frontend && npx tsc --noEmit -p tsconfig.app.json` (ignorer les erreurs hors de ses fichiers ; ne pas lancer `npm run build` qui écrit `dist/` en concurrence).
+- Ne jamais logger de donnée sensible (noms, matricules, montants individuels, factures).

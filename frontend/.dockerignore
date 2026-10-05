@@ -1,0 +1,25 @@
+# Dépendances et builds locaux (réinstallés / reconstruits dans l'image)
+node_modules/
+dist/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Bases SQLite égarées
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Divers
+.git
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+*.log
+npm-debug.log*
+.env
+.env.*
+Dockerfile
+.dockerignore

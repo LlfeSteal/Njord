@@ -1,0 +1,26 @@
+# Binaires et artefacts locaux
+njord
+bin/
+*.exe
+*.test
+*.out
+coverage*
+
+# Bases SQLite locales (ne jamais embarquer de données dans l'image)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Divers
+.git
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+*.log
+.env
+.env.*
+Dockerfile
+.dockerignore

@@ -3,6 +3,7 @@ package plan
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,7 +37,7 @@ func TestParseDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Total != 36 || res.OK != 36 || res.Warn != 0 || res.Drop != 0 {
+	if res.Total != 36 || res.OK != 30 || res.Warn != 6 || res.Drop != 0 {
 		t.Fatalf("compteurs total=%d ok=%d warn=%d drop=%d", res.Total, res.OK, res.Warn, res.Drop)
 	}
 	if res.Layout != "A" {
@@ -48,9 +49,22 @@ func TestParseDemo(t *testing.T) {
 	if res.HeaderRow != 3 || res.SourceFormat != domain.FormatDemo {
 		t.Errorf("header row %d format %s", res.HeaderRow, res.SourceFormat)
 	}
-	// Plus de contrôle des valeurs de pourcentage (ex-SPEC §8 r3) : 60, 10 et 200 % sont acceptés.
-	if len(res.Issues) != 0 {
+	// Seuls warns : nom/prénom non identifiable (réserves sans libellé, « PO », « RTE ») ;
+	// les pourcentages (60, 10, 200 %) ne sont plus contrôlés.
+	gotRows := []string{}
+	for _, is := range res.Issues {
+		if !strings.Contains(is.Motif, "nom/prénom non identifiable") {
+			t.Errorf("motif inattendu l. %d : %s", is.RowNum, is.Motif)
+		}
+		gotRows = append(gotRows, strconv.Itoa(is.RowNum))
+	}
+	if strings.Join(gotRows, " ") != "50 51 52 53 54 55" {
 		t.Fatalf("issues %+v", res.Issues)
+	}
+	for row, np := range map[int]string{8: "DURAND Claire", 18: "PETIT Karim", 19: "BLANC Sarah", 37: "ROBERT Michel", 38: "DE LA TOUR Antoine", 47: "BONNET Hugo", 53: ""} {
+		if l := lineByRow(res, row); l == nil || l.NomPrenom != np {
+			t.Errorf("ligne %d nom_prenom %+v, attendu %q", row, l, np)
+		}
 	}
 	l23 := lineByRow(res, 23)
 	if l23 == nil || l23.Pourcentage != 10 || l23.StatutParsing != domain.ParsingOK || l23.MotifRejet != "" || !strings.Contains(l23.Libelle, "FONTAINE") {
@@ -173,9 +187,9 @@ func TestParseSpecSynthetic(t *testing.T) {
 		st    domain.ParsingStatut
 		motif string
 	}{
-		2:  {domain.ParsingOK, ""},
-		3:  {domain.ParsingOK, ""},
-		4:  {domain.ParsingOK, ""},
+		2:  {domain.ParsingWarn, "ressource « R_001 » ≠ NOM + initiale du prénom (attendu « DUPONTJ »)"},
+		3:  {domain.ParsingWarn, "attendu « MARTINL »"},
+		4:  {domain.ParsingWarn, "attendu « PETITP »"},
 		5:  {domain.ParsingDrop, "CT vide"},
 		6:  {domain.ParsingDrop, "négative"},
 		7:  {domain.ParsingWarn, "doublon"},
@@ -195,7 +209,7 @@ func TestParseSpecSynthetic(t *testing.T) {
 			t.Errorf("ligne %d : %s %q, attendu %s %q", row, l.StatutParsing, l.MotifRejet, e.st, e.motif)
 		}
 	}
-	if res.OK != 3 || res.Warn != 3 || res.Drop != 5 {
+	if res.OK != 0 || res.Warn != 6 || res.Drop != 5 {
 		t.Errorf("ok=%d warn=%d drop=%d", res.OK, res.Warn, res.Drop)
 	}
 	b := lineByRow(res, 3)

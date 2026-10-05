@@ -68,7 +68,7 @@ func filterFromQuery(c *gin.Context) (LineFilter, error) {
 	return f, nil
 }
 
-const lineCols = `id, version_id, row_num, layout, ct, ressource, libelle, type_affectation, ligne_cout,
+const lineCols = `id, version_id, row_num, layout, ct, ressource, libelle, nom_prenom, type_affectation, ligne_cout,
 	charge_totale, pps, pourcentage, unite, calcul_duree, date_debut, date_fin, quantite_affectee, taux_fixe,
 	depuis, pendant, statut_parsing, motif_rejet, ressource_kind, inactive, personne_id, squad_id, groupe`
 
@@ -76,7 +76,7 @@ func scanLine(rows *sql.Rows) (domain.PlanLine, error) {
 	var l domain.PlanLine
 	var qte sql.NullFloat64
 	var pid, sid sql.NullString
-	err := rows.Scan(&l.ID, &l.VersionID, &l.RowNum, &l.Layout, &l.CT, &l.Ressource, &l.Libelle, &l.TypeAffectation,
+	err := rows.Scan(&l.ID, &l.VersionID, &l.RowNum, &l.Layout, &l.CT, &l.Ressource, &l.Libelle, &l.NomPrenom, &l.TypeAffectation,
 		&l.LigneCout, &l.ChargeTotale, &l.PPS, &l.Pourcentage, &l.Unite, &l.CalculDuree, &l.DateDebut, &l.DateFin,
 		&qte, &l.TauxFixe, &l.Depuis, &l.Pendant, &l.StatutParsing, &l.MotifRejet, &l.RessourceKind, &l.Inactive,
 		&pid, &sid, &l.Groupe)
@@ -142,7 +142,7 @@ func QueryLines(ctx context.Context, ex store.Execer, versionID string, f LineFi
 		if err != nil {
 			return nil, err
 		}
-		if needle != "" && !strings.Contains(foldText(l.Libelle+"\x00"+l.CT+"\x00"+l.Ressource), needle) {
+		if needle != "" && !strings.Contains(foldText(l.Libelle+"\x00"+l.NomPrenom+"\x00"+l.CT+"\x00"+l.Ressource), needle) {
 			continue
 		}
 		out = append(out, l)

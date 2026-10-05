@@ -30,7 +30,7 @@ Permettre à un utilisateur métier de **gérer le cycle de vie complet** d'un p
 |---|---|---|---|---|---|---|
 | 0 | Tâche ou sous-projet | `str` | ✓ | ~20 | `CT_A1` | 9 car., préfixe trigramme |
 | 1 | Ressource | `str` | ✓ | ~87 | `R_001` \| `RES_ext_##` | peut porter préfixe `[inactif]` |
-| 2 | Libellé | `str` | ✗ | ~51 | `<Prénom NOM>` \| `<Squad>` \| `<Squad> / <Prénom NOM>` | affichage |
+| 2 | Libellé | `str` | ✗ | ~51 | `<Prénom NOM>` \| `<Squad>` \| `<Squad> / <Prénom NOM>` | source de **NOM Prénom** (règles 9–11) |
 | 3 | Type d'affectation | `str` | ✗ | 1 | `Standard` | absent en layout B |
 | 4 | Ligne de coût | `enum` | ✓ | 2+ | `MAIN D'OEUVRE SUR SITE` \| `CAPACITE SUR SITE` | classification |
 | 5 | Charge totale | `float` h | ✓ | 70–800 | 219.0 | heures période complète |
@@ -203,6 +203,9 @@ Appliqués **à l'import uniquement**, le module Analyse gère ses propres contr
 | 6 | `(CT, Ressource, date_début, date_fin)` unique dans la version | doublon → `warn` + agrégation implicite |
 | 7 | CT non vide | sinon `drop` |
 | 8 | Ressource non vide | sinon `drop` |
+| 9 | NOM Prénom extrait de la partie personne du Libellé (mots en MAJUSCULES = NOM ; sinon ordre `<Prénom NOM>`) | non identifiable (vide, un seul mot, code) → `warn`, ligne conservée |
+| 10 | Libellé tout en majuscules (`ROBERT MICHEL`) : ordre tranché par le code Ressource | aucun ordre ne correspond → `warn` « ordre nom/prénom ambigu », libellé gardé tel quel |
+| 11 | Ressource = NOM (sans accents/espaces/tirets/apostrophes) + initiale du prénom (`DE LA TOUR Antoine` → `DELATOURA`) | sinon `warn` « attendu XXX », code du fichier conservé |
 
 ## 9. Hors périmètre
 

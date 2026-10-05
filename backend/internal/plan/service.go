@@ -254,7 +254,7 @@ func (e *enricher) line(l *ParsedLine) error {
 		}
 		return nil
 	}
-	pid, err := e.person(l.Ressource, person, squadID)
+	pid, err := e.person(l.Ressource, person, l.NomPrenom, squadID)
 	if err != nil {
 		return err
 	}
@@ -351,8 +351,14 @@ func (e *enricher) libelleSquad(seg string, path, pathIDs []string) (string, err
 }
 
 // person resolves (or creates) the personne of a ressource code (SPEC §6.2).
-func (e *enricher) person(code, personPart, squadID string) (string, error) {
+// nomPrenom (« NOM Prénom » extrait du libellé) sert de nom d'affichage ; à défaut,
+// la partie personne brute, puis le code.
+func (e *enricher) person(code, personPart, nomPrenom, squadID string) (string, error) {
 	nom := names.Normalize(personPart)
+	display := nomPrenom
+	if display == "" {
+		display = personPart
+	}
 	pid, ok := e.persByMat[code]
 	if !ok && nom != "" {
 		if pid, ok = e.persByNom[nom]; ok {
@@ -364,7 +370,6 @@ func (e *enricher) person(code, personPart, squadID string) (string, error) {
 		}
 	}
 	if !ok {
-		display := personPart
 		if display == "" {
 			display = code
 		}
@@ -393,12 +398,12 @@ func (e *enricher) person(code, personPart, squadID string) (string, error) {
 		}
 	} else if e.fromCode[pid] && personPart != "" {
 		// Fiche créée dans ce même import sans libellé : on lui donne le vrai nom.
-		if _, err := e.tx.ExecContext(e.ctx, `UPDATE personnes SET display_name = ?, nom_normalise = ? WHERE id = ?`, personPart, nom, pid); err != nil {
+		if _, err := e.tx.ExecContext(e.ctx, `UPDATE personnes SET display_name = ?, nom_normalise = ? WHERE id = ?`, display, nom, pid); err != nil {
 			return "", err
 		}
 		for i, n := range e.newPersonnes {
 			if n == code {
-				e.newPersonnes[i] = personPart
+				e.newPersonnes[i] = display
 				break
 			}
 		}
@@ -406,6 +411,15 @@ func (e *enricher) person(code, personPart, squadID string) (string, error) {
 			e.persByNom[nom] = pid
 		}
 		delete(e.fromCode, pid)
+	}
+	if ok && nomPrenom != "" {
+		// Fiche existante encore en brouillon : nom d'affichage aligné sur « NOM Prénom »
+		// (nom_normalise inchangé : Normalize ne dépend pas de l'ordre des mots).
+		if _, err := e.tx.ExecContext(e.ctx,
+			`UPDATE personnes SET display_name = ? WHERE id = ? AND statut = 'brouillon' AND display_name <> ?`,
+			nomPrenom, pid, nomPrenom); err != nil {
+			return "", err
+		}
 	}
 	if nom != "" && !e.aliasSet(pid)[nom] {
 		if _, err := e.tx.ExecContext(e.ctx,
@@ -422,10 +436,10 @@ func (e *enricher) person(code, personPart, squadID string) (string, error) {
 // ---------------------------------------------------------------------------
 
 func insertLines(ctx context.Context, tx *sql.Tx, versionID string, lines []ParsedLine) error {
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO plan_lines(version_id, row_num, layout, ct, ressource, libelle,
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO plan_lines(version_id, row_num, layout, ct, ressource, libelle, nom_prenom,
 		type_affectation, ligne_cout, charge_totale, pps, pourcentage, unite, calcul_duree, date_debut, date_fin,
 		quantite_affectee, taux_fixe, depuis, pendant, statut_parsing, motif_rejet, ressource_kind, inactive,
-		personne_id, squad_id, groupe) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		personne_id, squad_id, groupe) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -442,7 +456,7 @@ func insertLines(ctx context.Context, tx *sql.Tx, versionID string, lines []Pars
 		if l.SquadID != nil {
 			sid = *l.SquadID
 		}
-		if _, err := stmt.ExecContext(ctx, versionID, l.RowNum, l.Layout, l.CT, l.Ressource, l.Libelle,
+		if _, err := stmt.ExecContext(ctx, versionID, l.RowNum, l.Layout, l.CT, l.Ressource, l.Libelle, l.NomPrenom,
 			l.TypeAffectation, l.LigneCout, l.ChargeTotale, l.PPS, l.Pourcentage, l.Unite, l.CalculDuree,
 			l.DateDebut, l.DateFin, qte, l.TauxFixe, l.Depuis, l.Pendant, l.StatutParsing, l.MotifRejet,
 			l.RessourceKind, l.Inactive, pid, sid, l.Groupe); err != nil {

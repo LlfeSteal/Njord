@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS plan_lines (
 	ct                TEXT NOT NULL DEFAULT '',
 	ressource         TEXT NOT NULL DEFAULT '',
 	libelle           TEXT NOT NULL DEFAULT '',
+	nom_prenom        TEXT NOT NULL DEFAULT '',  -- « NOM Prénom » extrait du libellé
 	type_affectation  TEXT NOT NULL DEFAULT '',
 	ligne_cout        TEXT NOT NULL DEFAULT '',
 	charge_totale     REAL NOT NULL DEFAULT 0,

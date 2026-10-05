@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -84,5 +85,26 @@ func TestLifecycle(t *testing.T) {
 func TestEaster(t *testing.T) {
 	if got := easterSunday(2026).Format("2006-01-02"); got != "2026-04-05" {
 		t.Fatal(got)
+	}
+}
+
+// Une base créée avant l'ajout de plan_lines.nom_prenom reçoit la colonne à l'ouverture.
+func TestMigrateAddedColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`ALTER TABLE plan_lines DROP COLUMN nom_prenom`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	if st, err = Open(path); err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var n int
+	if err := st.DB().QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plan_lines') WHERE name = 'nom_prenom'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("colonne nom_prenom : %d %v", n, err)
 	}
 }

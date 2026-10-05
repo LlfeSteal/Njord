@@ -52,11 +52,36 @@ func Open(path string) (*Store, error) {
 	}
 	// SQLite: a single connection serialises writers and keeps ":memory:" alive.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migration: %w", err)
 	}
 	return &Store{db: db, Now: func() time.Time { return time.Now().UTC() }}, nil
+}
+
+// addedColumns: colonnes ajoutées après la première version du schéma ; une base
+// existante les reçoit par ALTER TABLE (CREATE TABLE IF NOT EXISTS ne les crée pas).
+var addedColumns = []struct{ table, column, def string }{
+	{"plan_lines", "nom_prenom", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// migrate applies the schema then adds the columns missing from an older base.
+func migrate(db *sql.DB) error {
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	for _, c := range addedColumns {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, c.table, c.column).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, c.table, c.column, c.def)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // OpenMemory opens a fresh private in-memory database (tests).
@@ -66,7 +91,7 @@ func OpenMemory() (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}

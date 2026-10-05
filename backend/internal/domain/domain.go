@@ -112,6 +112,7 @@ type PlanLine struct {
 	CT              string  `json:"ct"`
 	Ressource       string  `json:"ressource"` // sans le préfixe [inactif]
 	Libelle         string  `json:"libelle"`
+	NomPrenom       string  `json:"nom_prenom"` // « NOM Prénom » extrait du libellé ("" si non identifiable)
 	TypeAffectation string  `json:"type_affectation"`
 	LigneCout       string  `json:"ligne_cout"`
 	ChargeTotale    float64 `json:"charge_totale"`

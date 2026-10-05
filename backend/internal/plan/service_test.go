@@ -55,7 +55,7 @@ func TestServiceImportDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Intitule != "demo_plancharge" || rep.Total != 36 || rep.OK != 36 || rep.Warn != 0 || rep.ActiveVersion != nil {
+	if rep.Intitule != "demo_plancharge" || rep.Total != 36 || rep.OK != 30 || rep.Warn != 6 || rep.ActiveVersion != nil {
 		t.Fatalf("preview %+v", rep)
 	}
 	if len(rep.NouvellesPersonnes) != 29 || len(rep.NouveauxSquads) != 8 {
@@ -71,7 +71,7 @@ func TestServiceImportDemo(t *testing.T) {
 		t.Fatal(err)
 	}
 	v1 := res.Version
-	if v1.Statut != domain.StatutActive || v1.NbLignes != 36 || v1.NbWarn != 0 || v1.Layout != "A" ||
+	if v1.Statut != domain.StatutActive || v1.NbLignes != 36 || v1.NbWarn != 6 || v1.Layout != "A" ||
 		v1.Intitule != "PDC sept." || v1.Importeur != "alice" || v1.PeriodeDebut != "2026-09-01" || v1.PeriodeFin != "2026-11-30" ||
 		v1.SourceFormat != domain.FormatDemo {
 		t.Fatalf("version %+v", v1)
@@ -331,7 +331,7 @@ func TestHTTP(t *testing.T) {
 	if p = lines("?q=y99f900010"); p.Total != 3 {
 		t.Errorf("q=CT → %d", p.Total)
 	}
-	if p = lines("?statut=warn"); p.Total != 0 {
+	if p = lines("?statut=warn"); p.Total != 6 || p.Items[0].RowNum != 50 {
 		t.Errorf("statut=warn → %d", p.Total)
 	}
 	if p = lines("?inactive=false"); p.Total != 36 {
@@ -357,7 +357,7 @@ func TestHTTP(t *testing.T) {
 	// Facets + filtre squad.
 	w = do(r, http.MethodGet, "/api/plan/versions/"+id+"/facets", "")
 	f := decode[domain.Facets](t, w)
-	if len(f["ct"]) != 12 || len(f["squad_id"]) != 8 || len(f["statut"]) != 1 || len(f["ressource"]) != 29 {
+	if len(f["ct"]) != 12 || len(f["squad_id"]) != 8 || len(f["statut"]) != 2 || len(f["ressource"]) != 29 {
 		t.Errorf("facets ct=%d squad=%d statut=%v ress=%d", len(f["ct"]), len(f["squad_id"]), f["statut"], len(f["ressource"]))
 	}
 	core := str(t, st, `SELECT id FROM squads WHERE nom_canonique = 'Alpha Core Team'`)
@@ -372,10 +372,10 @@ func TestHTTP(t *testing.T) {
 		t.Fatalf("csv %d %q", w.Code, body[:min(80, len(body))])
 	}
 	recs := strings.Split(strings.TrimSpace(body), "\n")
-	if len(recs) != 37 { // en-tête + 36 lignes ok
+	if len(recs) != 31 { // en-tête + 30 lignes ok
 		t.Errorf("csv %d lignes", len(recs))
 	}
-	if !strings.Contains(recs[1], "8;ok;;Y99F90001;DURANDC;DURAND Claire / Squad Alpha;Standard;MAIN D'OEUVRE SUR SITE;219;25093.02;40;U9AAA1;Dates fixes;2026-09-01;2026-11-30;false;internal;Squad Alpha — Plateforme > Alpha Core Team") {
+	if !strings.Contains(recs[1], "8;ok;;Y99F90001;DURANDC;DURAND Claire / Squad Alpha;DURAND Claire;Standard;MAIN D'OEUVRE SUR SITE;219;25093.02;40;U9AAA1;Dates fixes;2026-09-01;2026-11-30;false;internal;Squad Alpha — Plateforme > Alpha Core Team") {
 		t.Errorf("csv ligne 1 %q", recs[1])
 	}
 

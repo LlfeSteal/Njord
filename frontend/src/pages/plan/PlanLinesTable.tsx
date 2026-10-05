@@ -72,6 +72,17 @@ function AliasAction({ line: l, onAlias }: { line: PlanLine; onAlias: (l: PlanLi
   );
 }
 
+/** « NOM Prénom » extrait du libellé ; le libellé brut reste consultable en bulle d'aide. */
+function NomPrenomCell({ line }: { line: PlanLine }) {
+  const value = line.nom_prenom || '—';
+  if (!line.libelle || line.libelle === line.nom_prenom) return <>{value}</>;
+  return (
+    <Tooltip label={`Libellé : ${line.libelle}`}>
+      <span>{value}</span>
+    </Tooltip>
+  );
+}
+
 export default function PlanLinesTable({ items, sort, order, onSort, squadName, onAlias, dimmed }: Props) {
   const th = { sort, order, onSort };
   return (
@@ -81,7 +92,7 @@ export default function PlanLinesTable({ items, sort, order, onSort, squadName, 
           <Th label="N°" sortKey="row_num" {...th} />
           <Th label="CT" sortKey="ct" {...th} />
           <Th label="Ressource" sortKey="ressource" {...th} />
-          <Th label="Libellé" {...th} />
+          <Th label="Nom Prénom" {...th} />
           <Th label="Squad / groupe" {...th} />
           <Th label="Ligne de coût" {...th} />
           <Th label="Charge totale" sortKey="charge_totale" alignRight {...th} />
@@ -129,7 +140,9 @@ export default function PlanLinesTable({ items, sort, order, onSort, squadName, 
                   {KIND_LABEL[l.ressource_kind] ?? l.ressource_kind}
                 </Text>
               </td>
-              <td>{l.libelle || '—'}</td>
+              <td>
+                <NomPrenomCell line={l} />
+              </td>
               <td>
                 {squad || (l.groupe ? '' : '—')}
                 {l.groupe && l.groupe !== squad && (

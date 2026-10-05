@@ -209,7 +209,7 @@ func (h *Handler) lines(c *gin.Context) {
 // CSVHeader is the column list of lines.csv.
 var CSVHeader = []string{
 	"row_num", "statut_parsing", "motif_rejet",
-	"ct", "ressource", "libelle", "type_affectation", "ligne_cout", "charge_totale", "pps",
+	"ct", "ressource", "libelle", "nom_prenom", "type_affectation", "ligne_cout", "charge_totale", "pps",
 	"pourcentage", "unite", "calcul_duree", "date_debut", "date_fin",
 	"inactive", "ressource_kind", "groupe",
 }
@@ -235,7 +235,7 @@ func (h *Handler) linesCSV(c *gin.Context) {
 			}
 			if err := write([]string{
 				fmt.Sprint(l.RowNum), string(l.StatutParsing), l.MotifRejet,
-				l.CT, l.Ressource, l.Libelle, l.TypeAffectation, l.LigneCout,
+				l.CT, l.Ressource, l.Libelle, l.NomPrenom, l.TypeAffectation, l.LigneCout,
 				httpx.FormatFloat(l.ChargeTotale), httpx.FormatFloat(l.PPS), fmt.Sprint(l.Pourcentage),
 				l.Unite, l.CalculDuree, l.DateDebut, l.DateFin,
 				inactive, l.RessourceKind, l.Groupe,

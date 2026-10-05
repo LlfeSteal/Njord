@@ -31,8 +31,8 @@ Préfixe `/api`, JSON **snake_case**. Types : `backend/internal/domain/domain.go
 `intitule` absent → nom du fichier sans extension. Erreur bloquante (onglet/en-tête) → 422, aucune écriture. Version/lignes créées via `store.CreateVersion(ctx, &v, archiveActive, fill)`.
 
 ### Plan : lignes
-`GET /plan/versions/:id/lines` → `PlanLinesPage` ; `GET /plan/versions/:id/lines.csv` (mêmes filtres, sans pagination).
-Filtres : `ct`, `ressource`, `ligne_cout`, `statut` (ok|warn|drop), `inactive` (bool), `squad_id`, `date_from`/`date_to` (chevauchement avec [date_debut, date_fin]), `q` (plein-texte sur libellé/CT/ressource, insensible casse/accents), `sort` (`row_num`|`ct`|`ressource`|`charge_totale`|`pps`|`date_debut`), `order`, `limit`, `offset`. `totals` = Σ sur **tout** le filtre courant (pas seulement la page). Facets : `ct`, `ressource`, `ligne_cout`, `squad_id` (valeur = id ; libellé via `/squads`), `statut`.
+`GET /plan/versions/:id/lines` → `PlanLinesPage` ; `GET /plan/versions/:id/lines.csv` (mêmes filtres, sans pagination ; colonne `nom_prenom` après `libelle`). `PlanLine.nom_prenom` = « NOM Prénom » extrait du libellé (`""` si non identifiable) ; les lignes importées avant son ajout sont complétées au démarrage du backend (statuts inchangés jusqu'au réimport).
+Filtres : `ct`, `ressource`, `ligne_cout`, `statut` (ok|warn|drop), `inactive` (bool), `squad_id`, `date_from`/`date_to` (chevauchement avec [date_debut, date_fin]), `q` (plein-texte sur libellé/nom_prenom/CT/ressource, insensible casse/accents), `sort` (`row_num`|`ct`|`ressource`|`charge_totale`|`pps`|`date_debut`), `order`, `limit`, `offset`. `totals` = Σ sur **tout** le filtre courant (pas seulement la page). Facets : `ct`, `ressource`, `ligne_cout`, `squad_id` (valeur = id ; libellé via `/squads`), `statut`.
 
 ### Réalisé : écritures
 `GET /realise/versions/:id/entries` → `RealiseEntriesPage` ; `GET /realise/versions/:id/entries.csv`.

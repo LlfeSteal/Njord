@@ -114,7 +114,7 @@ export default function PlanLinesFilters({
       <Group gap={8}>
         <SearchField
           aria-label="Recherche"
-          placeholder="Libellé, CT, ressource…"
+          placeholder="Nom, libellé, CT, ressource…"
           value={qInput}
           onChange={setQInput}
         />

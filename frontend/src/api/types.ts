@@ -69,6 +69,8 @@ export interface PlanLine {
   ct: string;
   ressource: string;
   libelle: string;
+  /** « NOM Prénom » extrait du libellé ('' si non identifiable). */
+  nom_prenom: string;
   type_affectation: string;
   ligne_cout: string;
   charge_totale: number;

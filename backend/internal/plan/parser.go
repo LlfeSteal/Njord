@@ -11,6 +11,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"njord/internal/domain"
+	"njord/internal/names"
 	"njord/internal/xlsxutil"
 )
 
@@ -127,6 +128,9 @@ const (
 	motifDates       = "date de fin antérieure à la date de début"
 	motifDoublon     = "doublon (CT, ressource, période)"
 	motifRessInconnu = "ressource de format inconnu"
+	motifNomPrenom   = "nom/prénom non identifiable"
+	motifNomAmbigu   = "ordre nom/prénom ambigu"
+	motifRessNom     = "ressource ≠ NOM + initiale du prénom"
 )
 
 type issue struct {
@@ -488,7 +492,36 @@ func parseDataRow(row []string, rowNum, idxQte, idxTaux, idxDepuis, idxPendant i
 	if pl.Ressource != "" && kind == "unknown" {
 		li.add(domain.ParsingWarn, motifRessInconnu, "")
 	}
+	if layout != "" {
+		checkNomPrenom(&pl, &li)
+	}
 	return pl, li
+}
+
+// checkNomPrenom extrait « NOM Prénom » de la partie personne du libellé et
+// contrôle la convention du code ressource (NOM + initiale du prénom).
+// Le code du fichier est toujours conservé ; tout écart passe en warn.
+func checkNomPrenom(pl *domain.PlanLine, li *lineIssues) {
+	person, _ := names.SplitLibelle(pl.Libelle, nil)
+	np, st := names.ParseNomPrenom(person, pl.Ressource)
+	switch st {
+	case names.NomPrenomNonIdentifiable:
+		cite := "libellé vide"
+		if person != "" {
+			cite = fmt.Sprintf("« %s »", person)
+		} else if pl.Libelle != "" {
+			cite = fmt.Sprintf("« %s »", pl.Libelle)
+		}
+		li.add(domain.ParsingWarn, motifNomPrenom, fmt.Sprintf("nom/prénom non identifiable dans le libellé (%s)", cite))
+	case names.NomPrenomAmbigu:
+		pl.NomPrenom = person
+		li.add(domain.ParsingWarn, motifNomAmbigu, fmt.Sprintf("ordre nom/prénom ambigu (« %s »)", person))
+	default:
+		pl.NomPrenom = np.String()
+		if want := names.ExpectedRessource(np); pl.Ressource != "" && !strings.EqualFold(pl.Ressource, want) {
+			li.add(domain.ParsingWarn, motifRessNom, fmt.Sprintf("ressource « %s » ≠ NOM + initiale du prénom (attendu « %s »)", pl.Ressource, want))
+		}
+	}
 }
 
 func formatNum(v float64) string {

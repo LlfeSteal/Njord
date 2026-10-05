@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
@@ -30,6 +31,11 @@ func main() {
 		log.Fatalf("ouverture base: %v", err)
 	}
 	defer st.Close()
+	if n, err := plan.BackfillNomPrenom(context.Background(), st); err != nil {
+		log.Fatalf("rétro-remplissage nom_prenom: %v", err)
+	} else if n > 0 {
+		log.Printf("nom_prenom complété sur %d lignes de plan existantes", n)
+	}
 
 	r := NewRouter(st)
 	if *static != "" {

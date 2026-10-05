@@ -98,3 +98,7 @@ Le dossier [`test_data_demo/`](test_data_demo/) contient deux fichiers Excel ano
 2. `demo_realise.xlsx` : à importer **ensuite**, dans l'onglet **Réalisé**.
 
 L'onglet **Analyse** permet alors de comparer le prévu et le réalisé.
+
+## Licence
+
+Njord est distribué sous licence [Apache 2.0](LICENSE). Voir aussi [NOTICE](NOTICE).

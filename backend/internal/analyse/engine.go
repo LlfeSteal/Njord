@@ -138,7 +138,7 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 	}
 
 	plan, real := in.Plan, in.Realise
-	return domain.AnalyseResult{
+	res := domain.AnalyseResult{
 		Meta: domain.AnalyseMeta{
 			PlanVersion:     &plan,
 			RealiseVersion:  &real,
@@ -156,6 +156,9 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 		Qualite:         r.q.list(),
 		Correspondances: corr,
 	}
+	res.Previsions = r.previsions()
+	res.Anomalies = r.anomalies(&res)
+	return res
 }
 
 func nonNilWeeks(w []domain.WeekInfo) []domain.WeekInfo {
@@ -186,7 +189,7 @@ func (r *run) enrich() {
 		r.enr[i] = r.en.Enrich(e)
 		tg := strings.TrimSpace(e.TG)
 		if tg != "" && r.ctLibelle[tg] == "" && strings.TrimSpace(e.TGLibelle) != "" {
-			r.ctLibelle[tg] = strings.TrimSpace(e.TGLibelle)
+			r.ctLibelle[tg] = ctLabel(tg, e.TGLibelle)
 		}
 		if r.enr[i].MO && r.enr[i].Heures != 0 { // contre-passations (heures < 0) incluses
 			id := r.m.resolve(e.Matricule, entryName(e))
@@ -563,4 +566,16 @@ func SortEcarts(rows []domain.EcartRow) {
 		}
 		return a.RessourceLabel < b.RessourceLabel
 	})
+}
+
+// ctLabel retire le code en tête du libellé TG du réalisé (« Y99F900011 - Réserve… » → « Réserve… »),
+// le code étant toujours affiché à côté.
+func ctLabel(tg, libelle string) string {
+	l := strings.TrimSpace(libelle)
+	if rest, ok := strings.CutPrefix(l, tg); ok {
+		if t := strings.TrimLeft(rest, " -–—:"); t != "" {
+			return t
+		}
+	}
+	return l
 }

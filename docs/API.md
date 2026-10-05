@@ -61,3 +61,9 @@ Filtres : `entite`, `activite`, `trigramme`, `tg`, `wp`, `categorie`, `type`, `l
 | GET | `/analyse/ecarts.csv` | mêmes params + filtres `ct`, `ressource`, `flag`, `squad_id` |
 | GET | `/analyse/realise-enrichi.csv` | mêmes params + `mask_sensitive` : écritures + `iso_week`, `heures`, `eur`, `classification` |
 | POST | `/analyse/alias/confirm` | `{personne_id, alias}` → ajoute un alias `confirme` → `Personne` |
+| PUT | `/analyse/anomalies/suivi` | `AnomalieSuiviInput` `{key, fingerprint, statut: traitee\|ignoree, commentaire, operateur?}` → `AnomalieSuivi` (upsert ; audit `anomalie.traitee` / `anomalie.ignoree`) |
+| DELETE | `/analyse/anomalies/suivi?key=` | rouvre l'anomalie (supprime le suivi ; audit `anomalie.rouverte`) → 204 |
+
+**Prévisions** (`AnalyseResult.previsions`, SPEC_analyse §7.7) : horizon = tout le plan (indépendant de `week_from/to`). `as_of` = dernière date de dépense du réalisé. Par CT et global : `budget` = Σ PPS, `consomme` = Σ TOTAL EN € brut (MO comprise), `reste_a_faire` = PPS des semaines > `as_of` (prorata des heures réparties en jours ouvrés), `atterrissage_plan` = consommé + reste à faire, `atterrissage_tendance` = consommé + moyenne € des 4 dernières semaines × semaines restantes, `statut` ok/vigilance/depassement, `series` hebdomadaires cumulées (`budget_cumul`, `reel_cumul` jusqu'à `as_of`, `plan_cumul`/`tendance_cumul` à partir de `as_of`, `heures_plan`, `heures_reel`).
+
+**Anomalies** (`AnalyseResult.anomalies`, SPEC_analyse §7.8) : catégories `ecart` (regroupé ressource × CT × flag sur la période, hors conformes), `ct_risque`, `derive`, `qualite`, `correspondance` (fuzzy à confirmer), `budget` (statut prévision ≠ ok). `key` stable, `fingerprint` = empreinte des chiffres ; `statut` = `a_traiter` sauf suivi enregistré de même empreinte (`traitee`/`ignoree`) ; empreinte différente → `a_traiter` + `suivi.obsolete = true`. Tri : gravité desc, catégorie, montant/heures desc.

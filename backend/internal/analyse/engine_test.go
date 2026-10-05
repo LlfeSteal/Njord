@@ -135,7 +135,7 @@ func TestFlags(t *testing.T) {
 	}
 	// Libellés & CT.
 	r := findRow(t, res, "CTC", "DELATOURA", "2026-W37")
-	if r.RessourceLabel != "Antoine De La Tour" || r.PersonneID == nil || *r.PersonneID != "p2" || r.CTLibelle != "CTC - Libellé CTC" {
+	if r.RessourceLabel != "Antoine De La Tour" || r.PersonneID == nil || *r.PersonneID != "p2" || r.CTLibelle != "Libellé CTC" {
 		t.Errorf("row enrichie incorrecte: %+v", r)
 	}
 	if hp := findRow(t, res, "CTE", "BARBIER Luc M.", "2026-W37"); hp.PersonneID != nil {

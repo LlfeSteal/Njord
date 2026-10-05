@@ -154,7 +154,7 @@ func TestHandlerAnalyse(t *testing.T) {
 	for _, r := range res.Ecarts {
 		byRes[r.Ressource] = r
 	}
-	if r := byRes["DURANDC"]; r.Flag != domain.FlagSurImputation || r.Confidence != domain.ConfMatricule || r.SquadNom != "Squad Alpha" || r.CTLibelle != "Y99F90001 - Socle" {
+	if r := byRes["DURANDC"]; r.Flag != domain.FlagSurImputation || r.Confidence != domain.ConfMatricule || r.SquadNom != "Squad Alpha" || r.CTLibelle != "Socle" {
 		t.Errorf("DURANDC: %+v", r)
 	}
 	if r := byRes["DELATOURA"]; r.Flag != domain.FlagConforme || r.Confidence != domain.ConfFuzzy {

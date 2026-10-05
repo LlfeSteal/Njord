@@ -450,6 +450,125 @@ type Correspondance struct {
 	Heures       float64    `json:"heures"`
 }
 
+// ---------------------------------------------------------------------------
+// Prévisions (SPEC_analyse §7.7) — horizon = tout le plan, indépendant de la période.
+
+// PrevisionPoint is one week of a cumulative forecast series (€ cumulés depuis le début du plan).
+type PrevisionPoint struct {
+	Week          string   `json:"week"`           // "2026-W37"
+	Debut         string   `json:"debut"`          // lundi, YYYY-MM-DD
+	BudgetCumul   float64  `json:"budget_cumul"`   // dépense prévue cumulée (PPS réparti au prorata des heures)
+	ReelCumul     *float64 `json:"reel_cumul"`     // € réalisés cumulés ; null après as_of
+	PlanCumul     *float64 `json:"plan_cumul"`     // projection plan ; null avant as_of (= réel à as_of)
+	TendanceCumul *float64 `json:"tendance_cumul"` // projection au rythme récent ; null avant as_of
+	HeuresPlan    float64  `json:"heures_plan"`    // heures MO planifiées sur la semaine
+	HeuresReel    *float64 `json:"heures_reel"`    // heures MO réalisées ; null après as_of
+}
+
+// PrevisionCT is the landing forecast of one CT (or of the whole perimeter for Global, CT = "").
+type PrevisionCT struct {
+	CT                   string           `json:"ct"`
+	CTLibelle            string           `json:"ct_libelle"`
+	Budget               float64          `json:"budget"`                // Σ PPS des lignes de plan
+	Consomme             float64          `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of
+	PctConsomme          *float64         `json:"pct_consomme"`          // 0..100, null si budget nul
+	ResteAFaire          float64          `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of
+	AtterrissagePlan     float64          `json:"atterrissage_plan"`     // consomme + reste_a_faire
+	AtterrissageTendance float64          `json:"atterrissage_tendance"` // consomme + rythme_hebdo × semaines_restantes
+	EcartPlan            float64          `json:"ecart_plan"`            // atterrissage_plan − budget
+	EcartTendance        float64          `json:"ecart_tendance"`        // atterrissage_tendance − budget
+	RythmeHebdo          float64          `json:"rythme_hebdo"`          // moyenne € des 4 dernières semaines réalisées
+	SemainesRestantes    int              `json:"semaines_restantes"`    // semaines après as_of jusqu'à fin_plan
+	FinPlan              string           `json:"fin_plan"`              // max date_fin des lignes du CT
+	Statut               PrevisionStatut  `json:"statut"`
+	Series               []PrevisionPoint `json:"series"`
+}
+
+// PrevisionStatut: depassement si atterrissage plan > budget ; vigilance si
+// atterrissage tendance > budget ou atterrissage plan > 95 % du budget ; ok sinon.
+type PrevisionStatut string
+
+const (
+	PrevisionOK          PrevisionStatut = "ok"
+	PrevisionVigilance   PrevisionStatut = "vigilance"
+	PrevisionDepassement PrevisionStatut = "depassement"
+)
+
+type Previsions struct {
+	AsOf     string        `json:"as_of"`      // dernière date de dépense du réalisé (YYYY-MM-DD), "" si aucune
+	AsOfWeek string        `json:"as_of_week"` // semaine ISO de as_of
+	Global   PrevisionCT   `json:"global"`     // agrégat (CT = "")
+	ParCT    []PrevisionCT `json:"par_ct"`     // tri : statut (dépassement d'abord) puis ecart_plan desc
+}
+
+// ---------------------------------------------------------------------------
+// Anomalies (SPEC_analyse §7.8) : boîte de réception du contrôleur de gestion.
+
+type AnomalieCategorie string
+
+const (
+	AnomalieEcart          AnomalieCategorie = "ecart"          // écart d'imputation regroupé par ressource × CT × flag
+	AnomalieCTRisque       AnomalieCategorie = "ct_risque"      // Σ € non sécurisé > seuil
+	AnomalieDerive         AnomalieCategorie = "derive"         // dérive de provision
+	AnomalieQualite        AnomalieCategorie = "qualite"        // contrôle qualité §10
+	AnomalieCorrespondance AnomalieCategorie = "correspondance" // correspondance approximative à confirmer
+	AnomalieBudget         AnomalieCategorie = "budget"         // atterrissage prévu au-delà du budget
+)
+
+type AnomalieStatut string
+
+const (
+	AnomalieATraiter AnomalieStatut = "a_traiter"
+	AnomalieTraitee  AnomalieStatut = "traitee"
+	AnomalieIgnoree  AnomalieStatut = "ignoree"
+)
+
+type Anomalie struct {
+	// Key : identifiant stable entre deux analyses (sans « / »), ex. "ecart|Y99F90001|DURANDC|sous_imputation".
+	Key       string            `json:"key"`
+	Categorie AnomalieCategorie `json:"categorie"`
+	Gravite   int               `json:"gravite"` // 3 haute · 2 moyenne · 1 basse
+	Titre     string            `json:"titre"`   // une ligne, ex. "DURAND Claire · Y99F90001 : sous-imputation"
+	Detail    string            `json:"detail"`  // phrase explicative
+	Flag      *Flag             `json:"flag,omitempty"`
+	CT        string            `json:"ct,omitempty"`
+	CTLibelle string            `json:"ct_libelle,omitempty"`
+	Ressource string            `json:"ressource,omitempty"` // code ressource ou nom réalisé
+	// Correspondance : nom réalisé et personne proposée (action « Confirmer l'alias »).
+	NomRealise string   `json:"nom_realise,omitempty"`
+	PersonneID *string  `json:"personne_id,omitempty"`
+	Montant    *float64 `json:"montant,omitempty"` // € concernés
+	Heures     *float64 `json:"heures,omitempty"`  // heures concernées (écart signé pour un écart)
+	Semaines   []string `json:"semaines,omitempty"`
+	Details    []string `json:"details,omitempty"` // au plus 50 lignes
+	// Lien : route front vers les données concernées, ex. "/ecarts?ct=Y99F90001&ressource=DURANDC".
+	Lien string `json:"lien"`
+	// Fingerprint : empreinte des chiffres (arrondis) ; un traitement dont l'empreinte diffère redevient « à traiter ».
+	Fingerprint string         `json:"fingerprint"`
+	Statut      AnomalieStatut `json:"statut"`
+	Suivi       *AnomalieSuivi `json:"suivi,omitempty"`
+}
+
+// AnomalieSuivi is the stored treatment of an anomaly (table anomalie_suivi).
+type AnomalieSuivi struct {
+	Key         string         `json:"key"`
+	Fingerprint string         `json:"fingerprint"`
+	Statut      AnomalieStatut `json:"statut"` // traitee | ignoree
+	Commentaire string         `json:"commentaire"`
+	Operateur   string         `json:"operateur"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	Obsolete    bool           `json:"obsolete"` // empreinte changée depuis le traitement (l'anomalie est revenue à traiter)
+}
+
+// AnomalieSuiviInput is the body of PUT /analyse/anomalies/suivi.
+type AnomalieSuiviInput struct {
+	Key         string         `json:"key"`
+	Fingerprint string         `json:"fingerprint"`
+	Statut      AnomalieStatut `json:"statut"` // traitee | ignoree
+	Commentaire string         `json:"commentaire"`
+	Operateur   string         `json:"operateur"`
+}
+
 type AnalyseResult struct {
 	Meta            AnalyseMeta      `json:"meta"`
 	KPIs            KPIs             `json:"kpis"`
@@ -458,4 +577,7 @@ type AnalyseResult struct {
 	Alertes         Alertes          `json:"alertes"`
 	Qualite         []QualiteWarning `json:"qualite"`
 	Correspondances []Correspondance `json:"correspondances"`
+	Previsions      Previsions       `json:"previsions"`
+	// Anomalies : tri gravité desc puis catégorie ; statut fusionné avec anomalie_suivi par le handler.
+	Anomalies []Anomalie `json:"anomalies"`
 }

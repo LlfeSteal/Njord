@@ -28,6 +28,8 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/analyse/ecarts.csv", h.ecartsCSV)
 	g.GET("/analyse/realise-enrichi.csv", h.realiseCSV)
 	g.POST("/analyse/alias/confirm", h.confirmAlias)
+	g.PUT("/analyse/anomalies/suivi", h.putSuivi)
+	g.DELETE("/analyse/anomalies/suivi", h.deleteSuivi)
 }
 
 func (h *Handler) context(c *gin.Context) {
@@ -89,7 +91,11 @@ func (h *Handler) compute(ctx context.Context, p params) (domain.AnalyseResult, 
 	}
 	in.WeekFrom, in.WeekTo, in.IncludeInactive = p.weekFrom, p.weekTo, p.includeInactive
 	in.Now = h.st.Now()
-	return Run(in, s), nil
+	res := Run(in, s)
+	if err := h.mergeSuivi(ctx, &res); err != nil {
+		return domain.AnalyseResult{}, err
+	}
+	return res, nil
 }
 
 func (h *Handler) analyse(c *gin.Context) {

@@ -99,6 +99,16 @@ CREATE TABLE IF NOT EXISTS plan_lines (
 );
 CREATE INDEX IF NOT EXISTS plan_lines_version ON plan_lines(version_id);
 
+-- Suivi des anomalies (SPEC_analyse §7.8) : traitement manuel par le contrôleur de gestion.
+CREATE TABLE IF NOT EXISTS anomalie_suivi (
+	key         TEXT PRIMARY KEY,
+	fingerprint TEXT NOT NULL,
+	statut      TEXT NOT NULL CHECK (statut IN ('traitee','ignoree')),
+	commentaire TEXT NOT NULL DEFAULT '',
+	operateur   TEXT NOT NULL DEFAULT '',
+	updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS realise_entries (
 	id                   INTEGER PRIMARY KEY AUTOINCREMENT,
 	version_id           TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,

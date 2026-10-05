@@ -219,6 +219,24 @@ Cartes affichées en tête d'écran :
 - % budget sécurisé ;
 - nombre de CT à risque.
 
+### 7.7 Prévisions (atterrissage)
+
+Ajout 2026-10-05 (contrôle de gestion). Horizon = tout le plan, indépendant de la période d'analyse.
+
+- `as_of` = dernière date de dépense du réalisé.
+- Budget d'un CT = Σ PPS des lignes du plan ; dépense prévue hebdomadaire = PPS réparti au prorata des heures (jours ouvrés, §4).
+- Consommé = Σ TOTAL EN € brut (MO comprise) jusqu'à `as_of`.
+- **Atterrissage plan** = consommé + reste à faire du plan (semaines postérieures à `as_of`).
+- **Atterrissage tendance** = consommé + rythme moyen des 4 dernières semaines × semaines restantes jusqu'à la fin du plan du CT.
+- Statut : `depassement` si atterrissage plan > budget ; `vigilance` si tendance > budget ou atterrissage plan > 95 % du budget ; `ok` sinon.
+- Séries hebdomadaires cumulées (budget, réel, projections plan et tendance) et heures MO planifiées / réalisées.
+
+### 7.8 Anomalies (boîte de réception)
+
+Ajout 2026-10-05. Liste unique des points à vérifier, chacun avec une clé stable et une empreinte de ses chiffres :
+écarts d'imputation (regroupés par ressource × CT × flag, hors conformes), CT à risque, dérives de provision, contrôles qualité (§10), correspondances approximatives à confirmer, prévisions en dépassement / vigilance.
+Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commentaire (journal d'audit) ; si l'empreinte change, elle redevient **à traiter**.
+
 ## 8. Comportements d'écran (onglet Analyse)
 
 - Sélecteur version plan (défaut : active, override archivée possible) ;

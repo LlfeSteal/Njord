@@ -1,0 +1,223 @@
+/* Boutons (§7) : 28 px, rayon 7, --fill, 13/500 ; pression scale 0.97 ; désactivé opacité 0.5. */
+
+.ui-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--fill);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    transform 0.1s var(--ease),
+    opacity 0.15s var(--ease);
+}
+.ui-btn:hover {
+  background: var(--fill-pressed);
+  text-decoration: none;
+}
+.ui-btn:active:not(:disabled):not([aria-disabled='true']) {
+  transform: scale(0.97);
+}
+.ui-btn:focus-visible {
+  border-radius: 7px;
+}
+.ui-btn:disabled,
+.ui-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+/* Le spinner de chargement garde l'opacité pleine pour rester lisible. */
+.ui-btn[data-loading] {
+  opacity: 0.75;
+}
+
+.ui-btn[data-size='sm'] {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  gap: 4px;
+}
+.ui-btn[data-icon-only] {
+  padding: 0;
+  width: 28px;
+}
+.ui-btn[data-icon-only][data-size='sm'] {
+  width: 24px;
+}
+.ui-btn[data-full] {
+  display: flex;
+  width: 100%;
+}
+
+.ui-btn__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-btn[data-overlay] > :not(.ui-btn__overlay) {
+  visibility: hidden;
+}
+.ui-btn__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Bascule enfoncée */
+.ui-btn[aria-pressed='true'] {
+  background: var(--fill-pressed);
+  color: var(--accent);
+}
+
+/* Primaire : bleu plein, texte blanc ; survol bleu assombri (§2.4). */
+.ui-btn[data-variant='primary'] {
+  background: var(--accent);
+  color: #fff;
+}
+.ui-btn[data-variant='primary']:hover {
+  background: color-mix(in srgb, var(--blue) 88%, black);
+}
+
+/* Plain : texte bleu sans fond ; --fill au survol. */
+.ui-btn[data-variant='plain'] {
+  background: transparent;
+  color: var(--accent);
+  padding: 0 8px;
+}
+.ui-btn[data-variant='plain']:hover,
+.ui-btn[data-variant='plain'][aria-pressed='true'] {
+  background: var(--fill);
+}
+.ui-btn[data-variant='plain'][data-icon-only] {
+  padding: 0;
+}
+
+/* Destructif */
+.ui-btn[data-destructive] {
+  color: var(--danger);
+}
+.ui-btn[data-variant='primary'][data-destructive] {
+  background: var(--danger);
+  color: #fff;
+}
+.ui-btn[data-variant='primary'][data-destructive]:hover {
+  background: color-mix(in srgb, var(--red) 88%, black);
+}
+
+/* ------------------------------------------------------------------ IconButton */
+
+.ui-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.15s var(--ease),
+    color 0.15s var(--ease),
+    transform 0.1s var(--ease);
+}
+.ui-icon-btn[data-size='sm'] {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.ui-icon-btn[data-variant='filled'] {
+  background: var(--fill);
+}
+.ui-icon-btn:hover,
+.ui-icon-btn[aria-expanded='true'] {
+  background: var(--fill);
+  color: var(--text);
+}
+.ui-icon-btn[data-variant='filled']:hover,
+.ui-icon-btn[data-variant='filled'][aria-expanded='true'] {
+  background: var(--fill-pressed);
+}
+.ui-icon-btn[aria-pressed='true'] {
+  background: var(--fill-pressed);
+  color: var(--accent);
+}
+.ui-icon-btn[data-destructive],
+.ui-icon-btn[data-destructive]:hover {
+  color: var(--danger);
+}
+.ui-icon-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.ui-icon-btn:focus-visible {
+  border-radius: 7px;
+}
+.ui-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ Link */
+
+.ui-link {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  text-align: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.ui-link:hover {
+  text-decoration: underline;
+}
+.ui-link[data-size='xs'] {
+  font-size: 11px;
+}
+.ui-link[data-size='sm'] {
+  font-size: 12px;
+}
+.ui-link[data-size='md'] {
+  font-size: 13px;
+}
+.ui-link[data-mono] {
+  font-family: var(--font-mono);
+}
+
+/* Spinner dans un bouton : couleur du texte du bouton (lisible sur fond bleu ou rouge). */
+.ui-btn .ui-spinner__track,
+.ui-icon-btn .ui-spinner__track {
+  stroke: currentColor;
+  opacity: 0.3;
+}
+.ui-btn .ui-spinner__arc,
+.ui-icon-btn .ui-spinner__arc {
+  stroke: currentColor;
+}

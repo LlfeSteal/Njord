@@ -1,0 +1,205 @@
+/* Tableaux natifs (§4, §8). Les filets passent par des bordures et des ombres internes
+   pour rester visibles dans l'en-tête collant (border-collapse ne colle pas les bordures). */
+
+.ui-table-wrap {
+  min-width: 0;
+}
+.ui-table-wrap[data-card] {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.ui-table-scroll {
+  overflow-x: auto;
+}
+.ui-table-scroll[data-scroll-y] {
+  overflow-y: auto;
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.ui-table__caption {
+  padding: 0;
+}
+
+.ui-table th,
+.ui-table td {
+  height: 36px;
+  padding: 0 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+.ui-table[data-compact] td {
+  height: 28px;
+}
+
+/* En-tête : style « column header » (§3), filet bas, collant si le tableau défile. */
+.ui-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 32px;
+  box-shadow: inset 0 -0.5px 0 var(--separator);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ui-table-wrap[data-card] .ui-table thead th,
+.ui-table-scroll[data-scroll-y] .ui-table thead th {
+  background: var(--card);
+}
+
+/* Filets entre lignes (aucun si alterné). */
+.ui-table:not([data-striped]) tbody tr + tr > td,
+.ui-table:not([data-striped]) tbody tr + tr > th {
+  border-top: 0.5px solid var(--separator);
+}
+.ui-table tfoot tr:first-child > td,
+.ui-table tfoot tr:first-child > th {
+  border-top: 0.5px solid var(--separator);
+}
+.ui-table[data-striped] tbody tr:nth-child(even) > td,
+.ui-table[data-striped] tbody tr:nth-child(even) > th {
+  background-color: var(--row-alt);
+}
+
+/* Survol : ombre interne, se combine avec le fond alterné. */
+.ui-table tbody td,
+.ui-table tbody th {
+  transition: box-shadow 0.15s var(--ease);
+}
+.ui-table[data-hover] tbody tr:hover > td,
+.ui-table[data-hover] tbody tr:hover > th,
+.ui-table tbody tr[data-clickable]:hover > td,
+.ui-table tbody tr[data-clickable]:hover > th {
+  box-shadow: inset 0 0 0 100vmax var(--row-hover);
+}
+.ui-table tr[data-clickable] {
+  cursor: pointer;
+}
+
+/* États de ligne. */
+.ui-table tr[data-muted] > td,
+.ui-table tr[data-muted] > th {
+  color: var(--text-secondary);
+}
+.ui-table tr[data-strike] > td,
+.ui-table tr[data-strike] > th {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.ui-table tr[data-selected] > td,
+.ui-table tr[data-selected] > th {
+  background-color: var(--accent-tint);
+}
+.ui-table tr[data-emphasis] > td,
+.ui-table tr[data-emphasis] > th {
+  font-weight: 600;
+}
+
+/* Conventions de cellule. */
+.ui-table :is(th, td)[data-align='right'] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ui-table :is(th, td)[data-align='center'] {
+  text-align: center;
+}
+.ui-table :is(th, td)[data-mono] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ui-table :is(th, td)[data-nowrap] {
+  white-space: nowrap;
+}
+.ui-table td[data-actions] {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+  padding-right: 8px;
+}
+.ui-table td[data-actions] > * {
+  vertical-align: middle;
+}
+.ui-table td[data-actions] > * + * {
+  margin-left: 4px;
+}
+
+/* En-tête triable : bouton sans fond sur toute la largeur. */
+.ui-table thead th[data-sort] {
+  padding: 0;
+}
+.ui-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: color 0.15s var(--ease);
+}
+th[data-align='right'] > .ui-sort {
+  justify-content: flex-end;
+}
+.ui-sort:hover,
+.ui-sort[data-active] {
+  color: var(--text);
+}
+.ui-sort:focus-visible {
+  outline-offset: -3px;
+}
+.ui-sort__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-sort__idle {
+  color: var(--text-tertiary);
+}
+
+/* Pagination. */
+.ui-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+.ui-pagination__summary {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ui-pagination__pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.ui-pagination__page {
+  padding: 0 4px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

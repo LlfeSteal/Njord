@@ -1,0 +1,155 @@
+/* Njord — tokens et base. Source de vérité : docs/STYLE.md (à tenir à jour).
+   Les styles des composants vivent dans src/ui/*.css ; aucune couleur littérale ailleurs. */
+
+:root {
+  color-scheme: light;
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Neutres */
+  --bg: #f5f5f7;
+  --card: #ffffff;
+  --row-alt: #fafafc;
+  --row-hover: rgba(0, 0, 0, 0.035);
+  --text: #1d1d1f;
+  --text-secondary: rgba(60, 60, 67, 0.6);
+  --text-tertiary: rgba(60, 60, 67, 0.3);
+  --separator: rgba(60, 60, 67, 0.12);
+  --fill: rgba(120, 120, 128, 0.12);
+  --fill-pressed: rgba(120, 120, 128, 0.2);
+  --material: rgba(255, 255, 255, 0.72);
+  --menu-bg: rgba(246, 246, 248, 0.97);
+  --segment-thumb: #ffffff;
+
+  /* Élévation */
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --popover-shadow: 0 8px 30px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  --raised-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  --backdrop: rgba(0, 0, 0, 0.5);
+
+  /* Teintes système */
+  --blue: #007aff;
+  --purple: #af52de;
+  --green: #34c759;
+  --orange: #ff9500;
+  --teal: #30b0c7;
+  --red: #ff3b30;
+  --gray: #8e8e93;
+
+  /* Sémantique Njord */
+  --accent: var(--blue);
+  --success: var(--green);
+  --warning: var(--orange);
+  --danger: var(--red);
+  --flag-conforme: var(--green);
+  --flag-hors-plan: var(--orange);
+  --flag-sur-imputation: var(--red);
+  --flag-sous-imputation: var(--purple);
+  --flag-absence: var(--gray);
+  --statut-active: var(--green);
+  --statut-archivee: var(--gray);
+  --statut-purgee: var(--text-tertiary);
+  --series-planned: color-mix(in srgb, var(--blue) 30%, transparent);
+  --series-actual: var(--blue);
+  --budget-secured: var(--green);
+  --budget-unsecured: var(--orange);
+  --budget-unclassified: var(--gray);
+  --focus-ring: color-mix(in srgb, var(--blue) 50%, transparent);
+  --field-ring: color-mix(in srgb, var(--blue) 45%, transparent);
+  --accent-tint: color-mix(in srgb, var(--blue) 14%, transparent);
+
+  /* Formes et mouvement */
+  --radius: 12px;
+  --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #000000;
+  --card: #1c1c1e;
+  --row-alt: #202022;
+  --row-hover: rgba(255, 255, 255, 0.05);
+  --text: #f5f5f7;
+  --text-secondary: rgba(235, 235, 245, 0.6);
+  --text-tertiary: rgba(235, 235, 245, 0.3);
+  --separator: rgba(84, 84, 88, 0.45);
+  --fill: rgba(118, 118, 128, 0.24);
+  --fill-pressed: rgba(118, 118, 128, 0.36);
+  --material: rgba(28, 28, 30, 0.72);
+  --menu-bg: rgba(44, 44, 46, 0.97);
+  --segment-thumb: #636366;
+  --shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --popover-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  --backdrop: rgba(0, 0, 0, 0.65);
+  --blue: #0a84ff;
+  --purple: #bf5af2;
+  --green: #30d158;
+  --orange: #ff9f0a;
+  --teal: #40c8e0;
+  --red: #ff453a;
+  --gray: #98989d;
+}
+
+/* ------------------------------------------------------------------ Base */
+* {
+  box-sizing: border-box;
+}
+html {
+  background: var(--bg);
+}
+body {
+  margin: 0;
+  font: 14px/1.4 var(--font);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+a {
+  color: var(--blue);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+::selection {
+  background: var(--accent-tint);
+}
+* {
+  scrollbar-color: var(--text-tertiary) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after,
+  ::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
+}

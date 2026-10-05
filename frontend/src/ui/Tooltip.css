@@ -1,0 +1,39 @@
+/* Bulle d'aide : matériau translucide (§5), z 30. */
+.ui-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 30;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--material);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--popover-shadow);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: normal;
+  text-transform: none;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  visibility: hidden;
+}
+.ui-tooltip[data-ready] {
+  visibility: visible;
+  animation: ui-tooltip-in 0.15s var(--ease);
+}
+/* Contenu riche (titre + lignes). */
+.ui-tooltip[data-rich] {
+  padding: 12px 14px;
+}
+
+@keyframes ui-tooltip-in {
+  from {
+    opacity: 0;
+  }
+}

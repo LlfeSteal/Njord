@@ -1,0 +1,80 @@
+.ui-text {
+  margin: 0;
+  font-size: 13px;
+  min-width: 0;
+}
+.ui-text[data-size='xs'] { font-size: 11px; }
+.ui-text[data-size='sm'] { font-size: 12px; }
+.ui-text[data-size='md'] { font-size: 13px; }
+.ui-text[data-size='lg'] { font-size: 15px; font-weight: 600; }
+.ui-text[data-size='xl'] { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.ui-text[data-size='kpi'] {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ui-text[data-tone='primary'] { color: var(--text); }
+.ui-text[data-tone='secondary'] { color: var(--text-secondary); }
+.ui-text[data-tone='tertiary'] { color: var(--text-tertiary); }
+.ui-text[data-tone='accent'] { color: var(--accent); }
+.ui-text[data-tone='success'] { color: var(--success); }
+.ui-text[data-tone='warning'] { color: var(--warning); }
+.ui-text[data-tone='danger'] { color: var(--danger); }
+.ui-text[data-tone='conforme'] { color: var(--flag-conforme); }
+.ui-text[data-tone='hors_plan'] { color: var(--flag-hors-plan); }
+.ui-text[data-tone='sur_imputation'] { color: var(--flag-sur-imputation); }
+.ui-text[data-tone='sous_imputation'] { color: var(--flag-sous-imputation); }
+.ui-text[data-tone='absence'] { color: var(--flag-absence); }
+
+.ui-text[data-weight='400'] { font-weight: 400; }
+.ui-text[data-weight='500'] { font-weight: 500; }
+.ui-text[data-weight='600'] { font-weight: 600; }
+.ui-text[data-align='left'] { text-align: left; }
+.ui-text[data-align='center'] { text-align: center; }
+.ui-text[data-align='right'] { text-align: right; }
+.ui-text[data-tabular] { font-variant-numeric: tabular-nums; }
+.ui-text[data-mono] { font-family: var(--font-mono); font-size: 0.92em; }
+.ui-text[data-strike] { text-decoration: line-through; }
+.ui-text[data-truncate] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-text[data-clamp] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ui-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+.ui-title[data-order='1'],
+.ui-title[data-order='2'] { font-size: 17px; letter-spacing: -0.01em; }
+.ui-title[data-order='3'] { font-size: 15px; }
+.ui-title[data-order='4'] { font-size: 13px; }
+
+.ui-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--fill);
+}
+.ui-code--block {
+  display: block;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  overflow: auto;
+  white-space: pre;
+}
+.ui-code--block code {
+  font: inherit;
+  background: none;
+}

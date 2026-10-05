@@ -1,0 +1,134 @@
+/* Bandeau : ton mélangé à la carte (§2.4). */
+.ui-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
+}
+.ui-banner[data-tone='error'] { background: color-mix(in srgb, var(--red) 10%, var(--card)); }
+.ui-banner[data-tone='warning'] { background: color-mix(in srgb, var(--orange) 12%, var(--card)); }
+.ui-banner[data-tone='info'] { background: color-mix(in srgb, var(--blue) 8%, var(--card)); }
+.ui-banner[data-tone='success'] { background: color-mix(in srgb, var(--green) 10%, var(--card)); }
+.ui-banner[data-compact] {
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+/* Glyphe aligné sur la première ligne (13 × 1,4 ≈ 18 px). */
+.ui-banner__glyph {
+  display: inline-flex;
+  flex: none;
+  height: 18px;
+  align-items: center;
+}
+.ui-banner__content {
+  flex: 1;
+  min-width: 0;
+}
+.ui-banner__title {
+  font-weight: 600;
+  color: var(--text);
+}
+.ui-banner[data-compact] .ui-banner__title {
+  font-weight: 400;
+}
+.ui-banner__text {
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+.ui-banner__title + .ui-banner__text {
+  margin-top: 2px;
+}
+.ui-banner__action {
+  flex: none;
+  align-self: center;
+}
+.ui-banner__close {
+  flex: none;
+  margin: -3px -8px -3px 0;
+}
+.ui-banner[data-compact] .ui-banner__close {
+  margin: -3px -4px -3px 0;
+}
+
+/* Spinner : piste tertiaire, arc secondaire, 0,9 s. */
+.ui-spinner {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+}
+.ui-spinner svg {
+  animation: ui-spin 0.9s linear infinite;
+}
+.ui-spinner__track {
+  stroke: var(--text-tertiary);
+}
+.ui-spinner__arc {
+  stroke: var(--text-secondary);
+}
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ui-loading-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+
+/* Squelettes : scintillement --fill → --fill-pressed, 1,4 s. */
+.ui-skeleton {
+  background: var(--fill);
+  animation: ui-shimmer 1.4s var(--ease) infinite;
+}
+@keyframes ui-shimmer {
+  50% {
+    background: var(--fill-pressed);
+  }
+}
+.ui-skeleton-row {
+  display: flex;
+  align-items: center;
+  height: 40px;
+}
+
+/* État vide. */
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 24px;
+  text-align: center;
+}
+.ui-empty__icon {
+  display: inline-flex;
+  margin-bottom: 12px;
+  color: var(--text-tertiary);
+}
+.ui-empty__icon svg {
+  width: 40px;
+  height: 40px;
+}
+.ui-empty__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.ui-empty__text {
+  max-width: 420px;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.ui-empty__action {
+  margin-top: 16px;
+}

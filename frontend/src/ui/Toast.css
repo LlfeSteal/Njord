@@ -1,0 +1,78 @@
+/* Pile de notifications : bas à droite, z 40 (§5). */
+.ui-toaster {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.ui-toast {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--material);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  box-shadow: var(--popover-shadow);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: ui-toast-in 0.15s var(--ease);
+}
+.ui-toast__glyph {
+  display: inline-flex;
+  flex: none;
+  height: 18px;
+  align-items: center;
+}
+.ui-toast__content {
+  flex: 1;
+  min-width: 0;
+  padding-right: 16px;
+}
+.ui-toast__title {
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+.ui-toast__message {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+
+/* Bouton fermer : visible au survol / focus (toujours sur écran tactile). */
+.ui-toast__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s var(--ease);
+}
+.ui-toast:hover .ui-toast__close,
+.ui-toast:focus-within .ui-toast__close {
+  opacity: 1;
+}
+@media (hover: none) {
+  .ui-toast__close {
+    opacity: 1;
+  }
+}
+
+@keyframes ui-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}

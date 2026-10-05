@@ -1,0 +1,103 @@
+/* Dialogues sur <dialog> natif (couche supérieure, §5). */
+.ui-dialog {
+  padding: 0;
+  margin: auto;
+  border: 0;
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--text);
+  box-shadow: var(--popover-shadow);
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+.ui-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  animation: ui-dialog-in 0.15s var(--ease);
+}
+.ui-dialog[data-size='sm'] { width: 440px; }
+.ui-dialog[data-size='md'] { width: 560px; }
+.ui-dialog[data-size='lg'] { width: 800px; }
+.ui-dialog[data-size='xl'] { width: min(1100px, 100vw - 32px); }
+
+.ui-dialog::backdrop {
+  background: var(--backdrop);
+  animation: ui-backdrop-in 0.15s var(--ease);
+}
+
+/* Panneau latéral : ancré à droite, pleine hauteur. */
+.ui-dialog.ui-sheet {
+  inset: 0 0 0 auto;
+  margin: 0;
+  height: 100%;
+  max-width: 100vw;
+  max-height: none;
+  border-radius: 0;
+}
+.ui-dialog.ui-sheet[open] {
+  animation: ui-sheet-in 0.2s var(--ease);
+}
+
+.ui-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 14px 14px 0 20px;
+  min-height: 44px;
+}
+.ui-dialog__titles {
+  flex: 1;
+  min-width: 0;
+}
+.ui-dialog__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-dialog__subtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ui-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 20px;
+  overflow: auto;
+}
+
+.ui-dialog__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: none;
+  padding: 12px 20px;
+  border-top: 0.5px solid var(--separator);
+}
+
+@keyframes ui-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes ui-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ui-sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}

@@ -1,0 +1,101 @@
+/* Glyphes de statut (§9) : la forme porte le sens, la couleur vient du ton. */
+.ui-glyph {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+  color: var(--text-secondary);
+}
+.ui-glyph[data-tone='neutral'] { color: var(--text-secondary); }
+.ui-glyph[data-tone='accent'] { color: var(--accent); }
+.ui-glyph[data-tone='success'] { color: var(--success); }
+.ui-glyph[data-tone='warning'] { color: var(--warning); }
+.ui-glyph[data-tone='danger'] { color: var(--danger); }
+.ui-glyph[data-tone='attention'] { color: var(--warning); }
+.ui-glyph[data-tone='conforme'] { color: var(--flag-conforme); }
+.ui-glyph[data-tone='hors_plan'] { color: var(--flag-hors-plan); }
+.ui-glyph[data-tone='sur_imputation'] { color: var(--flag-sur-imputation); }
+.ui-glyph[data-tone='sous_imputation'] { color: var(--flag-sous-imputation); }
+.ui-glyph[data-tone='absence'] { color: var(--flag-absence); }
+.ui-glyph[data-tone='active'] { color: var(--statut-active); }
+.ui-glyph[data-tone='archivee'] { color: var(--statut-archivee); }
+.ui-glyph[data-tone='purgee'] { color: var(--statut-purgee); }
+
+/* Tag : glyphe + libellé, sans fond ni contour (§8). */
+.ui-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  vertical-align: middle;
+}
+.ui-tag__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-tag[data-strike] .ui-tag__label {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+/* Pastille de compteur (§7). */
+.ui-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--fill);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.ui-pill[data-tone='accent'] {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.ui-pill__icon {
+  display: inline-flex;
+  flex: none;
+}
+.ui-pill__icon svg {
+  width: 12px;
+  height: 12px;
+}
+.ui-pill__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-pill__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s var(--ease);
+}
+.ui-pill__remove:hover {
+  background: var(--fill-pressed);
+}
+.ui-pill__remove:focus-visible {
+  border-radius: 50%;
+  outline-offset: 0;
+}

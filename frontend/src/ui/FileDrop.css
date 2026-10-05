@@ -1,0 +1,66 @@
+/* Zone de dépôt (§7) : rayon 12, 1,5 px pointillé --separator, --card, padding 32, centrée.
+   Survol de glisser-déposer : bordure bleue et teinte bleue 8 %. */
+
+.ui-filedrop {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border: 1.5px dashed var(--separator);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s var(--ease),
+    background-color 0.15s var(--ease);
+}
+.ui-filedrop:hover {
+  border-color: var(--text-tertiary);
+}
+.ui-filedrop:focus-visible {
+  border-radius: var(--radius);
+}
+.ui-filedrop[data-over] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--blue) 8%, var(--card));
+}
+.ui-filedrop[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.ui-filedrop[data-loading] {
+  cursor: progress;
+}
+
+.ui-filedrop__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-filedrop[data-loading] .ui-filedrop__content {
+  visibility: hidden;
+}
+.ui-filedrop__icon {
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+}
+.ui-filedrop__title {
+  font-size: 13px;
+  font-weight: 500;
+}
+.ui-filedrop__hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.ui-filedrop__spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

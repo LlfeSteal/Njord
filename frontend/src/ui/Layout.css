@@ -1,0 +1,86 @@
+.ui-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ui-group {
+  display: flex;
+  min-width: 0;
+}
+.ui-group--grow > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.ui-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols-base), minmax(0, 1fr));
+}
+@media (min-width: 576px) {
+  .ui-grid {
+    grid-template-columns: repeat(var(--cols-xs), minmax(0, 1fr));
+  }
+}
+@media (min-width: 768px) {
+  .ui-grid {
+    grid-template-columns: repeat(var(--cols-sm), minmax(0, 1fr));
+  }
+}
+@media (min-width: 992px) {
+  .ui-grid {
+    grid-template-columns: repeat(var(--cols-md), minmax(0, 1fr));
+  }
+}
+@media (min-width: 1200px) {
+  .ui-grid {
+    grid-template-columns: repeat(var(--cols-lg), minmax(0, 1fr));
+  }
+}
+
+.ui-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.ui-divider {
+  border: 0;
+  border-top: 0.5px solid var(--separator);
+  margin: 0;
+  width: 100%;
+}
+.ui-divider--label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.ui-divider--label::before,
+.ui-divider--label::after {
+  content: '';
+  flex: 1;
+  border-top: 0.5px solid var(--separator);
+}
+.ui-divider-v {
+  display: inline-block;
+  align-self: stretch;
+  width: 0;
+  border-left: 0.5px solid var(--separator);
+}
+
+.ui-visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}

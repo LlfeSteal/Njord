@@ -1,0 +1,135 @@
+/* Panneaux flottants et menus (§7) : rayon 10, --menu-bg, ombre popover, z 20.
+   Apparition : fondu + échelle depuis 0.96 en 0.12 s, depuis le coin d'ancrage. */
+
+.ui-popover {
+  position: fixed;
+  z-index: 20;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  border-radius: 10px;
+  /* Sous-couche opaque : sans elle, Chromium laisse transparaître le texte de la page à travers les 97 %. */
+  background: linear-gradient(var(--menu-bg), var(--menu-bg)), var(--bg);
+  box-shadow: var(--popover-shadow);
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0;
+  transform-origin: top left;
+}
+.ui-popover[data-ready] {
+  opacity: 1;
+  animation: ui-popover-in 0.12s var(--ease);
+}
+.ui-popover[data-side='bottom'][data-align='end'] {
+  transform-origin: top right;
+}
+.ui-popover[data-side='top'][data-align='start'] {
+  transform-origin: bottom left;
+}
+.ui-popover[data-side='top'][data-align='end'] {
+  transform-origin: bottom right;
+}
+.ui-popover:focus-visible,
+.ui-popover:focus {
+  outline: none;
+}
+
+@keyframes ui-popover-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ------------------------------------------------------------------ Menu */
+
+.ui-menu {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.ui-menu:focus-visible {
+  outline: none;
+}
+
+.ui-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+  outline: none;
+}
+/* Survol / focus : bleu plein, texte blanc (macOS). Le surlignage tient lieu d'anneau. */
+.ui-menu__item:focus,
+.ui-menu__item:focus-visible {
+  outline: none;
+  background: var(--accent);
+  color: #fff;
+}
+.ui-menu__item:disabled {
+  color: var(--text-tertiary);
+}
+.ui-menu__item[data-destructive] {
+  color: var(--danger);
+}
+.ui-menu__item[data-destructive]:focus {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ui-menu__icon {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  justify-content: center;
+}
+.ui-menu__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ui-menu__hint {
+  flex: none;
+  margin-left: 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ui-menu__check {
+  display: inline-flex;
+  flex: none;
+  width: 14px;
+  justify-content: center;
+  color: var(--accent);
+}
+.ui-menu__item:focus .ui-menu__hint,
+.ui-menu__item:focus .ui-menu__check {
+  color: inherit;
+}
+
+.ui-menu__header {
+  padding: 6px 8px 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.ui-menu__separator {
+  margin: 5px 8px;
+  border-top: 0.5px solid var(--separator);
+}

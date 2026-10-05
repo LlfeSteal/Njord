@@ -14,6 +14,14 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 - CT de 9 **ou 10** caractères acceptés (`Y99F900010`).
 - Ressource : `[inactif]` → strip + `inactive`; motif `^[A-Z0-9_]{1,12}$` sans `_` long → `internal` (ex. `DURANDC`, `R_001`) ; préfixe `2GI_` / `RES_ext_` ou longueur > 12 → `external` ; sinon `unknown` (warn).
 
+- **Pourcentage** (§8 r3) appliqué strictement : ∉ {20,30,40,50,70,80,100} → warn. Sur la démo : 5 warn (60 % l. 18/40/54, 10 % l. 23, 200 % l. 50), 31 ok.
+- **Alias de squad** issus des libellés (`… / Squad Alpha`) : rattachés au groupe du chemin dont le nom contient tous les tokens de l'alias (sinon groupe le plus interne) → « Squad Alpha » → « Squad Alpha — Plateforme », « Cellule Qualité » → « Cellule Transverse Qualité ».
+- Layout B : les colonnes démo additionnelles ne sont pas lues (position ambiguë avec la colonne poubelle).
+- PPS vide/non numérique → warn (0) ; charge non numérique → drop ; pourcentage non numérique → warn.
+- Les lignes drop sont stockées (consultables, filtre `statut=drop`) mais ne créent pas de personne ; l'analyse les exclut.
+- Preview : l'enrichissement des référentiels est simulé dans une transaction annulée (résultat exact de ce que créerait l'import).
+- Référentiels : alias manuel en conflit (même alias normalisé `manuel`/`confirme` sur une autre personne) → 409 ; fusion : le nom de la fiche source devient un alias `manuel` de la cible.
+
 ## Format démo — Réalisé
 Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. Mapping :
 
@@ -34,7 +42,10 @@ Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. 
 | absents | ENTITE, ACTIVITE, SOUS-ACTIVITE, TRIGRAMME, MATRICULE, FPC, CEA, COMPTE, n° LIGNE, LOT → vides |
 
 - Règle 8 (doublons) : clé testée seulement si `num_facture` ou `num_commande` non vide.
-- Valeurs `-` → vide partout. Avoirs négatifs conservés.
+- Valeurs `-` → vide partout. Avoirs négatifs conservés (démo : 20 montants négatifs).
+- Liste des TYPE reconnus = énuméré §3 + types de la classification budgétaire (`FRAIS ACHATS CAPACITE SUR SITE`, `PROVISIONS POUR ALEAS`, `Stockage`).
+- Lignes drop stockées (consultables) ; `montant_total_eur` = Σ ok + warn. Doublons : 1re occurrence ok, suivantes warn.
+- Démo : 482 écritures, 0 warn, 0 drop, 403 130,43 €.
 
 ## Analyse — interprétations
 - **⚫ Absence** : tuple `réel = 0 ∧ prévu > 0` **et** la personne a `Σ réel = 0` sur toute la période analysée (§9). Sinon le tuple est évalué par l'écart.
@@ -46,6 +57,19 @@ Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. 
 - **Taux de conformité** : `nb 🟢 / nb tuples comparés` où tuples comparés = tuples hors 🟠, en excluant les ressources `inactive` sauf `include_inactive`.
 - **Dérive de provision** : écritures non rattachées (`none`) sur un CT dont le plan porte une ligne `PROVISIONS POUR ALEAS`, ou de TYPE `PROVISIONS POUR ALEAS`.
 - **Qualité §10.1** : |Σ € réalisé par TG − Σ PPS plan du CT| > `seuil_ecart_tg_eur` → warn.
+
+- **Lignes de plan comparées** : seules celles dont la `ligne_cout` ∈ `mo_types` sont dépliées en heures prévues (frais de mission, provisions, stockage, achats exclus de la comparaison ; ils restent dans le PPS).
+- **Contre-passations** : toutes les écritures MO avec heures ≠ 0 sont appariées (les heures négatives diminuent le réel).
+- **Portée de la période** : tableau d'écarts, KPI heures, correspondances, règles fuzzy / 200 h / MO sans nom → période choisie. Budget, alertes (dont dérive de provision), règles 1, 4, 5 → toute la version de réalisé.
+- Semaines verrouillées : 0 jour au dénominateur (la charge est répartie sur les autres semaines) ; le contrôle ±0.5 h ne se déclenche donc que pour une ligne sans jour ouvré / dates invalides.
+- Périodes plan/réalisé disjointes → période par défaut = union + warn `periode_disjointe`.
+- Homonymes : la personne planifiée l'emporte si elle est seule, sinon ambigu → stratégie suivante.
+- Confiance d'un tuple = la plus faible de ses écritures ; tuple sans réel = `plan`. Prévu/réel arrondis à 0,01 h avant flags.
+- Inactifs : exclus uniquement du taux de conformité (comptés dans flags, points, taux d'absence).
+- Règle 1 : CT présents dans les deux sources, Σ TOTAL EN € brut (MO comprise) vs Σ PPS. `DeriveProvision.eur` = TOTAL EN € brut.
+- Confirmation d'alias : promeut un alias `import` existant en `confirme` (idempotent).
+- Export réalisé enrichi : filtré par semaines seulement si fournies ; ne requiert pas de plan.
+- Erreurs analyse : version purgée → 409, id inconnu → 404, semaine invalide → 400.
 
 ## À arbitrer
 _(vide)_

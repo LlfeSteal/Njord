@@ -31,6 +31,7 @@ import { useAnalyse, type UseAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag } from '../shared/ContextControl';
 import { cmp, forecastOf, rowReason, rowTone, STATUT_LABEL, useSort } from '../shared/pilotage';
 import { Consumption, CtLabel, RowGlyph, Signed } from './cells';
+import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type CtRow } from './model';
 import '../shared/pilotage.css';
 
@@ -375,6 +376,7 @@ export default function BudgetPage() {
         {(result) => (
           <>
             <BudgetMetrics result={result} rows={rows} />
+            {result.budget.par_nature?.length > 0 && <NatureBars rows={result.budget.par_nature} />}
             <BudgetTable rows={filtered} selected={ctParam} onOpen={(ct) => setCt(ct === ctParam ? null : ct)} />
           </>
         )}

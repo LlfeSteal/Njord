@@ -386,8 +386,18 @@ type BudgetGlobal struct {
 }
 
 type Budget struct {
-	ParCT  []BudgetCT   `json:"par_ct"`
-	Global BudgetGlobal `json:"global"`
+	ParCT     []BudgetCT     `json:"par_ct"`
+	Global    BudgetGlobal   `json:"global"`
+	ParNature []BudgetNature `json:"par_nature"` // analyse budgétaire, 5 lignes fixes (DECISIONS n° 10)
+}
+
+// BudgetNature : PPS du plan et réalisé (Σ TOTAL EN €, avoirs compris) d'une nature de coût.
+type BudgetNature struct {
+	Nature      string   `json:"nature"`  // provision | mo | capacite | frais | autres
+	Libelle     string   `json:"libelle"` // « Provision », « Main d'œuvre »…
+	PPS         float64  `json:"pps"`
+	Realise     float64  `json:"realise"`
+	PctConsomme *float64 `json:"pct_consomme"` // 0..100+, null si PPS nul
 }
 
 type AlerteCT struct {
@@ -557,4 +567,55 @@ type AnalyseResult struct {
 	Previsions      Previsions       `json:"previsions"`
 	// Anomalies : tri gravité desc puis catégorie ; statut fusionné avec anomalie_suivi par le handler.
 	Anomalies []Anomalie `json:"anomalies"`
+}
+
+// ---------------------------------------------------------------------------
+// Dérive du plan (DECISIONS n° 12) : GET /plan/compare
+
+type DeriveStatut string
+
+const (
+	DeriveAjoute   DeriveStatut = "ajoute"   // absent de la référence
+	DeriveRetire   DeriveStatut = "retire"   // absent de la version comparée
+	DeriveModifie  DeriveStatut = "modifie"  // |Δ PPS| ou |Δ charge| ≥ 0,01
+	DeriveInchange DeriveStatut = "inchange" //
+)
+
+type PlanCompareTotaux struct {
+	PPSFrom         float64 `json:"pps_from"`
+	PPSTo           float64 `json:"pps_to"`
+	ChargeFrom      float64 `json:"charge_from"`
+	ChargeTo        float64 `json:"charge_to"`
+	NbCTFrom        int     `json:"nb_ct_from"`
+	NbCTTo          int     `json:"nb_ct_to"`
+	NbPersonnesFrom int     `json:"nb_personnes_from"`
+	NbPersonnesTo   int     `json:"nb_personnes_to"`
+}
+
+type PlanCompareCT struct {
+	CT         string       `json:"ct"`
+	Groupe     string       `json:"groupe"` // groupe Excel de la version la plus récente qui porte le CT
+	PPSFrom    float64      `json:"pps_from"`
+	PPSTo      float64      `json:"pps_to"`
+	ChargeFrom float64      `json:"charge_from"`
+	ChargeTo   float64      `json:"charge_to"`
+	Statut     DeriveStatut `json:"statut"`
+}
+
+type PlanComparePersonne struct {
+	NomPrenom  string       `json:"nom_prenom"` // « (non nominatif) » pour les lignes sans NOM Prénom
+	PPSFrom    float64      `json:"pps_from"`
+	PPSTo      float64      `json:"pps_to"`
+	ChargeFrom float64      `json:"charge_from"`
+	ChargeTo   float64      `json:"charge_to"`
+	Statut     DeriveStatut `json:"statut"`
+}
+
+// PlanCompare : référence (From) vs version comparée (To), lignes non rejetées.
+type PlanCompare struct {
+	From        Version               `json:"from"`
+	To          Version               `json:"to"`
+	Totaux      PlanCompareTotaux     `json:"totaux"`
+	ParCT       []PlanCompareCT       `json:"par_ct"`       // |Δ PPS| décroissant, puis CT
+	ParPersonne []PlanComparePersonne `json:"par_personne"` // |Δ charge| décroissant, puis nom
 }

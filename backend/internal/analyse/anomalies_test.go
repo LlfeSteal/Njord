@@ -105,6 +105,21 @@ func TestAnomaliesDemo(t *testing.T) {
 	if byCat[domain.AnomalieEcart] == 0 {
 		t.Error("aucune anomalie écart")
 	}
+	// Analyse budgétaire (DECISIONS n° 10) : 5 natures dont Σ = budget et consommé des prévisions.
+	if pn := res.Budget.ParNature; len(pn) != 5 || pn[0].Nature != "provision" || pn[0].PPS < 85000 {
+		t.Errorf("par nature : %+v", pn)
+	} else {
+		var pps, reel float64
+		for _, n := range pn {
+			pps += n.PPS
+			reel += n.Realise
+		}
+		g := res.Previsions.Global
+		if math.Abs(pps-g.Budget) > 0.05 || math.Abs(reel-g.Consomme) > 0.05 {
+			t.Errorf("Σ natures PPS %.2f / réalisé %.2f, prévisions %.2f / %.2f", pps, reel, g.Budget, g.Consomme)
+		}
+		t.Logf("par nature : %+v", pn)
+	}
 	// La démo couvre tous les cas (DECISIONS n° 9) : sur- et sous-imputations, personnes jamais imputées.
 	flags := map[domain.Flag]int{}
 	for _, r := range res.Ecarts {

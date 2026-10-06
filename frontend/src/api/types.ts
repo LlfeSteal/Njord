@@ -281,6 +281,16 @@ export interface KPIs {
   total_reel_h: number;
 }
 
+/** Analyse budgétaire : PPS et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10). */
+export interface BudgetNature {
+  nature: 'provision' | 'mo' | 'capacite' | 'frais' | 'autres';
+  libelle: string;
+  pps: number;
+  realise: number;
+  /** 0..100+, null si PPS nul. */
+  pct_consomme: number | null;
+}
+
 export interface BudgetCT {
   ct: string;
   ct_libelle: string;
@@ -342,7 +352,7 @@ export interface AnalyseResult {
   meta: AnalyseMeta;
   kpis: KPIs;
   ecarts: EcartRow[];
-  budget: { par_ct: BudgetCT[]; global: BudgetGlobal };
+  budget: { par_ct: BudgetCT[]; global: BudgetGlobal; par_nature: BudgetNature[] };
   alertes: {
     ct_risque: AlerteCT[];
     alerte_globale: boolean;
@@ -450,4 +460,50 @@ export interface AnomalieSuiviInput {
   statut: Exclude<AnomalieStatut, 'a_traiter'>;
   commentaire: string;
   operateur?: string;
+}
+
+// ---------------------------------------------------------------- Dérive du plan (DECISIONS n° 12)
+export type DeriveStatut = 'ajoute' | 'retire' | 'modifie' | 'inchange';
+
+export interface PlanCompareTotaux {
+  pps_from: number;
+  pps_to: number;
+  charge_from: number;
+  charge_to: number;
+  nb_ct_from: number;
+  nb_ct_to: number;
+  nb_personnes_from: number;
+  nb_personnes_to: number;
+}
+
+export interface PlanCompareCT {
+  ct: string;
+  /** Groupe Excel de la version la plus récente qui porte le CT (« Parent > Enfant »). */
+  groupe: string;
+  pps_from: number;
+  pps_to: number;
+  charge_from: number;
+  charge_to: number;
+  statut: DeriveStatut;
+}
+
+export interface PlanComparePersonne {
+  /** « NOM Prénom » ; « (non nominatif) » regroupe les lignes sans nom. */
+  nom_prenom: string;
+  pps_from: number;
+  pps_to: number;
+  charge_from: number;
+  charge_to: number;
+  statut: DeriveStatut;
+}
+
+/** GET /plan/compare : référence (`from`) vs version comparée (`to`), lignes non rejetées. */
+export interface PlanCompare {
+  from: Version;
+  to: Version;
+  totaux: PlanCompareTotaux;
+  /** Tri : |Δ PPS| décroissant, puis CT. */
+  par_ct: PlanCompareCT[];
+  /** Tri : |Δ charge| décroissant, puis nom. */
+  par_personne: PlanComparePersonne[];
 }

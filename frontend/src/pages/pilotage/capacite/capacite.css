@@ -1,0 +1,162 @@
+/* Page Capacité — carte de chaleur divergente, tokens uniquement (docs/STYLE.md, DECISIONS n° 11). */
+
+/* Colonne Squad collante pendant le défilement horizontal ; indentation par niveau de hiérarchie. */
+.cap-table .cap-squad {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 180px;
+  max-width: 260px;
+  padding-left: calc(12px + var(--cap-depth, 0) * 16px);
+  background-color: var(--card);
+  white-space: nowrap;
+}
+.cap-table thead th.cap-squad {
+  z-index: 3;
+}
+.cap-squad__name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap-squad[data-parent] .cap-squad__name {
+  font-weight: 600;
+}
+.cap-squad[data-none] .cap-squad__name {
+  color: var(--text-secondary);
+}
+
+/* Semaine verrouillée : en-tête estompé (0 jour ouvré au plan). */
+.cap-table thead th[data-locked] {
+  color: var(--text-tertiary);
+}
+
+/* Filet avant les colonnes de total. */
+.cap-table .cap-sep {
+  border-left: 0.5px solid var(--separator);
+}
+
+/* Cellule : tuile teintée avec 2 px de surface autour (pas de bordure entre teintes). */
+.cap-table .cap-cell {
+  height: 32px;
+  padding: 2px;
+}
+.cap-table .cap-cell--total {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.cap-cell .ui-tooltip-anchor {
+  width: 100%;
+}
+.cap-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 52px;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--fill);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cap-tile[data-empty] {
+  background: none;
+}
+.cap-tile__none {
+  color: var(--text-tertiary);
+}
+.cap-tile__hp {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Échelle divergente : neutre --fill, sous-utilisé violet, sur-utilisé rouge ; le texte reste en --text. */
+.cap-tile[data-side='sous'][data-step='1'] {
+  background: color-mix(in srgb, var(--flag-sous-imputation) 14%, var(--card));
+}
+.cap-tile[data-side='sous'][data-step='2'] {
+  background: color-mix(in srgb, var(--flag-sous-imputation) 28%, var(--card));
+}
+.cap-tile[data-side='sous'][data-step='3'] {
+  background: color-mix(in srgb, var(--flag-sous-imputation) 42%, var(--card));
+}
+.cap-tile[data-side='sur'][data-step='1'] {
+  background: color-mix(in srgb, var(--flag-sur-imputation) 14%, var(--card));
+}
+.cap-tile[data-side='sur'][data-step='2'] {
+  background: color-mix(in srgb, var(--flag-sur-imputation) 28%, var(--card));
+}
+.cap-tile[data-side='sur'][data-step='3'] {
+  background: color-mix(in srgb, var(--flag-sur-imputation) 42%, var(--card));
+}
+
+/* ------------------------------------------------------------------ Légende */
+.cap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.cap-legend__scale {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.cap-legend__end {
+  padding-top: 1px;
+  white-space: nowrap;
+}
+.cap-legend__steps {
+  display: flex;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cap-legend__steps > li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 44px;
+}
+.cap-legend__steps > li[data-mid] {
+  min-width: 112px;
+}
+.cap-legend__swatch.cap-tile {
+  min-width: 0;
+  height: 16px;
+}
+.cap-legend__label {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cap-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Téléphone : échelle sur sa propre ligne, défilable sans élargir la page. */
+@media (max-width: 560px) {
+  .cap-legend__scale {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .cap-legend__steps {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+  .cap-legend__end:last-child {
+    margin-left: auto;
+  }
+}

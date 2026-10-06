@@ -29,6 +29,7 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	p.POST("/imports/preview", h.preview)
 	p.POST("/imports", h.commit)
 	p.GET("/versions", h.listVersions)
+	p.GET("/compare", h.compare)
 	p.GET("/versions/:id", h.getVersion)
 	p.POST("/versions/:id/archive", h.archive)
 	p.POST("/versions/:id/reactivate", h.reactivate)
@@ -82,6 +83,16 @@ func (h *Handler) listVersions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, vs)
+}
+
+// compare serves GET /plan/compare?from=&to= (DECISIONS n° 12).
+func (h *Handler) compare(c *gin.Context) {
+	res, err := Compare(c.Request.Context(), h.st, c.Query("from"), c.Query("to"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
 }
 
 func (h *Handler) getVersion(c *gin.Context) {

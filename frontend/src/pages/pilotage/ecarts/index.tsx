@@ -34,6 +34,7 @@ import { AnalyseGate } from '../anomalies/AnalyseGate';
 import { isAnalyseShown, norm, shortWeek } from '../anomalies/meta';
 import { EcartRowInspector, RessourceInspector } from './EcartInspector';
 import SyntheseImputations from './SyntheseImputations';
+import { useSquads } from '../../referentiels/hooks';
 import {
   DEFAULT_SORT,
   cmp,
@@ -106,6 +107,23 @@ export default function EcartsPage() {
     v && !data.some((d) => d.value === v) ? [{ value: v, label: v }, ...data] : data;
   const labelOf = (data: { value: string; label: string }[], v: string) => data.find((d) => d.value === v)?.label ?? v;
 
+  // Filtre squad : le squad choisi et tous ses sous-squads (un parent agrège ses enfants, cf. Capacité).
+  const squadsQ = useSquads();
+  const squadScope = useMemo(() => {
+    if (!state.squad) return null;
+    const children = new Map<string, string[]>();
+    for (const s of squadsQ.data ?? []) if (s.parent_id) children.set(s.parent_id, [...(children.get(s.parent_id) ?? []), s.id]);
+    const scope = new Set<string>();
+    for (const todo = [state.squad]; todo.length; ) {
+      const id = todo.pop()!;
+      if (scope.has(id)) continue;
+      scope.add(id);
+      todo.push(...(children.get(id) ?? []));
+    }
+    return scope;
+  }, [squadsQ.data, state.squad]);
+  const squadName = (id: string) => squadsQ.data?.find((s) => s.id === id)?.nom_canonique ?? id;
+
   // ---------------------------------------------------------------- Filtrage, tri, regroupement
   // La synthèse suit tous les filtres sauf le flag (sinon une seule part) ; le tableau, tous.
   const filteredSansFlag = useMemo(() => {
@@ -114,10 +132,10 @@ export default function EcartsPage() {
       (e) =>
         (!state.ct || e.ct === state.ct) &&
         (!state.ressource || e.ressource === state.ressource) &&
-        (!state.squad || e.squad_id === state.squad) &&
+        (!squadScope || (!!e.squad_id && squadScope.has(e.squad_id))) &&
         (!nq || norm(`${e.ressource} ${e.ressource_label} ${e.ct} ${e.ct_libelle}`).includes(nq)),
     );
-  }, [ecarts, state.ct, state.ressource, state.squad, state.q]);
+  }, [ecarts, state.ct, state.ressource, squadScope, state.q]);
   const filtered = useMemo(
     () => (state.flags.length === 0 ? filteredSansFlag : filteredSansFlag.filter((e) => state.flags.includes(e.flag))),
     [filteredSansFlag, state.flags],
@@ -155,7 +173,7 @@ export default function EcartsPage() {
     active.push({ key: 'ressource', label: labelOf(opts.res, state.ressource), onRemove: () => update({ ressource: null }) });
   if (state.flags.length)
     active.push({ key: 'flag', label: state.flags.map((f) => FLAG_META[f].label).join(', '), onRemove: () => update({ flags: [] }) });
-  if (state.squad) active.push({ key: 'squad', label: `Squad : ${labelOf(opts.squads, state.squad)}`, onRemove: () => update({ squad: null }) });
+  if (state.squad) active.push({ key: 'squad', label: `Squad : ${opts.squads.some((d) => d.value === state.squad) ? labelOf(opts.squads, state.squad) : squadName(state.squad)}`, onRemove: () => update({ squad: null }) });
   const clearFilters = () => update({ ct: null, ressource: null, squad: null, flags: [] });
 
   // ---------------------------------------------------------------- Export
@@ -238,7 +256,7 @@ export default function EcartsPage() {
           <Select
             label="Squad"
             placeholder="Toutes"
-            data={withValue(opts.squads, state.squad)}
+            data={withValue(opts.squads, state.squad).map((d) => (d.value === d.label ? { ...d, label: squadName(d.value) } : d))}
             value={state.squad ?? null}
             onChange={(v) => update({ squad: v })}
             clearable

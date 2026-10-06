@@ -10,6 +10,7 @@ import type {
   ImportReport,
   ImportResult,
   Kind,
+  PlanCompare,
   Personne,
   PlanLinesPage,
   RealiseEntriesPage,
@@ -126,6 +127,8 @@ export interface PlanLinesQuery extends Query {
 export const planApi = {
   lines: (id: string, q: PlanLinesQuery) => get<PlanLinesPage>(`/plan/versions/${id}/lines`, q),
   linesCsvUrl: (id: string, q: PlanLinesQuery) => csvUrl(`/plan/versions/${id}/lines.csv`, q),
+  /** Dérive : `from` = référence (défaut : plus ancienne version non purgée), `to` = défaut : version active. */
+  compare: (from?: string, to?: string) => get<PlanCompare>('/plan/compare', { from, to }),
 };
 
 // ------------------------------------------------------------------ Réalisé

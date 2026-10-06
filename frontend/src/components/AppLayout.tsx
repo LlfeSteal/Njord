@@ -16,6 +16,8 @@ import {
   IconChartBar,
   IconEuro,
   IconTrend,
+  IconGrid,
+  IconDiff,
 } from '../ui/Icons';
 import { useAnalyse } from '../pages/pilotage/shared/context';
 import './AppLayout.css';
@@ -52,6 +54,8 @@ export default function AppLayout() {
             { to: '/ecarts', label: 'Écarts', icon: <IconChartBar size={16} /> },
             { to: '/budget', label: 'Budget', icon: <IconEuro size={16} /> },
             { to: '/previsions', label: 'Prévisions', icon: <IconTrend size={16} /> },
+            { to: '/capacite', label: 'Capacité', icon: <IconGrid size={16} /> },
+            { to: '/derive', label: 'Dérive du plan', icon: <IconDiff size={16} /> },
           ],
         },
         {

@@ -241,6 +241,7 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 - sélecteur version réalisé (mêmes règles) ;
 - sélecteur de période d'analyse (par défaut : intersection des périodes couvertes) ;
 - badges couleur (⚫ 🟠 🔴 🟢 🟣) dans le tableau et les KPI ;
+- **analyse budgétaire** (page Budget) : barres PPS vs réalisé par nature de coût — Provision, Main d'œuvre, Capacité, Frais de mission, Autres (DECISIONS n° 10) ;
 - **synthèse des imputations** (page Écarts) : anneau des heures sur-imputées, sous-imputées, hors plan et conformes, et nombre de personnes du plan n'ayant rien imputé sur la période (DECISIONS n° 9) ;
 - drill-down : clic sur une ligne CT → filtres pré-remplis vers le tableau d'écarts ;
 - bouton "Exporter CSV conformité" et "Exporter CSV réalisé enrichi".

@@ -1,0 +1,81 @@
+/* Pilotage « Dérive du plan ». Tokens uniquement (docs/STYLE.md). */
+
+/* Sélecteur de version précédé de son libellé : « Référence [Plan v1 · 01/09/2026 ▾] ». */
+.derive-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.derive-pick__label {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.derive-pick .ui-popup {
+  max-width: 280px;
+}
+
+/* Cellules sur une ligne : valeur principale + secondaire. */
+.derive-pair,
+.derive-delta {
+  font-variant-numeric: tabular-nums;
+}
+.derive-delta {
+  font-weight: 600;
+}
+.derive-sec {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.derive-name {
+  display: block;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.derive-name[data-muted] {
+  color: var(--text-secondary);
+}
+
+/* ------------------------------------------------------------------ Barre divergente */
+/* Centrée sur 0 (filet neutre), hausse à droite en --danger, baisse à gauche en --accent ;
+   extrémité de donnée arrondie 4 px, côté zéro droit. */
+.derive-col-bar {
+  width: 128px;
+}
+/* CT + groupe sur une ligne, borné pour laisser la place au statut sur un écran de 1280 px. */
+.derive-table .pil-ct {
+  max-width: 240px;
+}
+.derive-bar {
+  position: relative;
+  display: block;
+  width: 120px;
+  height: 12px;
+}
+.derive-bar::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: var(--separator);
+}
+.derive-bar__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.derive-bar__fill[data-dir='up'] {
+  left: 50%;
+  border-radius: 0 4px 4px 0;
+  background: var(--danger);
+}
+.derive-bar__fill[data-dir='down'] {
+  right: 50%;
+  border-radius: 4px 0 0 4px;
+  background: var(--accent);
+}

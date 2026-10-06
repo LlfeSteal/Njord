@@ -597,3 +597,58 @@ func TestNonMOPlanLinesAndNegativeHours(t *testing.T) {
 		}
 	}
 }
+
+func TestBudgetParNature(t *testing.T) {
+	in := baseInput()
+	line := func(ct, ligneCout string, pps float64) domain.PlanLine {
+		l := planLine(ct, "", "DURAND Claire", nil, 10)
+		l.LigneCout, l.PPS = ligneCout, pps
+		return l
+	}
+	in.PlanLines = []domain.PlanLine{
+		line("CTP", "MAIN D'OEUVRE SUR SITE", 1000), // CT de provision : tout y est provision
+		line("CTA", "PROVISIONS POUR ALEAS", 200),   // ligne de coût provision sur un autre CT
+		line("CTA", "MAIN D'OEUVRE SUR SITE", 5000),
+		line("CTA", "CAPACITE SUR SITE", 3000),
+		line("CTA", "FRAIS ACHATS CAPACITE SUR SITE", 100),
+		line("CTA", "FRAIS DE MISSION", 400),
+		line("CTA", "Stockage", 50),
+	}
+	prov := mo("CTP", "DURAND Claire Mme", 5, "2026-09-08")
+	prov.TGLibelle = "CTP - Provisions pour aléas"
+	in.Entries = []domain.RealiseEntry{
+		prov, // 500 €
+		mo("CTA", "DURAND Claire Mme", 10, "2026-09-08"),            // 1000 €
+		cost("CTA", "CAPACITE SUR SITE", "PRESTATION", 2000),        //
+		cost("CTA", "FRAIS DE MISSION", "FRAIS DE MISSION", 300),    //
+		cost("CTA", "FRAIS DE MISSION", "FRAIS DE MISSION", -100),   // avoir
+		cost("CTA", "PROVISIONS POUR ALEAS", "AUTRES DEPENSES", 70), //
+		cost("CTA", "AUTRES PRESTATIONS", "PRESTATION", 120),        //
+		cost("", "FNP AUTOMATIQUES", "AUTRES DEPENSES", 30),         // sans TG : compté quand même
+	}
+	res := Run(in, store.DefaultSettings())
+	want := []struct {
+		nature       string
+		pps, realise float64
+	}{
+		{"provision", 1200, 570}, {"mo", 5000, 1000}, {"capacite", 3100, 2000}, {"frais", 400, 200}, {"autres", 50, 150},
+	}
+	if len(res.Budget.ParNature) != len(want) {
+		t.Fatalf("par nature : %+v", res.Budget.ParNature)
+	}
+	var pps, reel float64
+	for i, w := range want {
+		n := res.Budget.ParNature[i]
+		if n.Nature != w.nature || n.PPS != w.pps || n.Realise != w.realise || n.Libelle == "" {
+			t.Errorf("%s : %+v, attendu PPS %.0f réalisé %.0f", w.nature, n, w.pps, w.realise)
+		}
+		pps += n.PPS
+		reel += n.Realise
+	}
+	if n := res.Budget.ParNature[4]; n.PctConsomme == nil || *n.PctConsomme != 300 {
+		t.Errorf("autres : %% consommé %v", n.PctConsomme)
+	}
+	if pps != 9750 || reel != 3920 {
+		t.Errorf("Σ PPS %.2f, Σ réalisé %.2f", pps, reel)
+	}
+}

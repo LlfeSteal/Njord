@@ -10,6 +10,8 @@ const AnomaliesPage = lazy(() => import('./pages/pilotage/anomalies'));
 const EcartsPage = lazy(() => import('./pages/pilotage/ecarts'));
 const BudgetPage = lazy(() => import('./pages/pilotage/budget'));
 const PrevisionsPage = lazy(() => import('./pages/pilotage/previsions'));
+const CapacitePage = lazy(() => import('./pages/pilotage/capacite'));
+const DerivePage = lazy(() => import('./pages/pilotage/derive'));
 // Données
 const PlanModule = lazy(() => import('./pages/plan'));
 const RealiseModule = lazy(() => import('./pages/realise'));
@@ -28,6 +30,8 @@ export default function App() {
         <Route path="/ecarts" element={<Lazy><EcartsPage /></Lazy>} />
         <Route path="/budget" element={<Lazy><BudgetPage /></Lazy>} />
         <Route path="/previsions" element={<Lazy><PrevisionsPage /></Lazy>} />
+        <Route path="/capacite" element={<Lazy><CapacitePage /></Lazy>} />
+        <Route path="/derive" element={<Lazy><DerivePage /></Lazy>} />
         <Route path="/plan/*" element={<Lazy><PlanModule /></Lazy>} />
         <Route path="/realise/*" element={<Lazy><RealiseModule /></Lazy>} />
         <Route path="/personnes/*" element={<Lazy><PersonnesPage /></Lazy>} />

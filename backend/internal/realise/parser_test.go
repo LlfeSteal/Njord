@@ -80,6 +80,30 @@ func TestParseDemo(t *testing.T) {
 		e.Categorie != "PRESTATION" || e.Type != "CAPACITE SUR SITE" || e.CategorieFNP != "" {
 		t.Fatalf("1re écriture (dates/enum): %+v", e)
 	}
+	// nom_prenom : NOM RESSOURCE sans civilité ; "" pour les lignes fournisseur.
+	mo, people := 0, map[string]bool{}
+	for _, e := range res.Entries {
+		switch {
+		case e.NomRessource == "":
+			if e.NomPrenom != "" {
+				t.Errorf("fournisseur %q → nom_prenom %q", e.Fournisseur, e.NomPrenom)
+			}
+		case e.NomPrenom == "" || strings.HasSuffix(e.NomPrenom, ".") || strings.HasSuffix(e.NomPrenom, " Mme") ||
+			!strings.HasPrefix(e.NomRessource, e.NomPrenom+" "):
+			t.Errorf("ressource %q → nom_prenom %q", e.NomRessource, e.NomPrenom)
+		default:
+			people[e.NomPrenom] = true
+		}
+		if e.Categorie == "MAIN D'OEUVRE" {
+			mo++
+			if e.NomPrenom == "" {
+				t.Errorf("écriture MO ligne %d sans nom_prenom", e.RowNum)
+			}
+		}
+	}
+	if mo != 333 || !people["DE LA TOUR Antoine"] || !people["DURAND Claire"] {
+		t.Fatalf("nom_prenom: %d MO, %d personnes", mo, len(people))
+	}
 	last := res.Entries[len(res.Entries)-1]
 	if last.NomRessource == "" || last.EmployeFournisseur != last.NomRessource || last.Quantite != 7.5 {
 		t.Fatalf("dernière écriture: %+v", last)

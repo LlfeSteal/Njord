@@ -2,6 +2,7 @@ package realise
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -226,5 +227,36 @@ func TestParseSpecOtherSheet(t *testing.T) {
 	}
 	if res.HeaderRow != 3 || res.OK != 1 || res.Entries[0].RowNum != 4 {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// nom_prenom (DECISIONS n° 8) : « NOM Prénom » d'EMPLOYE/FOURNISSEUR sans la
+// civilité finale ; "" pour un fournisseur ou une valeur vide, sans warn.
+func TestParseSpecNomPrenom(t *testing.T) {
+	const cEmp = 12
+	cases := []struct{ in, want string }{
+		{"DURAND Claire Mme", "DURAND Claire"},
+		{"DE LA TOUR Antoine Mr.", "DE LA TOUR Antoine"},
+		{"DUPONT Jean M.", "DUPONT Jean"},
+		{"LEMOINE Inès Mlle.", "LEMOINE Inès"},
+		{"FOURN_0001", ""},
+		{"ACME", ""},
+		{"", ""},
+	}
+	rows := [][]any{}
+	for i, c := range cases {
+		rows = append(rows, specRow(map[int]any{cEmp: c.in, cFac: fmt.Sprintf("F_%d", i)}))
+	}
+	res, err := Parse(buildXLSX(t, "Réalisé", specHeader, rows))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK != len(cases) || len(res.Entries) != len(cases) {
+		t.Fatalf("ok=%d warn=%d drop=%d motifs=%v", res.OK, res.Warn, res.Drop, res.MotifsCount)
+	}
+	for i, c := range cases {
+		if e := res.Entries[i]; e.NomPrenom != c.want || e.EmployeFournisseur != c.in {
+			t.Errorf("%q → %q, attendu %q", c.in, e.NomPrenom, c.want)
+		}
 	}
 }

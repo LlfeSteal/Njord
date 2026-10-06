@@ -76,28 +76,32 @@ func (e *env) seed() {
 	e.version("plan0", "plan", "archivee", "PDC septembre")
 	e.version("real1", "realise", "active", "Réalisé S40")
 	e.exec(`INSERT INTO squads(id, nom_canonique, nom_normalise, created_at) VALUES ('sq1','Squad Alpha','SQUAD ALPHA','2026-10-01T10:00:00Z')`)
-	for _, p := range [][3]string{{"p1", "DURAND Claire", "DURANDC"}, {"p2", "Antoine De La Tour", "DELATOURA"}, {"p3", "Sarah Blanc", "BLANCS"}} {
+	for _, p := range [][2]string{{"p1", "DURAND Claire"}, {"p2", "Antoine De La Tour"}, {"p3", "Sarah Blanc"}} {
 		e.exec(`INSERT INTO personnes(id, display_name, nom_normalise, squad_id, created_at) VALUES (?,?,?,?,?)`,
-			p[0], p[1], names.Normalize(p[1]), "sq1", "2026-10-01T10:00:00Z")
-		e.exec(`INSERT INTO personne_matricules(personne_id, matricule) VALUES (?,?)`, p[0], p[2])
+			p[0], p[1], names.KeyOf(p[1]), "sq1", "2026-10-01T10:00:00Z")
 	}
-	e.exec(`INSERT INTO personne_matricules(personne_id, matricule) VALUES ('p1','A00001')`)
-	line := `INSERT INTO plan_lines(version_id,row_num,ct,ressource,libelle,ligne_cout,charge_totale,pps,date_debut,date_fin,statut_parsing,inactive,personne_id,squad_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-	e.exec(line, "plan1", 4, "Y99F90001", "DURANDC", "DURAND Claire / Squad Alpha", "MAIN D'OEUVRE SUR SITE", 10, 1000, "2026-09-07", "2026-09-11", "ok", 0, "p1", "sq1")
-	e.exec(line, "plan1", 5, "Y99F90008", "DELATOURA", "Antoine De La Tour", "MAIN D'OEUVRE SUR SITE", 20, 2000, "2026-09-07", "2026-09-11", "ok", 0, "p2", nil)
-	e.exec(line, "plan1", 6, "Y99F90004", "BLANCS", "Sarah Blanc", "MAIN D'OEUVRE SUR SITE", 20, 2000, "2026-09-07", "2026-09-11", "warn", 0, "p3", nil)
-	e.exec(line, "plan1", 7, "Y99F90004", "DROPPED", "x", "MAIN D'OEUVRE SUR SITE", 500, 0, "2026-09-07", "2026-09-11", "drop", 0, nil, nil)
-	e.exec(line, "plan1", 8, "Y99F900012", "2GI_DEMO", "", "PROVISIONS POUR ALEAS", 40, 5000, "2026-09-07", "2026-09-11", "ok", 0, nil, nil)
-	e.exec(line, "plan0", 4, "Y99F90001", "DURANDC", "DURAND Claire", "MAIN D'OEUVRE SUR SITE", 30, 0, "2026-09-07", "2026-09-11", "ok", 0, "p1", nil)
-	entry := `INSERT INTO realise_entries(version_id,row_num,tg,tg_libelle,categorie,type,employe_fournisseur,matricule,quantite,total_eur,date_depense,periode_comptable,num_facture,statut_parsing)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-	e.exec(entry, "real1", 2, "Y99F90001", "Y99F90001 - Socle", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "DURAND Claire Mme", "A00001", 26, 2600, "2026-09-08", "2026-09-30", "", "ok")
-	e.exec(entry, "real1", 3, "Y99F90008", "Y99F90008 - Archi", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "DE LA TOUR Antoine Mr.", "", 22, 2200, "2026-09-09", "2026-09-30", "", "ok")
-	e.exec(entry, "real1", 4, "Y99F900012", "Y99F900012 - Réserve", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "BARBIER Luc M.", "", 13, 1300, "2026-09-10", "2026-09-30", "", "ok")
-	e.exec(entry, "real1", 5, "Y99F900012", "Y99F900012 - Réserve", "AUTRES DEPENSES", "PROVISIONS POUR ALEAS", "FOURNISSEUR SECRET", "", 1, 15000, "2026-09-10", "2026-09-30", "F_0001", "ok")
-	e.exec(entry, "real1", 6, "Y99F90001", "Y99F90001 - Socle", "FRAIS DE MISSION", "FRAIS DE MISSION", "SKYFARE", "", 1, -300, "2026-09-10", "2026-09-30", "", "ok")
-	e.exec(entry, "real1", 7, "Y99F90001", "Y99F90001 - Socle", "FRAIS DE MISSION", "FRAIS DE MISSION", "SKYFARE", "", 1, 99999, "2026-09-10", "2026-09-30", "", "drop")
+	line := `INSERT INTO plan_lines(version_id,row_num,ct,ressource,libelle,nom_prenom,ligne_cout,charge_totale,pps,date_debut,date_fin,statut_parsing,inactive,personne_id,squad_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	pl := func(v string, row int, ct, res, lib, cout string, charge, pps float64, statut string, pid, sid any) {
+		e.exec(line, v, row, ct, res, lib, libelleNomPrenom(lib), cout, charge, pps, "2026-09-07", "2026-09-11", statut, 0, pid, sid)
+	}
+	pl("plan1", 4, "Y99F90001", "DURANDC", "DURAND Claire / Squad Alpha", "MAIN D'OEUVRE SUR SITE", 10, 1000, "ok", "p1", "sq1")
+	pl("plan1", 5, "Y99F90008", "DELATOURA", "Antoine De La Tour", "MAIN D'OEUVRE SUR SITE", 20, 2000, "ok", "p2", nil)
+	pl("plan1", 6, "Y99F90004", "BLANCS", "Sarah Blanc", "MAIN D'OEUVRE SUR SITE", 20, 2000, "warn", "p3", nil)
+	pl("plan1", 7, "Y99F90004", "DROPPED", "x", "MAIN D'OEUVRE SUR SITE", 500, 0, "drop", nil, nil)
+	pl("plan1", 8, "Y99F900012", "2GI_DEMO", "", "PROVISIONS POUR ALEAS", 40, 5000, "ok", nil, nil)
+	pl("plan0", 4, "Y99F90001", "DURANDC", "DURAND Claire", "MAIN D'OEUVRE SUR SITE", 30, 0, "ok", "p1", nil)
+	entry := `INSERT INTO realise_entries(version_id,row_num,tg,tg_libelle,categorie,type,employe_fournisseur,nom_prenom,matricule,quantite,total_eur,date_depense,periode_comptable,num_facture,statut_parsing)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	re := func(row int, tg, lib, cat, typ, nom, mat string, qte, eur float64, date, fact, statut string) {
+		e.exec(entry, "real1", row, tg, lib, cat, typ, nom, realiseNomPrenom(nom), mat, qte, eur, date, "2026-09-30", fact, statut)
+	}
+	re(2, "Y99F90001", "Y99F90001 - Socle", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "DURAND Claire Mme", "A00001", 26, 2600, "2026-09-08", "", "ok")
+	re(3, "Y99F90008", "Y99F90008 - Archi", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "DE LA TOUR Antoine Mr.", "", 22, 2200, "2026-09-09", "", "ok")
+	re(4, "Y99F900012", "Y99F900012 - Réserve", "MAIN D'OEUVRE", "MAIN D'OEUVRE SUR SITE", "BARBIER Luc M.", "", 13, 1300, "2026-09-10", "", "ok")
+	re(5, "Y99F900012", "Y99F900012 - Réserve", "AUTRES DEPENSES", "PROVISIONS POUR ALEAS", "FOURNISSEUR SECRET", "", 1, 15000, "2026-09-10", "F_0001", "ok")
+	re(6, "Y99F90001", "Y99F90001 - Socle", "FRAIS DE MISSION", "FRAIS DE MISSION", "SKYFARE", "", 1, -300, "2026-09-10", "", "ok")
+	re(7, "Y99F90001", "Y99F90001 - Socle", "FRAIS DE MISSION", "FRAIS DE MISSION", "SKYFARE", "", 1, 99999, "2026-09-10", "", "drop")
 }
 
 func TestHandlerPreconditions(t *testing.T) {
@@ -154,19 +158,20 @@ func TestHandlerAnalyse(t *testing.T) {
 	for _, r := range res.Ecarts {
 		byRes[r.Ressource] = r
 	}
-	if r := byRes["DURANDC"]; r.Flag != domain.FlagSurImputation || r.Confidence != domain.ConfMatricule || r.SquadNom != "Squad Alpha" || r.CTLibelle != "Socle" {
-		t.Errorf("DURANDC: %+v", r)
+	if r := byRes["DURAND Claire"]; r.Flag != domain.FlagSurImputation || r.Confidence != domain.ConfNom || r.SquadNom != "Squad Alpha" ||
+		r.CTLibelle != "Socle" || r.PersonneID == nil || *r.PersonneID != "p1" {
+		t.Errorf("DURAND Claire: %+v", r)
 	}
-	if r := byRes["DELATOURA"]; r.Flag != domain.FlagConforme || r.Confidence != domain.ConfFuzzy {
-		t.Errorf("DELATOURA: %+v", r)
+	if r := byRes["DE LA TOUR Antoine"]; r.Flag != domain.FlagConforme || r.Confidence != domain.ConfNom || r.RessourceLabel != "Antoine De La Tour" {
+		t.Errorf("DE LA TOUR Antoine: %+v", r)
 	}
-	if r := byRes["BLANCS"]; r.Flag != domain.FlagAbsence || !r.Warn {
-		t.Errorf("BLANCS: %+v", r)
+	if r := byRes["BLANC Sarah"]; r.Flag != domain.FlagAbsence || !r.Warn {
+		t.Errorf("BLANC Sarah: %+v", r)
 	}
-	if _, ok := byRes["DROPPED"]; ok {
+	if _, ok := byRes["x"]; ok {
 		t.Error("ligne drop utilisée")
 	}
-	if r := byRes["BARBIER Luc M."]; r.Flag != domain.FlagHorsPlan {
+	if r := byRes["BARBIER Luc"]; r.Flag != domain.FlagHorsPlan || r.Confidence != domain.ConfNone {
 		t.Errorf("BARBIER: %+v", r)
 	}
 	if len(res.Alertes.DeriveProvision) != 2 || len(res.Alertes.CTRisque) != 1 || res.Alertes.CTRisque[0].CT != "Y99F900012" {
@@ -206,11 +211,11 @@ func TestHandlerCSV(t *testing.T) {
 		t.Fatalf("ecarts.csv: %d %q", w.Code, body)
 	}
 	lines := strings.Split(strings.TrimSpace(body), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[1], "BARBIER Luc M.;Y99F900012;2026-W37;0;13;13;Hors plan;none") {
+	if len(lines) != 2 || !strings.Contains(lines[1], "BARBIER Luc;Y99F900012;2026-W37;0;13;13;Hors plan;none") {
 		t.Errorf("filtre flag: %q", lines)
 	}
 	w = e.do("GET", "/api/analyse/ecarts.csv?ct=Y99F90001&squad_id=sq1", nil)
-	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); len(lines) != 2 || !strings.HasPrefix(lines[1], "DURANDC;") {
+	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); len(lines) != 2 || !strings.HasPrefix(lines[1], "DURAND Claire;") {
 		t.Errorf("filtre ct+squad: %q", lines)
 	}
 	if w := e.do("GET", "/api/analyse/ecarts.csv?flag=rouge", nil); w.Code != http.StatusBadRequest {
@@ -223,8 +228,9 @@ func TestHandlerCSV(t *testing.T) {
 	if w.Code != http.StatusOK || len(lines) != 6 || !strings.HasSuffix(strings.TrimSpace(lines[0]), "iso_week;heures;eur;classification") {
 		t.Fatalf("realise-enrichi: %d %d lignes %q", w.Code, len(lines), lines[0])
 	}
-	if !strings.Contains(body, "DURAND Claire Mme") || !strings.Contains(lines[1], ";2026-W37;26;0;SECURISE") {
-		t.Errorf("enrichi: %q", lines[1])
+	if !strings.Contains(lines[0], ";EMPLOYE/FOURNISSEUR;NOM PRENOM;MATRICULE;") ||
+		!strings.Contains(lines[1], ";DURAND Claire Mme;DURAND Claire;A00001;") || !strings.Contains(lines[1], ";2026-W37;26;0;SECURISE") {
+		t.Errorf("enrichi: %q / %q", lines[0], lines[1])
 	}
 	masked := e.do("GET", "/api/analyse/realise-enrichi.csv?mask_sensitive=true", nil).Body.String()
 	for _, s := range []string{"DURAND", "A00001", "FOURNISSEUR SECRET", "F_0001"} {
@@ -237,52 +243,12 @@ func TestHandlerCSV(t *testing.T) {
 	}
 }
 
-func TestHandlerConfirmAlias(t *testing.T) {
+func TestHandlerAliasRouteRemoved(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
-	// Alias import existant → promu « confirme ».
-	e.exec(`INSERT INTO personne_alias(personne_id, alias, alias_normalise, source, created_at) VALUES ('p1','Claire DURAND','CLAIRE DURAND','import','2026-10-01T10:00:00Z')`)
-
-	w := e.do("POST", "/api/analyse/alias/confirm", map[string]string{"personne_id": "p2", "alias": "DE LA TOUR Antoine Mr.", "operateur": "alice"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("%d %s", w.Code, w.Body.String())
-	}
-	p := decode[domain.Personne](t, w)
-	if p.ID != "p2" || len(p.Alias) != 1 || p.Alias[0].Source != domain.AliasConfirme || p.Alias[0].AliasNormalise != "ANTOINE DE LA TOUR" || len(p.Matricules) != 1 {
-		t.Errorf("personne: %+v", p)
-	}
-	var op, action string
-	e.st.DB().QueryRow(`SELECT operateur, action FROM audit_log WHERE objet_id = 'p2'`).Scan(&op, &action)
-	if op != "alice" || action != "alias_confirm" {
-		t.Errorf("audit: %s %s", op, action)
-	}
-	// Idempotent.
-	if w := e.do("POST", "/api/analyse/alias/confirm", map[string]string{"personne_id": "p2", "alias": "Antoine DE LA TOUR"}); w.Code != http.StatusOK || len(decode[domain.Personne](t, w).Alias) != 1 {
-		t.Errorf("doublon: %d %s", w.Code, w.Body.String())
-	}
-	p1 := decode[domain.Personne](t, e.do("POST", "/api/analyse/alias/confirm", map[string]string{"personne_id": "p1", "alias": "DURAND Claire"}))
-	if len(p1.Alias) != 1 || p1.Alias[0].Source != domain.AliasConfirme {
-		t.Errorf("promotion import → confirme: %+v", p1.Alias)
-	}
-
-	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
-	for _, r := range res.Ecarts {
-		if r.Ressource == "DELATOURA" && r.Confidence != domain.ConfAlias {
-			t.Errorf("après confirmation: %s", r.Confidence)
-		}
-	}
-
-	for _, c := range []struct {
-		body map[string]string
-		code int
-	}{
-		{map[string]string{"personne_id": "zz", "alias": "X Y"}, http.StatusNotFound},
-		{map[string]string{"personne_id": "p1", "alias": ""}, http.StatusBadRequest},
-		{map[string]string{"personne_id": "p1", "alias": "M."}, http.StatusBadRequest},
-	} {
-		if w := e.do("POST", "/api/analyse/alias/confirm", c.body); w.Code != c.code {
-			t.Errorf("%v: %d", c.body, w.Code)
-		}
+	w := e.do("POST", "/api/analyse/alias/confirm", map[string]string{"personne_id": "p2", "alias": "DE LA TOUR Antoine Mr."})
+	if w.Code != http.StatusNotFound {
+		t.Errorf("POST /analyse/alias/confirm : %d, attendu 404", w.Code)
 	}
 }
 
@@ -303,7 +269,13 @@ func TestRepoLoadInput(t *testing.T) {
 	if in.PlanLines[0].PersonneID == nil || *in.PlanLines[0].PersonneID != "p1" || in.PlanLines[3].PersonneID != nil {
 		t.Error("personne_id mal relu")
 	}
-	if len(in.Personnes[0].Matricules) != 2 {
-		t.Errorf("matricules p1: %v", in.Personnes[0].Matricules)
+	if in.PlanLines[0].NomPrenom != "DURAND Claire" || in.PlanLines[3].NomPrenom != "" {
+		t.Errorf("nom_prenom du plan mal relu : %q / %q", in.PlanLines[0].NomPrenom, in.PlanLines[3].NomPrenom)
+	}
+	if in.Entries[0].NomPrenom != "DURAND Claire" || in.Entries[0].Matricule != "A00001" {
+		t.Errorf("écriture mal relue : %+v", in.Entries[0])
+	}
+	if p := in.Personnes[0]; p.ID != "p1" || p.NomNormalise != "DURAND|CLAIRE" || p.SquadID == nil {
+		t.Errorf("personne mal relue : %+v", p)
 	}
 }

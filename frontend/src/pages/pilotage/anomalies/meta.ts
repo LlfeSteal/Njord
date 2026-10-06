@@ -5,7 +5,7 @@ import type { UseAnalyse } from '../shared/context';
 import { fmtEur, fmtHours, fmtHoursSigned, fmtWeek } from '../../../lib/format';
 
 /** Ordre d'affichage des groupes (le plus coûteux d'abord). */
-export const CATEGORIES: AnomalieCategorie[] = ['budget', 'ct_risque', 'ecart', 'derive', 'qualite', 'correspondance'];
+export const CATEGORIES: AnomalieCategorie[] = ['budget', 'ct_risque', 'ecart', 'derive', 'qualite'];
 
 export const CATEGORIE_LABEL: Record<AnomalieCategorie, string> = {
   budget: 'Budget',
@@ -13,7 +13,6 @@ export const CATEGORIE_LABEL: Record<AnomalieCategorie, string> = {
   ecart: "Écarts d'imputation",
   derive: 'Dérive des provisions',
   qualite: 'Qualité des données',
-  correspondance: 'Correspondances',
 };
 
 export const GRAVITE_LABEL: Record<Anomalie['gravite'], string> = { 3: 'Haute', 2: 'Moyenne', 1: 'Basse' };
@@ -53,7 +52,7 @@ export const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu,
 
 /** Texte indexé par la recherche. */
 export const searchText = (a: Anomalie) =>
-  norm([a.titre, a.detail, a.ct, a.ct_libelle, a.ressource, a.nom_realise].filter(Boolean).join(' '));
+  norm([a.titre, a.detail, a.ct, a.ct_libelle, a.ressource].filter(Boolean).join(' '));
 
 /** Heures d'une anomalie : signées pour un écart. */
 export const fmtAnomalieHeures = (a: Anomalie) =>

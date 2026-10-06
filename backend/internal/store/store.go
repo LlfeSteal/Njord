@@ -63,9 +63,11 @@ func Open(path string) (*Store, error) {
 // existante les reçoit par ALTER TABLE (CREATE TABLE IF NOT EXISTS ne les crée pas).
 var addedColumns = []struct{ table, column, def string }{
 	{"plan_lines", "nom_prenom", "TEXT NOT NULL DEFAULT ''"},
+	{"realise_entries", "nom_prenom", "TEXT NOT NULL DEFAULT ''"},
 }
 
-// migrate applies the schema then adds the columns missing from an older base.
+// migrate applies the schema, adds the columns missing from an older base, runs
+// the data migrations not yet applied (PRAGMA user_version) then the indexes.
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(schema); err != nil {
 		return err
@@ -81,7 +83,11 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
-	return nil
+	if err := migrateData(db); err != nil {
+		return err
+	}
+	_, err := db.Exec(schemaIndexes)
+	return err
 }
 
 // OpenMemory opens a fresh private in-memory database (tests).

@@ -1,15 +1,9 @@
-// Inspecteur d'une ligne de plan : affectation, charge, contrôle du parsing, actions (alias, fiche).
-import { Button, Inspector, InspectorSection, KeyValue, Tag, Text, Tooltip, type KeyValueItem } from '../../ui';
-import { IconExternalLink, IconUserPlus } from '../../ui/Icons';
+// Inspecteur d'une ligne de plan : affectation, charge, contrôle du parsing, lien vers la fiche personne.
+import { Button, Inspector, InspectorSection, KeyValue, Tag, Text, type KeyValueItem } from '../../ui';
+import { IconExternalLink } from '../../ui/Icons';
 import type { PlanLine } from '../../api/types';
 import { fmtDate, fmtEur, fmtHours, fmtNumber, fmtPct } from '../../lib/format';
 import { ParsingGlyph } from './PlanLinesTable';
-
-const KIND_LABEL: Record<PlanLine['ressource_kind'], string> = {
-  internal: 'interne',
-  external: 'externe',
-  unknown: 'type inconnu',
-};
 
 const or = (v: string | null | undefined) => (v ? v : '—');
 
@@ -18,10 +12,9 @@ interface Props {
   onClose: () => void;
   squadName: (id: string | null) => string;
   squadPath: (id: string | null) => string;
-  onAlias: (l: PlanLine) => void;
 }
 
-export default function PlanLineInspector({ line: l, onClose, squadName, squadPath, onAlias }: Props) {
+export default function PlanLineInspector({ line: l, onClose, squadName, squadPath }: Props) {
   if (!l) return null;
 
   const affectation: KeyValueItem[] = [
@@ -29,13 +22,17 @@ export default function PlanLineInspector({ line: l, onClose, squadName, squadPa
       label: 'Ressource',
       value: (
         <>
-          <Text as="span" mono>
-            {l.ressource}
-          </Text>{' '}
-          <Text as="span" tone="secondary">
-            · {KIND_LABEL[l.ressource_kind] ?? l.ressource_kind}
-            {l.inactive ? ' · inactif' : ''}
-          </Text>
+          {l.nom_prenom || (
+            <Text as="span" tone="secondary">
+              Non nominative
+            </Text>
+          )}
+          {l.inactive && (
+            <Text as="span" tone="secondary">
+              {' '}
+              · inactif
+            </Text>
+          )}
         </>
       ),
     },
@@ -81,32 +78,17 @@ export default function PlanLineInspector({ line: l, onClose, squadName, squadPa
     { label: 'Ligne du fichier', value: fmtNumber(l.row_num), numeric: true },
   ];
 
-  const footer = (
-    <>
-      {l.personne_id && (
-        <Button variant="plain" iconRight={<IconExternalLink size={13} />} to={`/personnes?personne=${encodeURIComponent(l.personne_id)}`}>
-          Voir la fiche
-        </Button>
-      )}
-      {l.personne_id ? (
-        <Button icon={<IconUserPlus size={15} />} onClick={() => onAlias(l)}>
-          Créer un alias
-        </Button>
-      ) : (
-        <Tooltip label="Ressource non rattachée à une fiche personne">
-          <Button icon={<IconUserPlus size={15} />} disabled>
-            Créer un alias
-          </Button>
-        </Tooltip>
-      )}
-    </>
-  );
+  const footer = l.personne_id ? (
+    <Button variant="plain" iconRight={<IconExternalLink size={13} />} to={`/personnes?personne=${encodeURIComponent(l.personne_id)}`}>
+      Voir la fiche
+    </Button>
+  ) : undefined;
 
   return (
     <Inspector
       opened
       onClose={onClose}
-      title={l.nom_prenom || l.ressource}
+      title={l.nom_prenom || l.libelle || 'Ligne non nominative'}
       subtitle={l.ct}
       accessory={<ParsingGlyph line={l} />}
       footer={footer}

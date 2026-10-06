@@ -106,7 +106,7 @@ export default function PlanLinesFilters({ filters, update, facets, squadLabel, 
   });
   const pills: ActiveFilter[] = [];
   if (filters.ct) pills.push(pill('ct', 'CT', filters.ct));
-  if (filters.ressource) pills.push(pill('ressource', 'Ressource', filters.ressource));
+  if (filters.nom_prenom) pills.push(pill('nom_prenom', 'Ressource', filters.nom_prenom));
   if (filters.ligne_cout) pills.push(pill('ligne_cout', 'Ligne de coût', filters.ligne_cout));
   if (filters.statut) pills.push(pill('statut', 'Statut', STATUT_LABEL[filters.statut] ?? filters.statut));
   if (filters.squad_id) pills.push(pill('squad_id', 'Squad', squadLabel(filters.squad_id)));
@@ -119,11 +119,11 @@ export default function PlanLinesFilters({ filters, update, facets, squadLabel, 
 
   return (
     <Group gap={8} wrap={false} className="plan-bottom">
-      <SearchField aria-label="Recherche" placeholder="Nom, CT, ressource…" value={qInput} onChange={setQInput} />
+      <SearchField aria-label="Recherche" placeholder="Nom, CT, libellé…" value={qInput} onChange={setQInput} />
       <FilterButton count={count} onReset={clearCriteria}>
         <Stack gap={12}>
           <FacetSelect label="CT" name="ct" values={facets?.ct} {...common} />
-          <FacetSelect label="Ressource" name="ressource" values={facets?.ressource} {...common} />
+          <FacetSelect label="Ressource" name="nom_prenom" values={facets?.nom_prenom} {...common} />
           <FacetSelect label="Ligne de coût" name="ligne_cout" values={facets?.ligne_cout} {...common} />
           <FacetSelect label="Squad" name="squad_id" values={facets?.squad_id} render={squadLabel} {...common} />
           <FacetSelect

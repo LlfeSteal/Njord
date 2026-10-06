@@ -41,31 +41,16 @@ CREATE TABLE IF NOT EXISTS squad_alias (
 	UNIQUE (alias_normalise)
 );
 
+-- Une personne est identifiée uniquement par NOM + Prénom (DECISIONS n° 8) :
+-- nom_normalise = names.Key (« DURAND|CLAIRE »), unique (index personnes_cle, cf. schemaIndexes).
 CREATE TABLE IF NOT EXISTS personnes (
 	id            TEXT PRIMARY KEY,
-	display_name  TEXT NOT NULL,
-	nom_normalise TEXT NOT NULL DEFAULT '',  -- names.Normalize(display_name)
+	display_name  TEXT NOT NULL,             -- « NOM Prénom »
+	nom_normalise TEXT NOT NULL DEFAULT '',  -- names.Key
 	statut        TEXT NOT NULL DEFAULT 'brouillon' CHECK (statut IN ('brouillon','validee')),
 	squad_id      TEXT REFERENCES squads(id) ON DELETE SET NULL,
 	created_at    TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS personnes_nom ON personnes(nom_normalise);
--- Identifiants métier : code ressource PDC (ex. DURANDC, 2GI_...) ou matricule A##### du réalisé.
-CREATE TABLE IF NOT EXISTS personne_matricules (
-	personne_id TEXT NOT NULL REFERENCES personnes(id) ON DELETE CASCADE,
-	matricule   TEXT NOT NULL UNIQUE,
-	PRIMARY KEY (personne_id, matricule)
-);
-CREATE TABLE IF NOT EXISTS personne_alias (
-	id              INTEGER PRIMARY KEY AUTOINCREMENT,
-	personne_id     TEXT NOT NULL REFERENCES personnes(id) ON DELETE CASCADE,
-	alias           TEXT NOT NULL,
-	alias_normalise TEXT NOT NULL,           -- names.Normalize(alias)
-	source          TEXT NOT NULL CHECK (source IN ('import','manuel','confirme')),
-	created_at      TEXT NOT NULL,
-	UNIQUE (personne_id, alias_normalise)
-);
-CREATE INDEX IF NOT EXISTS personne_alias_norm ON personne_alias(alias_normalise);
 
 CREATE TABLE IF NOT EXISTS plan_lines (
 	id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,9 +58,9 @@ CREATE TABLE IF NOT EXISTS plan_lines (
 	row_num           INTEGER NOT NULL,
 	layout            TEXT NOT NULL DEFAULT '',
 	ct                TEXT NOT NULL DEFAULT '',
-	ressource         TEXT NOT NULL DEFAULT '',
+	ressource         TEXT NOT NULL DEFAULT '',  -- donnée brute du fichier, n'identifie personne
 	libelle           TEXT NOT NULL DEFAULT '',
-	nom_prenom        TEXT NOT NULL DEFAULT '',  -- « NOM Prénom » extrait du libellé
+	nom_prenom        TEXT NOT NULL DEFAULT '',  -- « NOM Prénom » extrait du libellé ('' = ligne non nominative)
 	type_affectation  TEXT NOT NULL DEFAULT '',
 	ligne_cout        TEXT NOT NULL DEFAULT '',
 	charge_totale     REAL NOT NULL DEFAULT 0,
@@ -126,6 +111,7 @@ CREATE TABLE IF NOT EXISTS realise_entries (
 	type                 TEXT NOT NULL DEFAULT '',
 	categorie_fnp        TEXT NOT NULL DEFAULT '',
 	employe_fournisseur  TEXT NOT NULL DEFAULT '',
+	nom_prenom           TEXT NOT NULL DEFAULT '',  -- « NOM Prénom » d'employe_fournisseur, civilité retirée
 	matricule            TEXT NOT NULL DEFAULT '',
 	fpc                  TEXT NOT NULL DEFAULT '',
 	cea                  TEXT NOT NULL DEFAULT '',
@@ -169,4 +155,10 @@ CREATE TABLE IF NOT EXISTS analyse_last_result (
 	json       TEXT NOT NULL,
 	created_at TEXT NOT NULL
 );
+`
+
+// schemaIndexes are created after the data migrations of migrate (a base
+// created before DECISIONS n° 8 may hold several personnes with the same key).
+const schemaIndexes = `
+CREATE UNIQUE INDEX IF NOT EXISTS personnes_cle ON personnes(nom_normalise);
 `

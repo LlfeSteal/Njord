@@ -213,7 +213,7 @@ func importSpec(t *testing.T, e *env) domain.Version {
 	rows, _ := specFixture()
 	rows = append(rows,
 		specRow(map[int]any{0: "ENTITE_B", cTG: "CT_000000002", 5: "CT_000000002 - Étude réseau", cCat: "PRESTATION",
-			cType: "PRESTATION", 8: "Câblage spécial", cTot: 500, cQte: 2, cDate: 46270, cFac: "F_9", 24: "LOT_2"}),
+			cType: "PRESTATION", 8: "Câblage spécial", cTot: 500, cQte: 2, cDate: 46270, cFac: "F_9", 24: "LOT_2", 12: "DURAND Claire Mme"}),
 	)
 	return decode[domain.ImportResult](t, e.upload("/api/realise/imports", buildXLSX(t, "Réalisé", specHeader, rows),
 		"spec.xlsx", nil), 201).Version
@@ -276,6 +276,20 @@ func TestHTTPEntries(t *testing.T) {
 	if p := page("?q=cablage&search_description=true"); p.Total != 1 {
 		t.Fatalf("q description: %d", p.Total)
 	}
+	// … et sur nom_prenom (« NOM Prénom » sans civilité).
+	if p := page("?q=durand%20CLAIRE"); p.Total != 1 || p.Items[0].NomPrenom != "DURAND Claire" ||
+		p.Items[0].EmployeFournisseur != "DURAND Claire Mme" {
+		t.Fatalf("q nom_prenom: %+v", p.Items)
+	}
+	if p := page("?q=dupont%20jean"); p.Total != 16 || p.Items[0].NomPrenom != "DUPONT Jean" {
+		t.Fatalf("q nom_prenom dupont: %d", p.Total)
+	}
+	if p := page("?q=mme"); p.Total != 0 { // la civilité n'est pas cherchable
+		t.Fatalf("q civilité: %d", p.Total)
+	}
+	if p := page("?q=durand&mask_sensitive=true"); p.Total != 1 || p.Items[0].NomPrenom != "" {
+		t.Fatalf("q nom_prenom masqué: %+v", p.Items)
+	}
 	// Tri + pagination.
 	p = page("?sort=total_eur&order=desc&statut=ok&limit=2&offset=0")
 	if p.Total != 6 || len(p.Items) != 2 || p.Items[0].TotalEur != 1234.5 || p.Items[0].RowNum != 2 {
@@ -308,11 +322,11 @@ func TestHTTPEntries(t *testing.T) {
 	// Masquage.
 	p = page("?mask_sensitive=true&limit=1")
 	it := p.Items[0]
-	if it.EmployeFournisseur != "" || it.Matricule != "" || it.NumFacture != "" || it.NumCommande != "" ||
+	if it.EmployeFournisseur != "" || it.NomPrenom != "" || it.Matricule != "" || it.NumFacture != "" || it.NumCommande != "" ||
 		it.DescriptionDepenses != "" || it.TG == "" {
 		t.Fatalf("masquage: %+v", it)
 	}
-	if page("?limit=1").Items[0].Matricule != "A12345" {
+	if it := page("?limit=1").Items[0]; it.Matricule != "A12345" || it.NomPrenom != "DUPONT Jean" {
 		t.Fatal("non masqué par défaut")
 	}
 	// Paramètres invalides.
@@ -368,6 +382,9 @@ func TestHTTPEntriesCSV(t *testing.T) {
 	if recs[1][col("TOTAL EN €")] != "-61800.5" || recs[1][col("QUANTITE")] != "-3.5" {
 		t.Fatalf("avoir csv: %v", recs[1])
 	}
+	if recs[0][col("NOM PRENOM")-1] != "EMPLOYE/FOURNISSEUR" || recs[2][col("NOM PRENOM")] != "DURAND Claire" {
+		t.Fatalf("colonne nom_prenom: %v", recs[2])
+	}
 	if recs[2][col("MATRICULE")] != "A12345" || recs[2][col("N° FACTURE")] == "" {
 		t.Fatalf("non masqué: %v", recs[2])
 	}
@@ -376,7 +393,7 @@ func TestHTTPEntriesCSV(t *testing.T) {
 		t.Fatalf("csv complet: %d", len(masked))
 	}
 	for _, r := range masked[1:] {
-		for _, c := range []string{"EMPLOYE/FOURNISSEUR", "MATRICULE", "N° FACTURE", "n° COMMANDE", "DESCRIPTION DEPENSES", "NOM RESSOURCE", "FOURNISSEUR"} {
+		for _, c := range []string{"EMPLOYE/FOURNISSEUR", "NOM PRENOM", "MATRICULE", "N° FACTURE", "n° COMMANDE", "DESCRIPTION DEPENSES", "NOM RESSOURCE", "FOURNISSEUR"} {
 			if r[col(c)] != "" {
 				t.Fatalf("colonne %s non masquée: %v", c, r)
 			}
@@ -395,7 +412,7 @@ func TestDemoEntriesMasked(t *testing.T) {
 		t.Fatalf("démo: %d %.2f", p.Total, p.Totals.TotalEur)
 	}
 	for _, it := range p.Items {
-		if it.NomRessource != "" || it.Fournisseur != "" || it.EmployeFournisseur != "" {
+		if it.NomRessource != "" || it.Fournisseur != "" || it.EmployeFournisseur != "" || it.NomPrenom != "" {
 			t.Fatal("masquage démo")
 		}
 	}

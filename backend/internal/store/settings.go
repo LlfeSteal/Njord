@@ -23,7 +23,6 @@ func DefaultSettings() domain.Settings {
 		SeuilNonSecurisePct:   15,
 		PurgeDelaiJours:       30,
 		SeuilQuantiteSemaineH: 200,
-		SeuilFuzzyCount:       10,
 		SeuilEcartTGEur:       50000,
 		DiviseurHorsPlanH:     12,
 		SemainesVerrouillees:  []int{51, 52},
@@ -78,7 +77,7 @@ func FrenchHolidays(year int) []string {
 	d := func(m time.Month, day int) time.Time { return time.Date(year, m, day, 0, 0, 0, 0, time.UTC) }
 	days := []time.Time{
 		d(time.January, 1),
-		easter.AddDate(0, 0, 1),  // lundi de Pâques
+		easter.AddDate(0, 0, 1), // lundi de Pâques
 		d(time.May, 1),
 		d(time.May, 8),
 		easter.AddDate(0, 0, 39), // Ascension

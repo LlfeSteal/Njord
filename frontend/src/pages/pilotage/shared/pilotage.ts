@@ -120,7 +120,6 @@ export const CATEGORIE_LABEL: Record<AnomalieCategorie, string> = {
   ct_risque: 'CT à risque',
   derive: 'Dérives de provision',
   qualite: 'Qualité des données',
-  correspondance: 'Correspondances à confirmer',
   budget: 'Prévisions budgétaires',
 };
 

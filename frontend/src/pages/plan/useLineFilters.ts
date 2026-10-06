@@ -5,7 +5,7 @@ import type { PlanLinesQuery } from '../../api/client';
 
 export const FILTER_KEYS = [
   'ct',
-  'ressource',
+  'nom_prenom',
   'ligne_cout',
   'statut',
   'inactive',
@@ -17,8 +17,8 @@ export const FILTER_KEYS = [
 export type FilterKey = (typeof FILTER_KEYS)[number];
 export type Filters = Record<FilterKey, string>;
 
-export type SortKey = 'row_num' | 'ct' | 'ressource' | 'charge_totale' | 'pps' | 'date_debut';
-const SORT_KEYS: readonly SortKey[] = ['row_num', 'ct', 'ressource', 'charge_totale', 'pps', 'date_debut'];
+export type SortKey = 'row_num' | 'ct' | 'nom_prenom' | 'charge_totale' | 'pps' | 'date_debut';
+const SORT_KEYS: readonly SortKey[] = ['row_num', 'ct', 'nom_prenom', 'charge_totale', 'pps', 'date_debut'];
 export type SortOrder = 'asc' | 'desc';
 
 export const PAGE_SIZES = [50, 100, 200] as const;
@@ -78,7 +78,7 @@ export function useLineFilters() {
   const query: PlanLinesQuery = useMemo(
     () => ({
       ct: filters.ct || undefined,
-      ressource: filters.ressource || undefined,
+      nom_prenom: filters.nom_prenom || undefined,
       ligne_cout: filters.ligne_cout || undefined,
       statut: filters.statut || undefined,
       inactive: filters.inactive === 'true' ? true : filters.inactive === 'false' ? false : undefined,

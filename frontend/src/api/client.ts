@@ -110,7 +110,7 @@ export const versionsApi = {
 // ------------------------------------------------------------------ Plan
 export interface PlanLinesQuery extends Query {
   ct?: string;
-  ressource?: string;
+  nom_prenom?: string;
   ligne_cout?: string;
   statut?: string; // ok | warn | drop
   inactive?: boolean;
@@ -118,7 +118,7 @@ export interface PlanLinesQuery extends Query {
   date_from?: string;
   date_to?: string;
   q?: string;
-  sort?: string; // row_num | ct | ressource | charge_totale | pps | date_debut
+  sort?: string; // row_num | ct | nom_prenom | charge_totale | pps | date_debut
   order?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
@@ -160,12 +160,8 @@ export const realiseApi = {
 export const referentielApi = {
   personnes: (q?: string) => get<Personne[]>('/personnes', { q }),
   personne: (id: string) => get<Personne>(`/personnes/${id}`),
-  updatePersonne: (id: string, body: Partial<Pick<Personne, 'display_name' | 'statut' | 'squad_id'>>) =>
+  updatePersonne: (id: string, body: Partial<Pick<Personne, 'statut' | 'squad_id'>>) =>
     patch<Personne>(`/personnes/${id}`, body),
-  addAlias: (id: string, alias: string) => post<Personne>(`/personnes/${id}/alias`, { alias }),
-  deleteAlias: (id: string, aliasId: number) => del<Personne>(`/personnes/${id}/alias/${aliasId}`),
-  addMatricule: (id: string, matricule: string) => post<Personne>(`/personnes/${id}/matricules`, { matricule }),
-  merge: (id: string, intoId: string) => post<Personne>(`/personnes/${id}/merge`, { into_id: intoId }),
   squads: () => get<Squad[]>('/squads'),
   createSquad: (body: { nom_canonique: string; entite_rattachee?: string; parent_id?: string | null }) =>
     post<Squad>('/squads', body),
@@ -194,8 +190,6 @@ export const analyseApi = {
   ecartsCsvUrl: (q: EcartsCsvQuery) => csvUrl('/analyse/ecarts.csv', q),
   realiseEnrichiCsvUrl: (p: AnalyseParams & { mask_sensitive?: boolean }) =>
     csvUrl('/analyse/realise-enrichi.csv', p as Query),
-  confirmAlias: (personne_id: string, alias: string) =>
-    post<Personne>('/analyse/alias/confirm', { personne_id, alias }),
   /** Marque une anomalie traitée / ignorée (upsert). */
   putSuivi: (body: AnomalieSuiviInput) => put<AnomalieSuivi>('/analyse/anomalies/suivi', body),
   /** Rouvre une anomalie (supprime son suivi). */

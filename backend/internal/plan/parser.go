@@ -116,21 +116,17 @@ var layoutBKeywords = []string{"OEUVRE", "CAPACITE", "MISSION", "PROVISION", "AC
 
 // Motif categories (keys of MotifsCount).
 const (
-	motifLayout      = "layout inconnu"
-	motifCTVide      = "CT vide"
-	motifRessVide    = "ressource vide"
-	motifChargeNeg   = "charge totale négative"
-	motifChargeNum   = "charge totale non numérique"
-	motifDateDebut   = "date de début non convertible"
-	motifDateFin     = "date de fin non convertible"
-	motifPctNum      = "pourcentage non numérique"
-	motifPPS         = "PPS non numérique"
-	motifDates       = "date de fin antérieure à la date de début"
-	motifDoublon     = "doublon (CT, ressource, période)"
-	motifRessInconnu = "ressource de format inconnu"
-	motifNomPrenom   = "nom/prénom non identifiable"
-	motifNomAmbigu   = "ordre nom/prénom ambigu"
-	motifRessNom     = "ressource ≠ NOM + initiale du prénom"
+	motifLayout       = "layout inconnu"
+	motifCTVide       = "CT vide"
+	motifChargeNeg    = "charge totale négative"
+	motifChargeNum    = "charge totale non numérique"
+	motifDateDebut    = "date de début non convertible"
+	motifDateFin      = "date de fin non convertible"
+	motifPctNum       = "pourcentage non numérique"
+	motifPPS          = "PPS non numérique"
+	motifDates        = "date de fin antérieure à la date de début"
+	motifDoublon      = "doublon (CT, nom/prénom, période)"
+	motifNonNominatif = "ligne non nominative"
 )
 
 type issue struct {
@@ -169,30 +165,30 @@ func (li lineIssues) motif() string {
 	return strings.Join(parts, " ; ")
 }
 
-var (
-	reInactif  = regexp.MustCompile(`(?i)^\s*\[\s*inactif\s*\]\s*`)
-	reInternal = regexp.MustCompile(`^[A-Z0-9_]{1,12}$`)
-)
+var reInactif = regexp.MustCompile(`(?i)^\s*\[\s*inactif\s*\]\s*`)
 
-// NormalizeRessource strips the [inactif] prefix and classifies the code
-// (SPEC §4.2 + DECISIONS): internal | external | unknown.
-func NormalizeRessource(raw string) (code string, inactive bool, kind string) {
+// NormalizeRessource strips the [inactif] prefix of the raw Ressource cell.
+// The code is kept as raw data only: it identifies no one (DECISIONS n° 8).
+func NormalizeRessource(raw string) (code string, inactive bool) {
 	code = strings.TrimSpace(raw)
 	if loc := reInactif.FindStringIndex(code); loc != nil {
 		inactive = true
 		code = strings.TrimSpace(code[loc[1]:])
 	}
-	switch {
-	case code == "":
-		kind = "unknown"
-	case strings.HasPrefix(strings.ToUpper(code), "2GI_") || strings.HasPrefix(strings.ToUpper(code), "RES_EXT_") || len([]rune(code)) > 12:
-		kind = "external"
-	case reInternal.MatchString(code):
-		kind = "internal"
-	default:
-		kind = "unknown"
-	}
 	return
+}
+
+// identity is the identity key of a plan line: names.KeyOf(NomPrenom), or
+// "L:" + libellé for a non-nominative line (no NOM Prénom), or "R:" + row
+// number when the libellé is empty too (such lines are never duplicates).
+func identity(l *domain.PlanLine) string {
+	if k := names.KeyOf(l.NomPrenom); k != "" {
+		return k
+	}
+	if l.Libelle != "" {
+		return "L:" + l.Libelle
+	}
+	return fmt.Sprintf("R:%d", l.RowNum)
 }
 
 func detectLayout(v3 string) string {
@@ -300,14 +296,14 @@ func Parse(data []byte) (*ParseResult, error) {
 		stack = closeGroups(stack)
 	}
 
-	// Règle 6 : doublons (CT, Ressource, date_debut, date_fin) parmi les lignes non rejetées.
-	type key struct{ ct, res, d1, d2 string }
+	// Règle 6 : doublons (CT, identité, date_debut, date_fin) parmi les lignes non rejetées.
+	type key struct{ ct, id, d1, d2 string }
 	seen := map[key][]int{}
 	for i, l := range res.Lines {
 		if issues[i].statut() == domain.ParsingDrop {
 			continue
 		}
-		k := key{l.CT, l.Ressource, l.DateDebut, l.DateFin}
+		k := key{l.CT, identity(&l.PlanLine), l.DateDebut, l.DateFin}
 		seen[k] = append(seen[k], i)
 	}
 	for _, idxs := range seen {
@@ -322,7 +318,7 @@ func Parse(data []byte) (*ParseResult, error) {
 				}
 			}
 			issues[i].add(domain.ParsingWarn, motifDoublon,
-				fmt.Sprintf("doublon (CT, ressource, période) avec la ligne %s : agrégation implicite", strings.Join(others, ", ")))
+				fmt.Sprintf("doublon (CT, nom/prénom, période) avec la ligne %s : agrégation implicite", strings.Join(others, ", ")))
 		}
 	}
 
@@ -360,7 +356,8 @@ func Parse(data []byte) (*ParseResult, error) {
 		if l.DateFin != "" && l.DateFin > res.PeriodeFin {
 			res.PeriodeFin = l.DateFin
 		}
-		ress[l.Ressource] = ress[l.Ressource] || l.Inactive
+		id := identity(&l.PlanLine)
+		ress[id] = ress[id] || l.Inactive
 	}
 	switch {
 	case layouts["A"] && layouts["B"]:
@@ -425,8 +422,7 @@ func parseDataRow(row []string, rowNum, idxQte, idxTaux, idxDepuis, idxPendant i
 	at := func(specPos int) string { return xlsxutil.Cell(row, specPos+shift) }
 
 	pl.CT = xlsxutil.Cell(row, 0)
-	code, inactive, kind := NormalizeRessource(xlsxutil.Cell(row, 1))
-	pl.Ressource, pl.Inactive, pl.RessourceKind = code, inactive, kind
+	pl.Ressource, pl.Inactive = NormalizeRessource(xlsxutil.Cell(row, 1))
 	pl.Libelle = strings.Join(strings.Fields(xlsxutil.Cell(row, 2)), " ")
 	if layout != "B" {
 		pl.TypeAffectation = xlsxutil.Cell(row, 3)
@@ -450,9 +446,6 @@ func parseDataRow(row []string, rowNum, idxQte, idxTaux, idxDepuis, idxPendant i
 	}
 	if pl.CT == "" {
 		li.add(domain.ParsingDrop, motifCTVide, "")
-	}
-	if pl.Ressource == "" {
-		li.add(domain.ParsingDrop, motifRessVide, "")
 	}
 
 	if v, err := xlsxutil.ParseNumber(at(5)); err == nil {
@@ -489,39 +482,30 @@ func parseDataRow(row []string, rowNum, idxQte, idxTaux, idxDepuis, idxPendant i
 	if err1 == nil && err2 == nil && d2 < d1 {
 		li.add(domain.ParsingWarn, motifDates, "")
 	}
-	if pl.Ressource != "" && kind == "unknown" {
-		li.add(domain.ParsingWarn, motifRessInconnu, "")
-	}
 	if layout != "" {
 		checkNomPrenom(&pl, &li)
 	}
 	return pl, li
 }
 
-// checkNomPrenom extrait « NOM Prénom » de la partie personne du libellé et
-// contrôle la convention du code ressource (NOM + initiale du prénom).
-// Le code du fichier est toujours conservé ; tout écart passe en warn.
+// checkNomPrenom extrait « NOM Prénom » de la partie personne du libellé :
+// c'est la seule identité de la ligne (DECISIONS n° 8). Sans NOM Prénom, la
+// ligne est non nominative : conservée (warn), sans personne.
 func checkNomPrenom(pl *domain.PlanLine, li *lineIssues) {
 	person, _ := names.SplitLibelle(pl.Libelle, nil)
-	np, st := names.ParseNomPrenom(person, pl.Ressource)
-	switch st {
-	case names.NomPrenomNonIdentifiable:
-		cite := "libellé vide"
-		if person != "" {
-			cite = fmt.Sprintf("« %s »", person)
-		} else if pl.Libelle != "" {
-			cite = fmt.Sprintf("« %s »", pl.Libelle)
-		}
-		li.add(domain.ParsingWarn, motifNomPrenom, fmt.Sprintf("nom/prénom non identifiable dans le libellé (%s)", cite))
-	case names.NomPrenomAmbigu:
-		pl.NomPrenom = person
-		li.add(domain.ParsingWarn, motifNomAmbigu, fmt.Sprintf("ordre nom/prénom ambigu (« %s »)", person))
-	default:
+	np, st := names.ParseNomPrenom(person)
+	if st == names.NomPrenomOK {
 		pl.NomPrenom = np.String()
-		if want := names.ExpectedRessource(np); pl.Ressource != "" && !strings.EqualFold(pl.Ressource, want) {
-			li.add(domain.ParsingWarn, motifRessNom, fmt.Sprintf("ressource « %s » ≠ NOM + initiale du prénom (attendu « %s »)", pl.Ressource, want))
-		}
+		return
 	}
+	cite := "libellé vide"
+	if person != "" {
+		cite = fmt.Sprintf("« %s »", person)
+	} else if pl.Libelle != "" {
+		cite = fmt.Sprintf("« %s »", pl.Libelle)
+	}
+	li.add(domain.ParsingWarn, motifNonNominatif,
+		fmt.Sprintf("ligne non nominative : nom/prénom non identifiable dans le libellé (%s)", cite))
 }
 
 func formatNum(v float64) string {

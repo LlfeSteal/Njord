@@ -1,8 +1,6 @@
 // Table des lignes d'une version de plan : une ligne par cellule, anomalies teintées avec glyphe de tête,
 // totaux en pied. Le détail complet d'une ligne s'ouvre dans l'inspecteur (clic sur la ligne).
-import type { MouseEvent } from 'react';
-import { IconButton, SortHeader, StatusGlyph, Table, Text, Tooltip, VisuallyHidden } from '../../ui';
-import { IconUserPlus } from '../../ui/Icons';
+import { SortHeader, StatusGlyph, Table, Text, Tooltip, VisuallyHidden } from '../../ui';
 import type { PlanLine } from '../../api/types';
 import { InactiveBadge } from '../../components/badges';
 import { fmtEur, fmtHours, fmtPct } from '../../lib/format';
@@ -20,15 +18,12 @@ interface Props {
   /** Nom de la squad la plus interne / chemin complet du groupe. */
   squadName: (id: string | null) => string;
   squadPath: (id: string | null) => string;
-  onAlias: (l: PlanLine) => void;
   onSelect: (l: PlanLine) => void;
   selectedId: number | null;
   dimmed?: boolean;
 }
 
-const COLS = 9; // glyphe + 7 colonnes + actions
-
-const stop = (e: MouseEvent) => e.stopPropagation();
+const COLS = 8; // glyphe + 7 colonnes
 
 /** Glyphe de tête d'une ligne en anomalie ; motif en bulle d'aide. */
 export function ParsingGlyph({ line: l, size }: { line: PlanLine; size?: number }) {
@@ -38,35 +33,23 @@ export function ParsingGlyph({ line: l, size }: { line: PlanLine; size?: number 
   return <StatusGlyph kind={warn ? 'warning' : 'danger'} tone={warn ? 'warning' : 'danger'} size={size} label={label} />;
 }
 
-/** Ressource sur une ligne : « CODE (NOM Prénom) » + mention inactif. */
+/** Ressource sur une ligne : « NOM Prénom » (l'identité), « Non nominative » sinon, + mention inactif. */
 export function RessourceLabel({ line: l }: { line: PlanLine }) {
   return (
     <span className="plan-res">
-      <span className="plan-res__code">{l.ressource}</span>
-      {l.nom_prenom && <span className="plan-res__name"> ({l.nom_prenom})</span>}
+      {l.nom_prenom ? (
+        <span>{l.nom_prenom}</span>
+      ) : (
+        <span className="plan-res__none" title={l.libelle || undefined}>
+          Non nominative
+        </span>
+      )}
       {l.inactive && (
         <span className="plan-res__inactive">
           <InactiveBadge />
         </span>
       )}
     </span>
-  );
-}
-
-function AliasAction({ line: l, onAlias }: { line: PlanLine; onAlias: (l: PlanLine) => void }) {
-  if (l.personne_id)
-    return (
-      <IconButton label="Créer un alias personne" onClick={() => onAlias(l)}>
-        <IconUserPlus size={15} />
-      </IconButton>
-    );
-  // Bouton désactivé : la bulle explique pourquoi.
-  return (
-    <Tooltip label="Ressource non rattachée à une fiche personne">
-      <IconButton label="Créer un alias personne" disabled>
-        <IconUserPlus size={15} />
-      </IconButton>
-    </Tooltip>
   );
 }
 
@@ -79,7 +62,6 @@ export default function PlanLinesTable({
   onSort,
   squadName,
   squadPath,
-  onAlias,
   onSelect,
   selectedId,
   dimmed,
@@ -97,15 +79,12 @@ export default function PlanLinesTable({
             <VisuallyHidden>Contrôle</VisuallyHidden>
           </th>
           {sh('ct', 'CT')}
-          {sh('ressource', 'Ressource')}
+          {sh('nom_prenom', 'Ressource')}
           <th>Squad</th>
           {sh('charge_totale', 'Charge', 'right')}
           {sh('pps', 'PPS', 'right')}
           <th data-align="right">%</th>
           {sh('date_debut', 'Dates')}
-          <th>
-            <VisuallyHidden>Actions</VisuallyHidden>
-          </th>
         </tr>
       </thead>
       <tbody>
@@ -158,9 +137,6 @@ export default function PlanLinesTable({
                 {fmtPct(l.pourcentage)}
               </td>
               <td data-nowrap>{fmtRange(l.date_debut, l.date_fin)}</td>
-              <td data-actions onClick={stop}>
-                <AliasAction line={l} onAlias={onAlias} />
-              </td>
             </tr>
           );
         })}
@@ -176,7 +152,7 @@ export default function PlanLinesTable({
           <td data-align="right" data-nowrap>
             {fmtEur(totals.pps)}
           </td>
-          <td colSpan={3} />
+          <td colSpan={2} />
         </tr>
       </tfoot>
     </Table>

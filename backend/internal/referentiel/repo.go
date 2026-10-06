@@ -14,7 +14,7 @@ import (
 
 func fold(s string) string { return strings.ToLower(xlsxutil.StripAccents(s)) }
 
-// listPersonnes loads personnes (all when id == "") with their matricules and aliases.
+// listPersonnes loads personnes (all when id == ""), sorted by display name.
 func listPersonnes(ctx context.Context, ex store.Execer, id string) ([]domain.Personne, error) {
 	where, args := "", []any{}
 	if id != "" {
@@ -25,7 +25,6 @@ func listPersonnes(ctx context.Context, ex store.Execer, id string) ([]domain.Pe
 		return nil, err
 	}
 	out := []domain.Personne{}
-	idx := map[string]int{}
 	for rows.Next() {
 		var p domain.Personne
 		var sq sql.NullString
@@ -39,54 +38,7 @@ func listPersonnes(ctx context.Context, ex store.Execer, id string) ([]domain.Pe
 			p.SquadID = &s
 		}
 		p.CreatedAt = store.ParseTime(created)
-		p.Matricules = []string{}
-		p.Alias = []domain.PersonneAlias{}
-		idx[p.ID] = len(out)
 		out = append(out, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return out, nil
-	}
-	pwhere := ""
-	if id != "" {
-		pwhere = " WHERE personne_id = ?"
-	}
-	rows, err = ex.QueryContext(ctx, `SELECT personne_id, matricule FROM personne_matricules`+pwhere+` ORDER BY matricule`, args...)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var pid, m string
-		if err := rows.Scan(&pid, &m); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if i, ok := idx[pid]; ok {
-			out[i].Matricules = append(out[i].Matricules, m)
-		}
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows, err = ex.QueryContext(ctx, `SELECT personne_id, id, alias, alias_normalise, source FROM personne_alias`+pwhere+` ORDER BY id`, args...)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var pid string
-		var a domain.PersonneAlias
-		if err := rows.Scan(&pid, &a.ID, &a.Alias, &a.AliasNormalise, &a.Source); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if i, ok := idx[pid]; ok {
-			out[i].Alias = append(out[i].Alias, a)
-		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -113,25 +65,10 @@ func getPersonne(ctx context.Context, ex store.Execer, id string) (domain.Person
 	return ps[0], nil
 }
 
-// matchPersonne: q (case/accent-insensitive) in display name, aliases or matricules.
+// matchPersonne: q (already folded) in the display name, case/accent-insensitive.
+// The name is the only identity of a personne (DECISIONS n° 8).
 func matchPersonne(p domain.Personne, q string) bool {
-	if q == "" {
-		return true
-	}
-	if strings.Contains(fold(p.DisplayName), q) {
-		return true
-	}
-	for _, a := range p.Alias {
-		if strings.Contains(fold(a.Alias), q) {
-			return true
-		}
-	}
-	for _, m := range p.Matricules {
-		if strings.Contains(fold(m), q) {
-			return true
-		}
-	}
-	return false
+	return q == "" || strings.Contains(fold(p.DisplayName), q)
 }
 
 func listSquads(ctx context.Context, ex store.Execer, id string) ([]domain.Squad, error) {

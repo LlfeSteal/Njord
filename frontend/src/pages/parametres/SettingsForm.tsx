@@ -114,14 +114,6 @@ const SECTIONS: Section[] = [
         min: 0,
         description: 'Warn si une ligne MO dépasse ce volume sur une semaine',
       },
-      {
-        key: 'seuil_fuzzy_count',
-        label: 'Correspondances approximatives',
-        unit: 'nb',
-        min: 0,
-        integer: true,
-        description: 'Warn global au-delà de ce nombre de correspondances fuzzy',
-      },
     ],
   },
   {

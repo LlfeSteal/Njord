@@ -67,9 +67,10 @@ export interface PlanLine {
   row_num: number;
   layout: string;
   ct: string;
+  /** Code brut du fichier : n'identifie personne (affiché nulle part, export CSV seulement). */
   ressource: string;
   libelle: string;
-  /** « NOM Prénom » extrait du libellé ('' si non identifiable). */
+  /** Identité : « NOM Prénom » extrait du libellé ('' = ligne non nominative). */
   nom_prenom: string;
   type_affectation: string;
   ligne_cout: string;
@@ -86,7 +87,6 @@ export interface PlanLine {
   pendant: string;
   statut_parsing: ParsingStatut;
   motif_rejet: string;
-  ressource_kind: 'internal' | 'external' | 'unknown';
   inactive: boolean;
   personne_id: string | null;
   squad_id: string | null;
@@ -117,6 +117,8 @@ export interface RealiseEntry {
   type: string;
   categorie_fnp: string;
   employe_fournisseur: string;
+  /** « NOM Prénom » d'EMPLOYE/FOURNISSEUR, civilité retirée ('' si non identifiable). Sensible. */
+  nom_prenom: string;
   matricule: string;
   fpc: string;
   cea: string;
@@ -146,23 +148,15 @@ export interface RealiseEntriesPage {
 export type Facets = Record<string, string[]>;
 
 // ---------------------------------------------------------------- Référentiels
-export type AliasSource = 'import' | 'manuel' | 'confirme';
-
-export interface PersonneAlias {
-  id: number;
-  alias: string;
-  alias_normalise: string;
-  source: AliasSource;
-}
-
+/** Personne identifiée uniquement par NOM + Prénom. */
 export interface Personne {
   id: string;
+  /** « NOM Prénom » */
   display_name: string;
+  /** Clé d'identité, ex. « DE LA TOUR|ANTOINE » (unique). */
   nom_normalise: string;
   statut: 'brouillon' | 'validee';
   squad_id: string | null;
-  matricules: string[];
-  alias: PersonneAlias[];
   created_at: string;
 }
 
@@ -183,7 +177,6 @@ export interface Settings {
   seuil_non_securise_pct: number;
   purge_delai_jours: number;
   seuil_quantite_semaine_h: number;
-  seuil_fuzzy_count: number;
   seuil_ecart_tg_eur: number;
   diviseur_hors_plan_h: number;
   semaines_verrouillees: number[];
@@ -206,7 +199,8 @@ export interface AuditEntry {
 // ---------------------------------------------------------------- Analyse
 export type Flag = 'absence' | 'hors_plan' | 'sur_imputation' | 'sous_imputation' | 'conforme';
 export type Classification = 'SECURISE' | 'NON_SECURISE' | 'NON_CLASSE';
-export type Confidence = 'matricule' | 'alias' | 'fuzzy' | 'none' | 'plan';
+/** nom : même NOM + Prénom dans le plan et le réalisé ; none : hors plan ; plan : plan seul. */
+export type Confidence = 'nom' | 'none' | 'plan';
 
 export const FLAG_SEVERITY: Record<Flag, number> = {
   absence: 5,
@@ -333,11 +327,12 @@ export interface QualiteWarning {
 }
 
 export interface Correspondance {
+  /** EMPLOYE/FOURNISSEUR brut. */
   nom_realise: string;
-  nom_normalise: string;
+  /** « NOM Prénom » sans civilité ('' si illisible). */
+  nom_prenom: string;
   personne_id: string | null;
   personne_nom: string;
-  ressource: string;
   confidence: Confidence;
   nb_ecritures: number;
   heures: number;
@@ -413,7 +408,7 @@ export interface Previsions {
 }
 
 // ------------------------------------------------------------------ Anomalies (SPEC_analyse §7.8)
-export type AnomalieCategorie = 'ecart' | 'ct_risque' | 'derive' | 'qualite' | 'correspondance' | 'budget';
+export type AnomalieCategorie = 'ecart' | 'ct_risque' | 'derive' | 'qualite' | 'budget';
 export type AnomalieStatut = 'a_traiter' | 'traitee' | 'ignoree';
 
 export interface AnomalieSuivi {
@@ -438,8 +433,6 @@ export interface Anomalie {
   ct?: string;
   ct_libelle?: string;
   ressource?: string;
-  nom_realise?: string;
-  personne_id?: string | null;
   montant?: number | null;
   heures?: number | null;
   semaines?: string[];

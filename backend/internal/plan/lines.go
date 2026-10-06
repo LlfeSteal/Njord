@@ -17,20 +17,20 @@ import (
 
 // LineFilter holds the filters of GET /plan/versions/:id/lines(.csv).
 type LineFilter struct {
-	CT, Ressource, LigneCout, Statut, SquadID string
+	CT, NomPrenom, LigneCout, Statut, SquadID string
 	Inactive                                  *bool // nil = tous
 	DateFrom, DateTo                          string
-	Q                                         string
+	Q                                         string // plein-texte libellé / nom_prenom / CT
 	Sort                                      string
 	Desc                                      bool
 }
 
-var sortColumns = map[string]bool{"row_num": true, "ct": true, "ressource": true, "charge_totale": true, "pps": true, "date_debut": true}
+var sortColumns = map[string]bool{"row_num": true, "ct": true, "nom_prenom": true, "charge_totale": true, "pps": true, "date_debut": true}
 
 func filterFromQuery(c *gin.Context) (LineFilter, error) {
 	f := LineFilter{
 		CT:        strings.TrimSpace(c.Query("ct")),
-		Ressource: strings.TrimSpace(c.Query("ressource")),
+		NomPrenom: strings.TrimSpace(c.Query("nom_prenom")),
 		LigneCout: strings.TrimSpace(c.Query("ligne_cout")),
 		Statut:    strings.TrimSpace(c.Query("statut")),
 		SquadID:   strings.TrimSpace(c.Query("squad_id")),
@@ -109,8 +109,8 @@ func QueryLines(ctx context.Context, ex store.Execer, versionID string, f LineFi
 	if f.CT != "" {
 		add(`ct = ?`, f.CT)
 	}
-	if f.Ressource != "" {
-		add(`ressource = ?`, f.Ressource)
+	if f.NomPrenom != "" {
+		add(`nom_prenom = ?`, f.NomPrenom)
 	}
 	if f.LigneCout != "" {
 		add(`ligne_cout = ?`, f.LigneCout)
@@ -142,7 +142,7 @@ func QueryLines(ctx context.Context, ex store.Execer, versionID string, f LineFi
 		if err != nil {
 			return nil, err
 		}
-		if needle != "" && !strings.Contains(foldText(l.Libelle+"\x00"+l.NomPrenom+"\x00"+l.CT+"\x00"+l.Ressource), needle) {
+		if needle != "" && !strings.Contains(foldText(l.Libelle+"\x00"+l.NomPrenom+"\x00"+l.CT), needle) {
 			continue
 		}
 		out = append(out, l)
@@ -159,8 +159,8 @@ func sortLines(ls []domain.PlanLine, by string, desc bool) {
 		switch by {
 		case "ct":
 			return strings.Compare(a.CT, b.CT)
-		case "ressource":
-			return strings.Compare(a.Ressource, b.Ressource)
+		case "nom_prenom":
+			return strings.Compare(a.NomPrenom, b.NomPrenom)
 		case "charge_totale":
 			return cmpFloat(a.ChargeTotale, b.ChargeTotale)
 		case "pps":
@@ -196,7 +196,7 @@ func cmpFloat(a, b float64) int {
 func Facets(ctx context.Context, ex store.Execer, versionID string) (domain.Facets, error) {
 	out := domain.Facets{}
 	for facet, col := range map[string]string{
-		"ct": "ct", "ressource": "ressource", "ligne_cout": "ligne_cout", "squad_id": "squad_id", "statut": "statut_parsing",
+		"ct": "ct", "nom_prenom": "nom_prenom", "ligne_cout": "ligne_cout", "squad_id": "squad_id", "statut": "statut_parsing",
 	} {
 		rows, err := ex.QueryContext(ctx, `SELECT DISTINCT `+col+` FROM plan_lines WHERE version_id = ? AND `+col+` IS NOT NULL AND `+col+` <> '' ORDER BY 1`, versionID)
 		if err != nil {

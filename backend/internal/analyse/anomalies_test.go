@@ -294,21 +294,28 @@ func TestAnomaliesSeed(t *testing.T) {
 	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
 	checkAnomalies(t, res.Anomalies)
 	want := map[string]bool{
-		"ecart|Y99F90001|DURANDC|sur_imputation":    false,
-		"ecart|Y99F900012|BARBIER Luc M.|hors_plan": false,
-		"ct_risque|Y99F900012":                      false,
-		"derive|Y99F900012|5":                       false,
-		"qualite|plan_warn":                         false,
+		"ecart|Y99F90001|DURAND Claire|sur_imputation": false,
+		"ecart|Y99F900012|BARBIER Luc|hors_plan":       false,
+		"ct_risque|Y99F900012":                         false,
+		"derive|Y99F900012|5":                          false,
+		"qualite|plan_warn":                            false,
 	}
 	for _, a := range res.Anomalies {
 		if _, ok := want[a.Key]; ok {
 			want[a.Key] = true
 		}
+		if a.Categorie == "correspondance" || a.Key == "qualite|fuzzy" {
+			t.Errorf("catégorie supprimée : %s", a.Key)
+		}
 		switch a.Key {
-		case "ecart|Y99F90001|DURANDC|sur_imputation":
+		case "ecart|Y99F90001|DURAND Claire|sur_imputation":
 			if a.Titre != "DURAND Claire · Y99F90001 : sur-imputation" || a.Detail != "1 semaine, écart cumulé +16 h (prévu 10 h, réel 26 h)" ||
-				a.Lien != "/ecarts?ct=Y99F90001&ressource=DURANDC&flag=sur_imputation" || a.PersonneID == nil || *a.PersonneID != "p1" {
-				t.Errorf("écart DURANDC : %+v", a)
+				a.Lien != "/ecarts?ct=Y99F90001&ressource=DURAND+Claire&flag=sur_imputation" || a.Ressource != "DURAND Claire" {
+				t.Errorf("écart DURAND Claire : %+v", a)
+			}
+		case "ecart|Y99F900012|BARBIER Luc|hors_plan":
+			if a.Titre != "BARBIER Luc · Y99F900012 : hors plan" || a.Lien != "/ecarts?ct=Y99F900012&ressource=BARBIER+Luc&flag=hors_plan" {
+				t.Errorf("hors plan BARBIER : %+v", a)
 			}
 		case "ct_risque|Y99F900012":
 			if a.Gravite != 3 || *a.Montant != 15000 || a.Lien != "/budget?ct=Y99F900012" {

@@ -41,6 +41,8 @@ export const COLUMNS: EntryColumn[] = [
   { key: 'wp', label: 'WP', render: (e) => codeCell(e.wp, e.wp_libelle), mono: true },
   { key: 'wp_libelle', label: 'WP libellé', render: truncated((e) => e.wp_libelle, 240) },
   { key: 'categorie', label: 'Catégorie', render: (e) => txt(e.categorie), main: true },
+  // Identité (« NOM Prénom » sans civilité) : seule clé de rapprochement avec le plan.
+  { key: 'nom_prenom', label: 'Nom', render: truncated((e) => e.nom_prenom, 200), main: true, sensitive: true },
   { key: 'type', label: 'Type', render: truncated((e) => e.type, 200) },
   { key: 'entite', label: 'Entité', render: (e) => txt(e.entite) },
   { key: 'activite', label: 'Activité', render: (e) => txt(e.activite) },
@@ -124,6 +126,7 @@ export const DETAIL_GROUPS: { title: string; fields: DetailField[] }[] = [
       { label: 'Catégorie FNP', value: (e) => txt(e.categorie_fnp) },
       { label: 'Quantité', value: (e) => fmtNumber(e.quantite), numeric: true },
       { label: 'Total', value: (e) => fmtEur(e.total_eur, true), numeric: true },
+      { label: 'NOM Prénom', value: (e) => txt(e.nom_prenom), sensitive: true },
       { label: 'Employé / fournisseur', value: (e) => txt(e.employe_fournisseur), sensitive: true },
       { label: 'Nom ressource', value: (e) => txt(e.nom_ressource), sensitive: true },
       { label: 'Fournisseur', value: (e) => txt(e.fournisseur), sensitive: true },

@@ -31,7 +31,6 @@ import { plural } from '../../components/lifecycle/lifecycleUtils';
 import { fmtDateTime, fmtNumber, fmtPeriod } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
 import { useSquadIndex } from '../referentiels/hooks';
-import AliasPersonneModal from './AliasPersonneModal';
 import PlanLineInspector from './PlanLineInspector';
 import PlanLinesFilters from './PlanLinesFilters';
 import PlanLinesTable from './PlanLinesTable';
@@ -61,7 +60,6 @@ export default function PlanVersionDetail({ versionId: forced }: { versionId?: s
   const { filters, sort, order, limit, page, update, query } = useLineFilters();
   const squads = useSquadIndex();
   const lc = useVersionLifecycle('plan');
-  const [aliasLine, setAliasLine] = useState<PlanLine | null>(null);
   const [panel, setPanel] = useState<Panel>(null);
 
   const version = useQuery({
@@ -149,7 +147,6 @@ export default function PlanVersionDetail({ versionId: forced }: { versionId?: s
       onClose={() => setPanel(null)}
       squadName={squads.name}
       squadPath={squads.label}
-      onAlias={setAliasLine}
     />
   );
 
@@ -215,8 +212,7 @@ export default function PlanVersionDetail({ versionId: forced }: { versionId?: s
                 onSort={onSort}
                 squadName={squads.name}
                 squadPath={squads.label}
-                onAlias={setAliasLine}
-                onSelect={(line) => setPanel({ type: 'line', line })}
+                          onSelect={(line) => setPanel({ type: 'line', line })}
                 selectedId={selected?.id ?? null}
                 dimmed={lines.isPlaceholderData}
               />
@@ -242,7 +238,6 @@ export default function PlanVersionDetail({ versionId: forced }: { versionId?: s
         </Stack>
       )}
 
-      <AliasPersonneModal line={aliasLine} onClose={() => setAliasLine(null)} />
       <ImportWizard kind="plan" opened={wizard} onClose={() => setWizard(false)} />
       {lc.modals}
     </Page>

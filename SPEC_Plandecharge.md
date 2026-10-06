@@ -60,12 +60,7 @@ LAYOUT_B = la colonne 3 (Type d'affectation) est absente, tout est décalé d'un
 
 ### 4.2 Normalisation ressource
 
-| Pattern | `kind` | Traitement |
-|---|---|---|
-| préfixe `[inactif]` | — | strip + flag `inactive = true` |
-| court (matricule interne type `R_###`) | `internal` | clé conservée telle quelle |
-| long type `2GI_…_Ollioules_…_` | `external` | clé conservée, rattachée au référentiel squads |
-| autre | `unknown` | ligne conservée, warn |
+Le code `Ressource` **n'identifie plus personne** (DECISIONS n° 8) : il est conservé brut pour l'export CSV ; seul le préfixe `[inactif]` est exploité (strip + flag `inactive = true`). L'identité d'une ligne est le **NOM Prénom** extrait du `Libellé` (§8 règle 9).
 
 ### 4.3 Conversions
 
@@ -101,7 +96,6 @@ Les 12 colonnes du §3, plus :
 | `version_id` | référence | rattache à la version |
 | `statut_parsing` | enum | `ok` \| `warn` \| `drop` |
 | `motif_rejet` | texte ? | motif fonctionnel lisible |
-| `ressource_kind` | enum | `internal` \| `external` \| `unknown` |
 | `inactive` | booléen | préfixe `[inactif]` |
 | `personne_id` | référence ? | vers référentiel personnes si résolue |
 | `squad_id` | référence ? | vers référentiel squads si résolue |
@@ -115,17 +109,16 @@ Peuplée automatiquement à l'import (détection dans la colonne `Libellé` du b
 
 ### 6.2 Personne
 
-Identité humaine canonique servant à faire le pont entre PDC (`Ressource` court, `Libellé` humain) et Réalisé (`MATRICULE`, `EMPLOYE/FOURNISSEUR`). Champs :
+Identité humaine identifiée **uniquement par NOM + Prénom** (DECISIONS n° 8) : `Libellé` côté PDC, `EMPLOYE/FOURNISSEUR` sans civilité côté Réalisé. Ni code ressource, ni matricule, ni alias. Champs :
 
 | Champ | Rôle |
 |---|---|
-| `id` | identité canonique |
-| `nom_normalisé` | clé de rapprochement (uppercase, ponctuation retirée, tokens triés) |
-| `matricules[]` | un ou plusieurs identifiants métier (PDC court, matricule A##### du Réalisé…) |
-| `alias[]` | variantes de nom vues dans les deux sources |
+| `id` | identifiant technique |
+| `display_name` | « NOM Prénom » (non modifiable : c'est l'identité) |
+| `nom_normalisé` | clé `NOM\|PRÉNOM` (majuscules, sans accents ni ponctuation, ordre conservé), unique |
 | `squad_id` ? | rattachement hiérarchique |
 
-**Règle de création** : à l'import, si une ressource est nouvelle → création d'une fiche personne `brouillon` ; l'utilisateur peut la rattacher à une fiche existante depuis l'écran de détail.
+**Règle de création** : à l'import, un NOM Prénom nouveau → création d'une fiche personne `brouillon` ; un NOM Prénom connu → rattachement à la fiche existante. Ligne sans NOM Prénom → non nominative, sans fiche.
 
 ## 7. Fonctionnalités (cycle de vie)
 
@@ -161,10 +154,10 @@ Actions en ligne : consulter, archiver/réactiver, purger (visible admin, condit
 
 Affiche la table des lignes avec :
 
-- **Filtres** : CT, ressource, ligne de coût, statut parsing, inactive, squad, période.
-- **Recherche plein-texte** sur Libellé / CT / Ressource.
+- **Filtres** : CT, NOM Prénom, ligne de coût, statut parsing, inactive, squad, période.
+- **Recherche plein-texte** sur Libellé / NOM Prénom / CT.
 - **Indicateurs visuels** : badge `[inactif]`, badge `warn` avec tooltip motif, badge `drop` striqué.
-- **Actions** : export CSV des lignes filtrées ; création manuelle d'un alias personne.
+- **Actions** : export CSV des lignes filtrées.
 - **Pied de page** : sous-totaux `Σ charge totale` et `Σ PPS` par filtre courant.
 
 ### 7.4 Archiver (soft delete)
@@ -200,12 +193,12 @@ Appliqués **à l'import uniquement**, le module Analyse gère ses propres contr
 | 3 | ~~`pct ∈ {20,30,40,50,70,80,100}`~~ | **supprimée** (2026-10-05) : toute valeur numérique acceptée |
 | 4 | `charge_totale ≥ 0` | sinon `drop` |
 | 5 | `date_fin ≥ date_début` | sinon `warn` |
-| 6 | `(CT, Ressource, date_début, date_fin)` unique dans la version | doublon → `warn` + agrégation implicite |
+| 6 | `(CT, NOM Prénom, date_début, date_fin)` unique dans la version (libellé pour une ligne non nominative) | doublon → `warn` + agrégation implicite |
 | 7 | CT non vide | sinon `drop` |
-| 8 | Ressource non vide | sinon `drop` |
-| 9 | NOM Prénom extrait de la partie personne du Libellé (mots en MAJUSCULES = NOM ; sinon ordre `<Prénom NOM>`) | non identifiable (vide, un seul mot, code) → `warn`, ligne conservée |
-| 10 | Libellé tout en majuscules (`ROBERT MICHEL`) : ordre tranché par le code Ressource | aucun ordre ne correspond → `warn` « ordre nom/prénom ambigu », libellé gardé tel quel |
-| 11 | Ressource = NOM (sans accents/espaces/tirets/apostrophes) + initiale du prénom (`DE LA TOUR Antoine` → `DELATOURA`) | sinon `warn` « attendu XXX », code du fichier conservé |
+| 8 | ~~Ressource non vide~~ | **supprimée** (2026-10-06) : le code n'identifie plus personne |
+| 9 | NOM Prénom extrait de la partie personne du Libellé (mots en MAJUSCULES = NOM ; sinon ordre `<Prénom NOM>`) | non identifiable (vide, un seul mot, code) → `warn` « ligne non nominative », ligne conservée au budget, sans personne |
+| 10 | Libellé tout en majuscules (`ROBERT MICHEL`) | ordre `<NOM Prénom>` : dernier mot = prénom |
+| 11 | ~~Ressource = NOM + initiale du prénom~~ | **supprimée** (2026-10-06, DECISIONS n° 8) |
 
 ## 9. Hors périmètre
 

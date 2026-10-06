@@ -129,7 +129,7 @@ export default function EntriesFilters(p: Props) {
     <Group gap={8} wrap={false} className="realise-bottom">
       <SearchField
         aria-label="Recherche plein-texte"
-        placeholder={p.searchDescription ? 'TG, libellé, description…' : 'TG ou libellé TG…'}
+        placeholder={p.searchDescription ? 'TG, libellé, nom, description…' : 'TG, libellé TG, nom…'}
         value={p.q}
         onChange={p.onQChange}
       />

@@ -16,6 +16,7 @@ import (
 	"github.com/xuri/excelize/v2"
 
 	"njord/internal/domain"
+	"njord/internal/names"
 	"njord/internal/xlsxutil"
 )
 
@@ -387,6 +388,18 @@ func Parse(data []byte) (*ParseResult, error) {
 			} else {
 				e.TotalEur = math.Round(v*1000*100) / 100 // k€ → €, au centime
 			}
+		}
+
+		// Identité (DECISIONS n° 8) : « NOM Prénom » sans la civilité finale ;
+		// "" pour un fournisseur ou un libellé illisible (pas de warn). Au
+		// format démo, seul NOM RESSOURCE désigne une personne (la colonne
+		// FOURNISSEUR, repli d'EMPLOYE/FOURNISSEUR, est une société).
+		person := e.EmployeFournisseur
+		if format != domain.FormatSpec {
+			person = e.NomRessource
+		}
+		if np, ok := names.ParseRealise(person); ok {
+			e.NomPrenom = np.String()
 		}
 
 		// Champs communs : quantité, dates.

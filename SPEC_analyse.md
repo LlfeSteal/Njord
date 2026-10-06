@@ -116,23 +116,21 @@ Le tableau correspond à une charge annuelle de référence de 550 h. Pour une a
 
 ## 5. Corrélation identité PDC ↔ Réalisé
 
-Les deux sources n'exposent pas la même clé ressource.
+Les deux sources n'exposent pas la même clé ressource ; seul le NOM + Prénom est commun (§5.1).
 
 | Côté PDC | Côté Réalisé | Exemple |
 |---|---|---|
 | `Ressource` court `R_###` ou long `RES_ext_##` | `MATRICULE` `A#####` | non appairables directement |
 | `Libellé` `<Prénom NOM>` \| `<Squad> / <Prénom NOM>` | `EMPLOYE/FOURNISSEUR` `<NOM Prénom M.>` | format différent |
 
-### 5.1 Stratégies ordonnées
+### 5.1 Identité NOM + Prénom (seule stratégie)
 
-Appliquées séquentiellement, première qui matche gagne :
+Depuis le 2026-10-06 (DECISIONS n° 8), une ressource est identifiée **uniquement par NOM + Prénom** ; codes ressource, matricules et alias ne servent plus.
 
-1. **Correspondance directe par matricule** : si `PDC.Ressource` a déjà été résolue dans le référentiel `Personne` avec un matricule côté Réalisé → jointure immédiate.
-2. **Alias référentiel** : lookup dans `Personne.alias` (populé par le module Plan, enrichissable manuellement depuis l'écran de détail).
-3. **Rapprochement nominal normalisé** : `normalize(PDC.Libellé) == normalize(Réalisé.EMPLOYE/FOURNISSEUR)` avec normalisation : uppercase, ponctuation retirée, tokens triés alphabétiquement. **Correspondance exacte uniquement**, pas d'approximation éditoriale (trop de faux positifs sur patronymes courants).
-4. **Sinon** → écriture Réalisé non appariée → **🟠 Hors plan**.
-
-Les correspondances obtenues par stratégie 3 sont marquées `confidence = fuzzy` et affichées avec un astérisque dans l'UI ; l'utilisateur peut les confirmer pour alimenter `Personne.alias`.
+1. Côté PDC : NOM Prénom extrait du `Libellé` (SPEC Plan §8 règle 9). Ligne sans NOM Prénom → non nominative, jamais appariée.
+2. Côté Réalisé : `EMPLOYE/FOURNISSEUR` `<NOM Prénom Civilité>` dont on **retire la civilité finale** (M., Mr., Mme., Mlle.…).
+3. Clé = `NOM|PRÉNOM` en majuscules, sans accents ni ponctuation, **ordre conservé**. **Égalité stricte** → `confidence = nom`.
+4. **Sinon** → écriture Réalisé non appariée → **🟠 Hors plan** (`confidence = none`).
 
 ### 5.2 Clé de jointure
 
@@ -144,7 +142,7 @@ Clé fonctionnelle du croisement :
 
 où :
 - `clé_CT` : code CT complet à 9 caractères (commun PDC `Tâche ou sous-projet` ↔ Réalisé `TG`) ;
-- `clé_ressource` : issue de la stratégie §5.1 ;
+- `clé_ressource` : clé NOM + Prénom (§5.1) ;
 - `iso_week` : semaine ISO issue du dépliage §4 côté plan, de `DATE DEPENSE` côté réalisé.
 
 ## 6. Règles d'écart et flags
@@ -244,7 +242,6 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 - sélecteur de période d'analyse (par défaut : intersection des périodes couvertes) ;
 - badges couleur (⚫ 🟠 🔴 🟢 🟣) dans le tableau et les KPI ;
 - drill-down : clic sur une ligne CT → filtres pré-remplis vers le tableau d'écarts ;
-- bouton "Confirmer cet alias" sur chaque correspondance fuzzy ;
 - bouton "Exporter CSV conformité" et "Exporter CSV réalisé enrichi".
 
 ## 9. Cas particuliers
@@ -256,7 +253,7 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 | Ressource `[inactif]` présente au plan | conservée, flag `inactive` affiché, exclue du calcul du taux de conformité par défaut (toggle inclus) |
 | Semaine verrouillée (S51/S52) | `heures_prévues = 0`, écritures réalisées imputées sur ces semaines → **🟠 Hors plan** |
 | Écritures réalisées en montant négatif (avoir) | conservées, contribuent négativement au Σ € et au calcul % sécurité |
-| Écriture MO sans matricule ni nom résolvable | 🟠 Hors plan + `warn` global |
+| Écriture MO sans NOM Prénom identifiable | 🟠 Hors plan + `warn` global |
 | Ressource avec 100 % d'absence sur une seule semaine mais réelle ailleurs | ne déclenche pas ⚫ (règle : ⚫ = `Σ heures_réelles = 0` sur **toute** la période analysée) |
 
 ## 10. Contrôles qualité métier
@@ -267,7 +264,7 @@ Appliqués **au moment du rendu**, remontés dans une bannière dédiée.
 |---|---|---|
 | 1 | `Σ TOTAL EN €` par TG vs agrégat attendu métier | warn si écart > seuil absolu |
 | 2 | lignes MO avec `QUANTITE > 200 h` sur une semaine | warn (imputations physiquement impossibles) |
-| 3 | correspondances fuzzy > seuil sur la période | warn global invitant à enrichir `Personne.alias` |
+| 3 | ~~correspondances fuzzy > seuil~~ | **supprimée** (2026-10-06) : plus de correspondance approximative |
 | 4 | lignes Réalisé sans `TG` | exclues de l'analyse, comptées dans le warn |
 | 5 | lignes Réalisé dont `PERIODE COMPTABLE < DATE DEPENSE − 7 j` | warn |
 

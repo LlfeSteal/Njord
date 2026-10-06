@@ -91,7 +91,7 @@ export default function RealiseDetail({ versionId: forced }: { versionId?: strin
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [visible, setVisible] = useLocalStorage<string[]>({
-    key: 'njord.realise.columns.v2',
+    key: 'njord.realise.columns.v3',
     defaultValue: DEFAULT_VISIBLE,
   });
   const [columnsOpen, setColumnsOpen] = useState(false);

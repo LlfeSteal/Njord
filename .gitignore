@@ -7,3 +7,4 @@ frontend/dist/
 backend/njord
 backend/data/
 .DS_Store
+test_data_demo

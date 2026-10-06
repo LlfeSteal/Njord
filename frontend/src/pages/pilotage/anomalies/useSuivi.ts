@@ -1,11 +1,11 @@
-// Traitement d'une anomalie : traitée, ignorée, rouverte, ou alias confirmé puis traitée.
+// Traitement d'une anomalie : traitée, ignorée ou rouverte.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '../../../ui';
 import { analyseApi } from '../../../api/client';
 import type { Anomalie, AnomalieStatut, AnomalieSuivi } from '../../../api/types';
 import { loadOperateur } from '../../../components/lifecycle/lifecycleUtils';
 
-export type SuiviAction = 'traitee' | 'ignoree' | 'rouvrir' | 'alias';
+export type SuiviAction = 'traitee' | 'ignoree' | 'rouvrir';
 
 export interface SuiviVars {
   a: Anomalie;
@@ -27,7 +27,6 @@ const TOAST: Record<SuiviAction, string> = {
   traitee: 'Anomalie traitée',
   ignoree: 'Anomalie ignorée',
   rouvrir: 'Anomalie rouverte',
-  alias: 'Alias confirmé, anomalie traitée',
 };
 
 export function useSuivi(onApplied: (vars: SuiviVars, override: SuiviOverride) => void) {
@@ -37,10 +36,6 @@ export function useSuivi(onApplied: (vars: SuiviVars, override: SuiviOverride) =
       if (action === 'rouvrir') {
         await analyseApi.deleteSuivi(a.key);
         return null;
-      }
-      if (action === 'alias') {
-        if (!a.personne_id || !a.nom_realise) throw new Error('Personne ou nom réalisé manquant.');
-        await analyseApi.confirmAlias(a.personne_id, a.nom_realise);
       }
       return analyseApi.putSuivi({
         key: a.key,
@@ -54,12 +49,11 @@ export function useSuivi(onApplied: (vars: SuiviVars, override: SuiviOverride) =
       toast({ tone: 'success', title: TOAST[vars.action], message: vars.a.titre });
       onApplied(vars, { statut: suivi ? suivi.statut : 'a_traiter', suivi: suivi ?? undefined, at: Date.now() });
       qc.invalidateQueries({ queryKey: ['analyse'] });
-      if (vars.action === 'alias') qc.invalidateQueries({ queryKey: ['personnes'] });
     },
-    onError: (err, vars) =>
+    onError: (err) =>
       toast({
         tone: 'error',
-        title: vars.action === 'alias' ? "Confirmation de l'alias impossible" : 'Action impossible',
+        title: 'Action impossible',
         message: err instanceof Error ? err.message : String(err),
       }),
   });

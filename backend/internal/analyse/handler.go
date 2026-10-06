@@ -2,7 +2,6 @@ package analyse
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -27,7 +26,6 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/analyse", h.analyse)
 	g.GET("/analyse/ecarts.csv", h.ecartsCSV)
 	g.GET("/analyse/realise-enrichi.csv", h.realiseCSV)
-	g.POST("/analyse/alias/confirm", h.confirmAlias)
 	g.PUT("/analyse/anomalies/suivi", h.putSuivi)
 	g.DELETE("/analyse/anomalies/suivi", h.deleteSuivi)
 }
@@ -129,9 +127,9 @@ var FlagLabel = map[domain.Flag]string{
 	domain.FlagConforme:       "Conforme",
 }
 
-// FilterEcarts applies the CSV filters (ct, ressource, flag, squad_id).
-// ressource matches the PDC code or the label, case-insensitively.
-// FilterEcarts applies the CSV filters; flags is a set (empty = all flags).
+// FilterEcarts applies the CSV filters (ct, ressource, flag, squad_id); flags is
+// a set (empty = all flags). ressource matches the « NOM Prénom » or the label,
+// case-insensitively.
 func FilterEcarts(rows []domain.EcartRow, ct, ressource string, flags map[domain.Flag]bool, squadID string) []domain.EcartRow {
 	out := []domain.EcartRow{}
 	for _, r := range rows {
@@ -238,7 +236,7 @@ func (h *Handler) realiseCSV(c *gin.Context) {
 var realiseHeader = []string{
 	"ENTITE", "ACTIVITE", "SOUS-ACTIVITE", "TRIGRAMME", "TG", "TG - LIBELLE", "WP", "WP LIBELLE",
 	"DESCRIPTION DEPENSES", "CATEGORIE", "TYPE", "CATEGORIE DEPENSES POUR FNP AUTOMATIQUES",
-	"EMPLOYE/FOURNISSEUR", "MATRICULE", "FPC", "CEA", "QUANTITE", "TOTAL EN €", "DATE DEPENSE",
+	"EMPLOYE/FOURNISSEUR", "NOM PRENOM", "MATRICULE", "FPC", "CEA", "QUANTITE", "TOTAL EN €", "DATE DEPENSE",
 	"PERIODE COMPTABLE", "COMPTE COMPTABLE", "N° FACTURE", "n° COMMANDE", "n° LIGNE", "LOT DE PROGRAMME IFRS15",
 	"NOM RESSOURCE", "FOURNISSEUR", "CODE ARTICLE", "MOIS COMPTABLE", "LIGNE EXCEL", "STATUT PARSING", "MOTIF",
 }
@@ -257,35 +255,8 @@ func realiseRecord(e *domain.RealiseEntry, mask bool) []string {
 	return []string{
 		e.Entite, e.Activite, e.SousActivite, e.Trigramme, e.TG, e.TGLibelle, e.WP, e.WPLibelle,
 		sens(e.DescriptionDepenses), e.Categorie, e.Type, e.CategorieFNP,
-		sens(e.EmployeFournisseur), sens(e.Matricule), e.FPC, e.CEA, httpx.FormatFloat(e.Quantite), httpx.FormatFloat(e.TotalEur),
+		sens(e.EmployeFournisseur), sens(e.NomPrenom), sens(e.Matricule), e.FPC, e.CEA, httpx.FormatFloat(e.Quantite), httpx.FormatFloat(e.TotalEur),
 		e.DateDepense, e.PeriodeComptable, e.CompteComptable, sens(e.NumFacture), sens(e.NumCommande), numLigne, e.LotIFRS15,
 		sens(e.NomRessource), sens(e.Fournisseur), e.CodeArticle, e.MoisComptable, itoa(e.RowNum), string(e.StatutParsing), e.MotifRejet,
 	}
-}
-
-type confirmBody struct {
-	PersonneID string `json:"personne_id"`
-	Alias      string `json:"alias"`
-	Operateur  string `json:"operateur"`
-}
-
-func (h *Handler) confirmAlias(c *gin.Context) {
-	var b confirmBody
-	if err := c.ShouldBindJSON(&b); err != nil {
-		httpx.Error(c, httpx.BadRequest("corps JSON invalide"))
-		return
-	}
-	if strings.TrimSpace(b.PersonneID) == "" || strings.TrimSpace(b.Alias) == "" {
-		httpx.Error(c, httpx.BadRequest("personne_id et alias sont requis"))
-		return
-	}
-	p, err := h.repo.ConfirmAlias(c, strings.TrimSpace(b.PersonneID), b.Alias, httpx.Operateur(c, b.Operateur))
-	if errors.Is(err, errBadAlias) {
-		err = httpx.BadRequest("alias vide après normalisation")
-	}
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, p)
 }

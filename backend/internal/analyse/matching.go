@@ -8,171 +8,119 @@ import (
 	"njord/internal/names"
 )
 
-// Resource keys (identity of a « ressource » in the join):
+// Resource keys (identity of a « ressource » in the join, DECISIONS n° 8 :
+// NOM + Prénom uniquement, égalité stricte de names.Key) :
 //
-//	"P:<personne_id>"  personne du référentiel
-//	"R:<code>"         ligne de plan sans personne_id (code ressource PDC)
-//	"L:<libellé>"      ligne de plan sans personne ni code
-//	"N:<nom normalisé>" écriture réalisée non appariée
-//	"M:<matricule>"    écriture non appariée sans nom, avec matricule
-//	"X:"               écriture MO sans nom ni matricule
-func personKey(id string) string { return "P:" + id }
-
-func planLineKey(l *domain.PlanLine) string {
-	switch {
-	case l.PersonneID != nil && *l.PersonneID != "":
-		return personKey(*l.PersonneID)
-	case strings.TrimSpace(l.Ressource) != "":
-		return "R:" + strings.TrimSpace(l.Ressource)
-	default:
-		return "L:" + strings.TrimSpace(l.Libelle)
-	}
-}
-
-// identity is the result of the §5.1 resolution of a réalisé entry.
-type identity struct {
-	Key        string
-	PersonneID *string
-	Confidence domain.Confidence
-}
-
-func (id identity) matched() bool { return id.Confidence != domain.ConfNone }
-
-// matcher implements SPEC_analyse §5.1 as refined by DECISIONS « Correspondance ».
-type matcher struct {
-	byMatricule map[string]string   // matricule (canon) → key
-	strong      map[string][]string // alias manuel/confirmé normalisé → keys
-	weak        map[string][]string // alias import / nom personne / PersonKey(libellé) → keys
-	planned     map[string]bool     // keys present in the plan
-	cache       map[string]identity
-}
-
-func addKey(m map[string][]string, norm, key string) {
-	if norm == "" {
-		return
-	}
-	for _, k := range m[norm] {
-		if k == key {
-			return
-		}
-	}
-	m[norm] = append(m[norm], key)
-}
-
-func newMatcher(personnes []domain.Personne, lines []domain.PlanLine) *matcher {
-	m := &matcher{
-		byMatricule: map[string]string{},
-		strong:      map[string][]string{},
-		weak:        map[string][]string{},
-		planned:     map[string]bool{},
-		cache:       map[string]identity{},
-	}
-	for i := range lines {
-		m.planned[planLineKey(&lines[i])] = true
-	}
-	for _, p := range personnes {
-		k := personKey(p.ID)
-		for _, mat := range p.Matricules {
-			if c := canon(mat); c != "" {
-				m.byMatricule[c] = k
-			}
-		}
-		for _, a := range p.Alias {
-			norm := names.Normalize(a.Alias)
-			if norm == "" {
-				norm = a.AliasNormalise
-			}
-			switch a.Source {
-			case domain.AliasManuel, domain.AliasConfirme:
-				addKey(m.strong, norm, k)
-			default:
-				addKey(m.weak, norm, k)
-			}
-		}
-		addKey(m.weak, names.Normalize(p.DisplayName), k)
-		if p.NomNormalise != "" {
-			addKey(m.weak, names.Normalize(p.NomNormalise), k)
-		}
-	}
-	for i := range lines {
-		addKey(m.weak, names.PersonKey(lines[i].Libelle), planLineKey(&lines[i]))
-	}
-	return m
-}
-
-// pick returns the single candidate, preferring keys planned in the plan when
-// several persons share the same normalised name; "" if ambiguous.
-func (m *matcher) pick(keys []string) string {
-	if len(keys) == 1 {
-		return keys[0]
-	}
-	var planned []string
-	for _, k := range keys {
-		if m.planned[k] {
-			planned = append(planned, k)
-		}
-	}
-	if len(planned) == 1 {
-		return planned[0]
+//	"N:<names.Key>"  ligne de plan nominative ou écriture au NOM Prénom lisible
+//	"L:<libellé>"    ligne de plan non nominative (jamais rapprochée du réalisé)
+//	"U:<nom brut>"   écriture MO dont le nom est illisible (hors plan)
+//	"X:"             écriture MO sans nom (hors plan)
+//
+// Seules les clés "N:" peuvent être communes au plan et au réalisé.
+func nameKey(nomPrenom string) string {
+	if k := names.KeyOf(nomPrenom); k != "" {
+		return "N:" + k
 	}
 	return ""
 }
 
-func identityOf(key string, conf domain.Confidence) identity {
-	id := identity{Key: key, Confidence: conf}
-	if strings.HasPrefix(key, "P:") {
-		pid := key[2:]
+// noLibelle labels a non-nominative plan line without libellé.
+const noLibelle = "(sans libellé)"
+
+// noName labels a réalisé MO entry without any name.
+const noName = "(sans nom)"
+
+func planLineKey(l *domain.PlanLine) string {
+	if k := nameKey(l.NomPrenom); k != "" {
+		return k
+	}
+	return "L:" + strings.TrimSpace(l.Libelle)
+}
+
+// planLineLabel is the « ressource » of a plan line: its « NOM Prénom », or its
+// libellé when the line is non nominative.
+func planLineLabel(l *domain.PlanLine) string {
+	if nameKey(l.NomPrenom) != "" {
+		return strings.TrimSpace(l.NomPrenom)
+	}
+	if lib := strings.TrimSpace(l.Libelle); lib != "" {
+		return lib
+	}
+	return noLibelle
+}
+
+// identity is the resolution of a réalisé MO entry.
+type identity struct {
+	Key        string
+	PersonneID *string // fiche personne de même clé, même hors plan
+	Confidence domain.Confidence
+}
+
+// matched: the entry is attached to the plan (ConfNom).
+func (id identity) matched() bool { return id.Confidence == domain.ConfNom }
+
+// matcher resolves réalisé entries against the plan by exact NOM + Prénom key.
+type matcher struct {
+	planned map[string]bool             // keys present in the plan
+	byKey   map[string]*domain.Personne // names.Key → personne
+}
+
+// personneKey: names.Key of a personne (nom_normalise, else recomputed from the display name).
+func personneKey(p *domain.Personne) string {
+	if k := strings.TrimSpace(p.NomNormalise); k != "" {
+		return k
+	}
+	return names.KeyOf(p.DisplayName)
+}
+
+func newMatcher(personnes []domain.Personne, lines []domain.PlanLine) *matcher {
+	m := &matcher{planned: map[string]bool{}, byKey: map[string]*domain.Personne{}}
+	for i := range lines {
+		m.planned[planLineKey(&lines[i])] = true
+	}
+	for i := range personnes {
+		if k := personneKey(&personnes[i]); k != "" {
+			if _, dup := m.byKey[k]; !dup {
+				m.byKey[k] = &personnes[i]
+			}
+		}
+	}
+	return m
+}
+
+// personne returns the personne of a "N:" resource key (nil otherwise).
+func (m *matcher) personne(key string) *domain.Personne {
+	if k, ok := strings.CutPrefix(key, "N:"); ok {
+		return m.byKey[k]
+	}
+	return nil
+}
+
+// resolve: the entry's NOM Prénom key is matched (ConfNom) iff it is present
+// in the plan; otherwise ConfNone (hors plan). PersonneID is set whenever a
+// personne record has the same key, even if not planned.
+func (m *matcher) resolve(nomPrenom, raw string) identity {
+	var id identity
+	switch k := nameKey(nomPrenom); {
+	case k != "":
+		id.Key = k
+	case strings.TrimSpace(raw) != "":
+		id.Key = "U:" + canon(raw)
+	default:
+		id.Key = "X:"
+	}
+	id.Confidence = domain.ConfNone
+	if m.planned[id.Key] && strings.HasPrefix(id.Key, "N:") {
+		id.Confidence = domain.ConfNom
+	}
+	if p := m.personne(id.Key); p != nil {
+		pid := p.ID
 		id.PersonneID = &pid
 	}
 	return id
 }
 
-// resolve applies the ordered strategies: matricule → alias (manuel/confirmé)
-// → fuzzy (alias import, nom normalisé, libellé du plan) → none.
-func (m *matcher) resolve(matricule, nom string) identity {
-	mat := canon(matricule)
-	norm := names.Normalize(nom)
-	ck := mat + "\x00" + norm
-	if id, ok := m.cache[ck]; ok {
-		return id
-	}
-	var id identity
-	if k, ok := m.byMatricule[mat]; ok && mat != "" {
-		id = identityOf(k, domain.ConfMatricule)
-	} else if k := m.pick(m.strong[norm]); norm != "" && k != "" {
-		id = identityOf(k, domain.ConfAlias)
-	} else if k := m.pick(m.weak[norm]); norm != "" && k != "" {
-		id = identityOf(k, domain.ConfFuzzy)
-	} else {
-		switch {
-		case norm != "":
-			id = identity{Key: "N:" + norm, Confidence: domain.ConfNone}
-		case mat != "":
-			id = identity{Key: "M:" + mat, Confidence: domain.ConfNone}
-		default:
-			id = identity{Key: "X:", Confidence: domain.ConfNone}
-		}
-	}
-	m.cache[ck] = id
-	return id
-}
-
-// confRank: lower = weaker evidence (used to keep the weakest confidence of a tuple).
-var confRank = map[domain.Confidence]int{
-	domain.ConfNone: 0, domain.ConfFuzzy: 1, domain.ConfAlias: 2, domain.ConfMatricule: 3, domain.ConfPlan: 4,
-}
-
-func weakest(a, b domain.Confidence) domain.Confidence {
-	if a == "" {
-		return b
-	}
-	if confRank[b] < confRank[a] {
-		return b
-	}
-	return a
-}
-
-// entryName returns the réalisé name used for matching.
+// entryName returns the raw réalisé name (EMPLOYE/FOURNISSEUR, else NOM RESSOURCE).
 func entryName(e *domain.RealiseEntry) string {
 	if n := strings.TrimSpace(e.EmployeFournisseur); n != "" {
 		return n
@@ -180,14 +128,15 @@ func entryName(e *domain.RealiseEntry) string {
 	return strings.TrimSpace(e.NomRessource)
 }
 
+// sortCorrespondances: hors plan (none) first, then by NOM Prénom and raw name.
 func sortCorrespondances(cs []domain.Correspondance) {
 	sort.SliceStable(cs, func(i, j int) bool {
 		a, b := cs[i], cs[j]
-		if confRank[a.Confidence] != confRank[b.Confidence] {
-			return confRank[a.Confidence] < confRank[b.Confidence]
+		if an, bn := a.Confidence == domain.ConfNone, b.Confidence == domain.ConfNone; an != bn {
+			return an
 		}
-		if a.NomNormalise != b.NomNormalise {
-			return a.NomNormalise < b.NomNormalise
+		if a.NomPrenom != b.NomPrenom {
+			return a.NomPrenom < b.NomPrenom
 		}
 		return a.NomRealise < b.NomRealise
 	})

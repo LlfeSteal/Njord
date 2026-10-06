@@ -89,9 +89,9 @@ type ImportReport struct {
 	// Réalisé uniquement.
 	MontantTotalEur *float64 `json:"montant_total_eur,omitempty"`
 	// Détail (tronqué à 500 entrées) et comptage par motif.
-	Issues       []ParseIssue   `json:"issues"`
-	MotifsCount  map[string]int `json:"motifs_count"`
-	ActiveVersion *Version      `json:"active_version"` // version active existante (null sinon)
+	Issues        []ParseIssue   `json:"issues"`
+	MotifsCount   map[string]int `json:"motifs_count"`
+	ActiveVersion *Version       `json:"active_version"` // version active existante (null sinon)
 }
 
 // ImportResult is returned by POST /{kind}/imports.
@@ -110,9 +110,9 @@ type PlanLine struct {
 	Layout    string `json:"layout"` // "A" | "B" | "" (inconnu)
 	// Les 12 colonnes de la SPEC.
 	CT              string  `json:"ct"`
-	Ressource       string  `json:"ressource"` // sans le préfixe [inactif]
+	Ressource       string  `json:"ressource"` // code brut du fichier sans le préfixe [inactif] ; n'identifie personne
 	Libelle         string  `json:"libelle"`
-	NomPrenom       string  `json:"nom_prenom"` // « NOM Prénom » extrait du libellé ("" si non identifiable)
+	NomPrenom       string  `json:"nom_prenom"` // identité : « NOM Prénom » extrait du libellé ("" = ligne non nominative)
 	TypeAffectation string  `json:"type_affectation"`
 	LigneCout       string  `json:"ligne_cout"`
 	ChargeTotale    float64 `json:"charge_totale"`
@@ -130,7 +130,7 @@ type PlanLine struct {
 	// Enrichissement import.
 	StatutParsing ParsingStatut `json:"statut_parsing"`
 	MotifRejet    string        `json:"motif_rejet"`
-	RessourceKind string        `json:"ressource_kind"` // internal | external | unknown
+	RessourceKind string        `json:"-"` // colonne héritée, plus exposée
 	Inactive      bool          `json:"inactive"`
 	PersonneID    *string       `json:"personne_id"`
 	SquadID       *string       `json:"squad_id"`
@@ -169,6 +169,7 @@ type RealiseEntry struct {
 	Type                string  `json:"type"`
 	CategorieFNP        string  `json:"categorie_fnp"`
 	EmployeFournisseur  string  `json:"employe_fournisseur"` // sensible
+	NomPrenom           string  `json:"nom_prenom"`          // sensible ; « NOM Prénom » d'EMPLOYE/FOURNISSEUR sans civilité ("" si non identifiable)
 	Matricule           string  `json:"matricule"`           // sensible
 	FPC                 string  `json:"fpc"`
 	CEA                 string  `json:"cea"`
@@ -209,30 +210,14 @@ type Facets map[string][]string
 // ---------------------------------------------------------------------------
 // Référentiels
 
-type AliasSource string
-
-const (
-	AliasImport   AliasSource = "import"   // créé automatiquement à l'import du plan
-	AliasManuel   AliasSource = "manuel"   // saisi par l'utilisateur
-	AliasConfirme AliasSource = "confirme" // correspondance fuzzy confirmée depuis l'analyse
-)
-
-type PersonneAlias struct {
-	ID             int64       `json:"id"`
-	Alias          string      `json:"alias"`
-	AliasNormalise string      `json:"alias_normalise"`
-	Source         AliasSource `json:"source"`
-}
-
+// Personne : identité humaine, identifiée uniquement par NOM + Prénom (DECISIONS n° 8).
 type Personne struct {
-	ID           string          `json:"id"`
-	DisplayName  string          `json:"display_name"`
-	NomNormalise string          `json:"nom_normalise"`
-	Statut       string          `json:"statut"` // brouillon | validee
-	SquadID      *string         `json:"squad_id"`
-	Matricules   []string        `json:"matricules"`
-	Alias        []PersonneAlias `json:"alias"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID           string    `json:"id"`
+	DisplayName  string    `json:"display_name"`  // « NOM Prénom »
+	NomNormalise string    `json:"nom_normalise"` // names.Key, ex. "DE LA TOUR|ANTOINE" (unique)
+	Statut       string    `json:"statut"`        // brouillon | validee
+	SquadID      *string   `json:"squad_id"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 type Squad struct {
@@ -254,7 +239,6 @@ type Settings struct {
 	SeuilNonSecurisePct   float64  `json:"seuil_non_securise_pct"`   // 15
 	PurgeDelaiJours       int      `json:"purge_delai_jours"`        // 30
 	SeuilQuantiteSemaineH float64  `json:"seuil_quantite_semaine_h"` // 200
-	SeuilFuzzyCount       int      `json:"seuil_fuzzy_count"`        // 10
 	SeuilEcartTGEur       float64  `json:"seuil_ecart_tg_eur"`       // 50 000
 	DiviseurHorsPlanH     float64  `json:"diviseur_hors_plan_h"`     // 12
 	SemainesVerrouillees  []int    `json:"semaines_verrouillees"`    // [51, 52] (numéros ISO, toute année)
@@ -303,11 +287,9 @@ const (
 type Confidence string
 
 const (
-	ConfMatricule Confidence = "matricule"
-	ConfAlias     Confidence = "alias"
-	ConfFuzzy     Confidence = "fuzzy"
-	ConfNone      Confidence = "none" // non apparié → hors plan
-	ConfPlan      Confidence = "plan" // tuple issu du plan seul (aucun réel)
+	ConfNom  Confidence = "nom"  // même NOM + Prénom dans le plan et le réalisé
+	ConfNone Confidence = "none" // non apparié → hors plan
+	ConfPlan Confidence = "plan" // tuple issu du plan seul (aucun réel)
 )
 
 type WeekInfo struct {
@@ -325,7 +307,7 @@ type AnalyseContext struct {
 	DefaultRealiseID *string    `json:"default_realise_id"`
 	DefaultWeekFrom  string     `json:"default_week_from"`
 	DefaultWeekTo    string     `json:"default_week_to"`
-	Weeks            []WeekInfo `json:"weeks"` // union des semaines couvertes par les versions par défaut
+	Weeks            []WeekInfo `json:"weeks"`   // union des semaines couvertes par les versions par défaut
 	Message          string     `json:"message"` // ex. "Aucun plan actif : importez ou réactivez un plan"
 }
 
@@ -343,8 +325,8 @@ type AnalyseMeta struct {
 // EcartRow is one tuple (CT × ressource × semaine) of the écarts table (§7.1).
 type EcartRow struct {
 	PersonneID     *string    `json:"personne_id"`     // null si hors plan non résolu
-	Ressource      string     `json:"ressource"`       // code ressource PDC, ou nom réalisé si hors plan
-	RessourceLabel string     `json:"ressource_label"` // nom affichable
+	Ressource      string     `json:"ressource"`       // « NOM Prénom » ; libellé d'une ligne non nominative ; nom réalisé brut si illisible
+	RessourceLabel string     `json:"ressource_label"` // nom affichable (= nom de la fiche personne si elle existe)
 	CT             string     `json:"ct"`
 	CTLibelle      string     `json:"ct_libelle"`
 	Semaine        string     `json:"semaine"` // "2026-W37"
@@ -432,7 +414,7 @@ type Alertes struct {
 }
 
 type QualiteWarning struct {
-	Code    string   `json:"code"`  // ex. "tg_ecart_budget", "mo_quantite_semaine", "fuzzy", "sans_tg", "cloture", "plan_repartition", "mo_sans_nom", "plan_warn", "realise_warn"
+	Code    string   `json:"code"`  // ex. "tg_ecart_budget", "mo_quantite_semaine", "sans_tg", "cloture", "plan_repartition", "mo_sans_nom", "plan_warn", "realise_warn"
 	Regle   int      `json:"regle"` // n° §10 de la SPEC analyse, 0 si autre
 	Message string   `json:"message"`
 	Count   int      `json:"count"`
@@ -440,14 +422,13 @@ type QualiteWarning struct {
 }
 
 type Correspondance struct {
-	NomRealise   string     `json:"nom_realise"`
-	NomNormalise string     `json:"nom_normalise"`
-	PersonneID   *string    `json:"personne_id"`
-	PersonneNom  string     `json:"personne_nom"`
-	Ressource    string     `json:"ressource"` // code ressource PDC
-	Confidence   Confidence `json:"confidence"`
-	NbEcritures  int        `json:"nb_ecritures"`
-	Heures       float64    `json:"heures"`
+	NomRealise  string     `json:"nom_realise"` // EMPLOYE/FOURNISSEUR brut
+	NomPrenom   string     `json:"nom_prenom"`  // « NOM Prénom » sans civilité ("" si illisible)
+	PersonneID  *string    `json:"personne_id"`
+	PersonneNom string     `json:"personne_nom"`
+	Confidence  Confidence `json:"confidence"` // nom | none
+	NbEcritures int        `json:"nb_ecritures"`
+	Heures      float64    `json:"heures"`
 }
 
 // ---------------------------------------------------------------------------
@@ -507,12 +488,11 @@ type Previsions struct {
 type AnomalieCategorie string
 
 const (
-	AnomalieEcart          AnomalieCategorie = "ecart"          // écart d'imputation regroupé par ressource × CT × flag
-	AnomalieCTRisque       AnomalieCategorie = "ct_risque"      // Σ € non sécurisé > seuil
-	AnomalieDerive         AnomalieCategorie = "derive"         // dérive de provision
-	AnomalieQualite        AnomalieCategorie = "qualite"        // contrôle qualité §10
-	AnomalieCorrespondance AnomalieCategorie = "correspondance" // correspondance approximative à confirmer
-	AnomalieBudget         AnomalieCategorie = "budget"         // atterrissage prévu au-delà du budget
+	AnomalieEcart    AnomalieCategorie = "ecart"     // écart d'imputation regroupé par ressource × CT × flag
+	AnomalieCTRisque AnomalieCategorie = "ct_risque" // Σ € non sécurisé > seuil
+	AnomalieDerive   AnomalieCategorie = "derive"    // dérive de provision
+	AnomalieQualite  AnomalieCategorie = "qualite"   // contrôle qualité §10
+	AnomalieBudget   AnomalieCategorie = "budget"    // atterrissage prévu au-delà du budget
 )
 
 type AnomalieStatut string
@@ -524,7 +504,7 @@ const (
 )
 
 type Anomalie struct {
-	// Key : identifiant stable entre deux analyses (sans « / »), ex. "ecart|Y99F90001|DURANDC|sous_imputation".
+	// Key : identifiant stable entre deux analyses (sans « / »), ex. "ecart|Y99F90001|DURAND Claire|sous_imputation".
 	Key       string            `json:"key"`
 	Categorie AnomalieCategorie `json:"categorie"`
 	Gravite   int               `json:"gravite"` // 3 haute · 2 moyenne · 1 basse
@@ -533,15 +513,12 @@ type Anomalie struct {
 	Flag      *Flag             `json:"flag,omitempty"`
 	CT        string            `json:"ct,omitempty"`
 	CTLibelle string            `json:"ct_libelle,omitempty"`
-	Ressource string            `json:"ressource,omitempty"` // code ressource ou nom réalisé
-	// Correspondance : nom réalisé et personne proposée (action « Confirmer l'alias »).
-	NomRealise string   `json:"nom_realise,omitempty"`
-	PersonneID *string  `json:"personne_id,omitempty"`
-	Montant    *float64 `json:"montant,omitempty"` // € concernés
-	Heures     *float64 `json:"heures,omitempty"`  // heures concernées (écart signé pour un écart)
-	Semaines   []string `json:"semaines,omitempty"`
-	Details    []string `json:"details,omitempty"` // au plus 50 lignes
-	// Lien : route front vers les données concernées, ex. "/ecarts?ct=Y99F90001&ressource=DURANDC".
+	Ressource string            `json:"ressource,omitempty"` // « NOM Prénom » (cf. EcartRow.Ressource)
+	Montant   *float64          `json:"montant,omitempty"`   // € concernés
+	Heures    *float64          `json:"heures,omitempty"`    // heures concernées (écart signé pour un écart)
+	Semaines  []string          `json:"semaines,omitempty"`
+	Details   []string          `json:"details,omitempty"` // au plus 50 lignes
+	// Lien : route front vers les données concernées, ex. "/ecarts?ct=Y99F90001&ressource=DURAND+Claire".
 	Lien string `json:"lien"`
 	// Fingerprint : empreinte des chiffres (arrondis) ; un traitement dont l'empreinte diffère redevient « à traiter ».
 	Fingerprint string         `json:"fingerprint"`

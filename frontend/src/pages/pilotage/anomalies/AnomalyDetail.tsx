@@ -1,6 +1,6 @@
 // Détail d'une anomalie (panneau de lecture façon Mail) et actions de traitement.
 import { Button, Disclosure, Group, InspectorSection, KeyValue, Link, Stack, StatusGlyph, Text, Textarea, type KeyValueItem } from '../../../ui';
-import { IconCheck, IconUndo, IconUserPlus } from '../../../ui/Icons';
+import { IconCheck, IconUndo } from '../../../ui/Icons';
 import type { Anomalie } from '../../../api/types';
 import { fmtDateTime, fmtEur } from '../../../lib/format';
 import { AnomalyGlyph } from './AnomalyList';
@@ -28,8 +28,7 @@ export function AnomalyBody({ a }: { a: Anomalie }) {
   const items: KeyValueItem[] = [];
   if (a.ct) items.push({ label: 'CT', value: a.ct, mono: true });
   if (a.ct_libelle) items.push({ label: 'Libellé CT', value: a.ct_libelle });
-  if (a.categorie === 'correspondance' && a.nom_realise) items.push({ label: 'Nom au réalisé', value: a.nom_realise });
-  else if (a.ressource) items.push({ label: 'Ressource', value: a.ressource, mono: true });
+  if (a.ressource) items.push({ label: 'Ressource', value: a.ressource });
   const heures = fmtAnomalieHeures(a);
   if (heures) items.push({ label: a.categorie === 'ecart' ? 'Écart' : 'Heures', value: heures, numeric: true });
   if (a.montant != null) items.push({ label: 'Montant', value: fmtEur(a.montant), numeric: true });
@@ -99,7 +98,6 @@ export function AnomalyActions({ a, comment, onComment, onAction, pending }: Act
         </Button>
       </Group>
     );
-  const alias = a.categorie === 'correspondance' && !!a.personne_id && !!a.nom_realise;
   return (
     <Stack gap={8}>
       <Textarea
@@ -121,16 +119,6 @@ export function AnomalyActions({ a, comment, onComment, onAction, pending }: Act
         >
           Ignorer
         </Button>
-        {alias && (
-          <Button
-            icon={<IconUserPlus size={15} />}
-            loading={pending === 'alias'}
-            disabled={busy}
-            onClick={() => onAction('alias')}
-          >
-            Confirmer l'alias
-          </Button>
-        )}
         <Button
           variant="primary"
           icon={<IconCheck size={15} />}

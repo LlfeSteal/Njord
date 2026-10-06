@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -30,10 +28,6 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/personnes", h.listPersonnes)
 	g.GET("/personnes/:id", h.getPersonne)
 	g.PATCH("/personnes/:id", h.patchPersonne)
-	g.POST("/personnes/:id/alias", h.addPersonneAlias)
-	g.DELETE("/personnes/:id/alias/:aliasId", h.deletePersonneAlias)
-	g.POST("/personnes/:id/matricules", h.addMatricule)
-	g.POST("/personnes/:id/merge", h.merge)
 	g.GET("/squads", h.listSquads)
 	g.POST("/squads", h.createSquad)
 	g.GET("/squads/:id", h.getSquad)
@@ -141,20 +135,14 @@ func (h *Handler) patchPersonne(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	// DECISIONS n° 8 : NOM + Prénom est l'identité de la personne, il ne se modifie pas.
+	if _, ok := m["display_name"]; ok {
+		httpx.Error(c, httpx.BadRequest("le nom est l'identité de la personne : non modifiable"))
+		return
+	}
 	id := c.Param("id")
 	h.personneTx(c, id, func(ctx context.Context, tx *sql.Tx) error {
 		changed := []string{}
-		if v, ok, err := str(m, "display_name"); err != nil {
-			return err
-		} else if ok {
-			if v == "" {
-				return httpx.BadRequest("le nom affiché ne peut pas être vide")
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE personnes SET display_name = ?, nom_normalise = ? WHERE id = ?`, v, names.Normalize(v), id); err != nil {
-				return err
-			}
-			changed = append(changed, "display_name")
-		}
 		if v, ok, err := str(m, "statut"); err != nil {
 			return err
 		} else if ok {
@@ -189,165 +177,6 @@ func (h *Handler) patchPersonne(c *gin.Context) {
 			return nil
 		}
 		return h.st.Audit(ctx, tx, operateur(c, m), "update", "personne", id, "champs : "+strings.Join(changed, ", "))
-	})
-}
-
-func (h *Handler) addPersonneAlias(c *gin.Context) {
-	m, err := bind(c)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	alias, _, err := str(m, "alias")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	norm := names.Normalize(alias)
-	if norm == "" {
-		httpx.Error(c, httpx.BadRequest("alias vide"))
-		return
-	}
-	id := c.Param("id")
-	h.personneTx(c, id, func(ctx context.Context, tx *sql.Tx) error {
-		other, err := exists(ctx, tx, `SELECT 1 FROM personne_alias WHERE alias_normalise = ? AND personne_id <> ? AND source IN ('manuel','confirme')`, norm, id)
-		if err != nil {
-			return err
-		}
-		if other {
-			return store.Precondition("cet alias est déjà attribué à une autre personne")
-		}
-		var aid int64
-		var src string
-		err = tx.QueryRowContext(ctx, `SELECT id, source FROM personne_alias WHERE personne_id = ? AND alias_normalise = ?`, id, norm).Scan(&aid, &src)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-			if _, err := tx.ExecContext(ctx, `INSERT INTO personne_alias(personne_id, alias, alias_normalise, source, created_at) VALUES (?,?,?,'manuel',?)`,
-				id, alias, norm, store.FormatTime(h.st.Now())); err != nil {
-				return err
-			}
-		case err != nil:
-			return err
-		case src == "import":
-			if _, err := tx.ExecContext(ctx, `UPDATE personne_alias SET source = 'manuel' WHERE id = ?`, aid); err != nil {
-				return err
-			}
-		default:
-			return nil // déjà présent
-		}
-		return h.st.Audit(ctx, tx, operateur(c, m), "alias_add", "personne", id, "source=manuel")
-	})
-}
-
-func (h *Handler) deletePersonneAlias(c *gin.Context) {
-	id := c.Param("id")
-	aliasID, err := strconv.ParseInt(c.Param("aliasId"), 10, 64)
-	if err != nil {
-		httpx.Error(c, httpx.BadRequest("identifiant d'alias invalide"))
-		return
-	}
-	h.personneTx(c, id, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM personne_alias WHERE id = ? AND personne_id = ?`, aliasID, id)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return store.ErrNotFound
-		}
-		return h.st.Audit(ctx, tx, httpx.Operateur(c, ""), "alias_delete", "personne", id, fmt.Sprintf("alias #%d", aliasID))
-	})
-}
-
-func (h *Handler) addMatricule(c *gin.Context) {
-	m, err := bind(c)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	mat, _, err := str(m, "matricule")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	if mat == "" {
-		httpx.Error(c, httpx.BadRequest("matricule vide"))
-		return
-	}
-	id := c.Param("id")
-	h.personneTx(c, id, func(ctx context.Context, tx *sql.Tx) error {
-		var owner string
-		err := tx.QueryRowContext(ctx, `SELECT personne_id FROM personne_matricules WHERE matricule = ?`, mat).Scan(&owner)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-		case err != nil:
-			return err
-		case owner == id:
-			return nil
-		default:
-			return store.Precondition("ce matricule est déjà rattaché à une autre personne")
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO personne_matricules(personne_id, matricule) VALUES (?,?)`, id, mat); err != nil {
-			return err
-		}
-		return h.st.Audit(ctx, tx, operateur(c, m), "matricule_add", "personne", id, "")
-	})
-}
-
-func (h *Handler) merge(c *gin.Context) {
-	m, err := bind(c)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	src := c.Param("id")
-	into, _, err := str(m, "into_id")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	if into == "" {
-		httpx.Error(c, httpx.BadRequest("into_id requis"))
-		return
-	}
-	if into == src {
-		httpx.Error(c, httpx.BadRequest("impossible de fusionner une personne avec elle-même"))
-		return
-	}
-	h.personneTx(c, into, func(ctx context.Context, tx *sql.Tx) error {
-		var display string
-		var squad sql.NullString
-		err := tx.QueryRowContext(ctx, `SELECT display_name, squad_id FROM personnes WHERE id = ?`, src).Scan(&display, &squad)
-		if errors.Is(err, sql.ErrNoRows) {
-			return store.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		now := store.FormatTime(h.st.Now())
-		stmts := []struct {
-			q    string
-			args []any
-		}{
-			{`UPDATE personne_matricules SET personne_id = ? WHERE personne_id = ?`, []any{into, src}},
-			{`INSERT OR IGNORE INTO personne_alias(personne_id, alias, alias_normalise, source, created_at)
-				SELECT ?, alias, alias_normalise, source, created_at FROM personne_alias WHERE personne_id = ? ORDER BY id`, []any{into, src}},
-			// Le nom de la fiche fusionnée devient un alias de la cible (sauf s'il est identique à son nom).
-			{`INSERT OR IGNORE INTO personne_alias(personne_id, alias, alias_normalise, source, created_at)
-				SELECT ?, ?, ?, 'manuel', ? WHERE ? <> '' AND ? <> (SELECT nom_normalise FROM personnes WHERE id = ?)`,
-				[]any{into, display, names.Normalize(display), now, names.Normalize(display), names.Normalize(display), into}},
-			{`UPDATE plan_lines SET personne_id = ? WHERE personne_id = ?`, []any{into, src}},
-			{`UPDATE personnes SET squad_id = ? WHERE id = ? AND squad_id IS NULL`, []any{squad, into}},
-			{`DELETE FROM personnes WHERE id = ?`, []any{src}},
-		}
-		for _, s := range stmts {
-			if _, err := tx.ExecContext(ctx, s.q, s.args...); err != nil {
-				return err
-			}
-		}
-		if err := h.st.Audit(ctx, tx, operateur(c, m), "merge", "personne", into, "fusion de la personne "+src); err != nil {
-			return err
-		}
-		return h.st.Audit(ctx, tx, operateur(c, m), "delete", "personne", src, "fusionnée dans "+into)
 	})
 }
 

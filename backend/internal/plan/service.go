@@ -121,10 +121,9 @@ func (s *Service) Commit(ctx context.Context, data []byte, filename, intitule, i
 		if err := insertLines(ctx, tx, versionID, res.Lines); err != nil {
 			return err
 		}
-		if len(en.newPersonnes)+len(en.newSquads)+en.nbAlias+en.nbMatricules > 0 {
+		if len(en.newPersonnes)+len(en.newSquads) > 0 {
 			return s.st.Audit(ctx, tx, v.Importeur, "referentiel_import", "plan_version", versionID,
-				fmt.Sprintf("personnes créées=%d squads créés=%d alias ajoutés=%d matricules rattachés=%d",
-					len(en.newPersonnes), len(en.newSquads), en.nbAlias, en.nbMatricules))
+				fmt.Sprintf("personnes créées=%d squads créés=%d", len(en.newPersonnes), len(en.newSquads)))
 		}
 		return nil
 	})
@@ -143,25 +142,20 @@ type enricher struct {
 	tx  *sql.Tx
 	now string
 
-	squadByKey map[string]string          // nom_normalise / alias_normalise → squad id
-	pathCache  map[string][]string        // chemin de groupes → ids
-	persByMat  map[string]string          // matricule → personne id
-	persByNom  map[string]string          // nom_normalise → personne id
-	aliases    map[string]map[string]bool // personne id → alias_normalise
-	fromCode   map[string]bool            // personnes créées ici avec display_name = code ressource
+	squadByKey map[string]string   // nom_normalise / alias_normalise → squad id
+	pathCache  map[string][]string // chemin de groupes → ids
+	persByCle  map[string]string   // names.Key (personnes.nom_normalise) → personne id
+	aligned    map[string]bool     // personnes dont le display_name a été aligné dans cet import
 
 	newPersonnes []string
 	newSquads    []string
-	nbAlias      int
-	nbMatricules int
 }
 
 func enrich(ctx context.Context, tx *sql.Tx, now string, lines []ParsedLine) (*enricher, error) {
 	e := &enricher{
 		ctx: ctx, tx: tx, now: now,
 		squadByKey: map[string]string{}, pathCache: map[string][]string{},
-		persByMat: map[string]string{}, persByNom: map[string]string{},
-		aliases: map[string]map[string]bool{}, fromCode: map[string]bool{},
+		persByCle: map[string]string{}, aligned: map[string]bool{},
 		newPersonnes: []string{}, newSquads: []string{},
 	}
 	if err := e.load(); err != nil {
@@ -202,22 +196,7 @@ func (e *enricher) load() error {
 	if err := pairs(`SELECT squad_id, alias_normalise FROM squad_alias ORDER BY id`, func(id, k string) { setIfAbsent(e.squadByKey, k, id) }); err != nil {
 		return err
 	}
-	if err := pairs(`SELECT personne_id, matricule FROM personne_matricules`, func(id, m string) { e.persByMat[m] = id }); err != nil {
-		return err
-	}
-	if err := pairs(`SELECT id, nom_normalise FROM personnes ORDER BY created_at, id`, func(id, k string) { setIfAbsent(e.persByNom, k, id) }); err != nil {
-		return err
-	}
-	return pairs(`SELECT personne_id, alias_normalise FROM personne_alias`, func(id, k string) { e.aliasSet(id)[k] = true })
-}
-
-func (e *enricher) aliasSet(pid string) map[string]bool {
-	s := e.aliases[pid]
-	if s == nil {
-		s = map[string]bool{}
-		e.aliases[pid] = s
-	}
-	return s
+	return pairs(`SELECT id, nom_normalise FROM personnes ORDER BY created_at, id`, func(id, k string) { setIfAbsent(e.persByCle, k, id) })
 }
 
 func (e *enricher) line(l *ParsedLine) error {
@@ -230,7 +209,7 @@ func (e *enricher) line(l *ParsedLine) error {
 		squadID = pathIDs[len(pathIDs)-1]
 	}
 	drop := l.StatutParsing == domain.ParsingDrop
-	person, squadSeg := names.SplitLibelle(l.Libelle, nil)
+	_, squadSeg := names.SplitLibelle(l.Libelle, nil)
 	if !drop && squadSeg != "" {
 		id, err := e.libelleSquad(squadSeg, l.GroupPath, pathIDs)
 		if err != nil {
@@ -244,17 +223,18 @@ func (e *enricher) line(l *ParsedLine) error {
 		sid := squadID
 		l.SquadID = &sid
 	}
-	if l.Ressource == "" {
-		return nil
+	key := names.KeyOf(l.NomPrenom)
+	if key == "" {
+		return nil // ligne non nominative : pas de personne
 	}
 	if drop {
 		// Pas de création pour une ligne rejetée ; rattachement si déjà connue.
-		if pid, ok := e.persByMat[l.Ressource]; ok {
+		if pid, ok := e.persByCle[key]; ok {
 			l.PersonneID = &pid
 		}
 		return nil
 	}
-	pid, err := e.person(l.Ressource, person, l.NomPrenom, squadID)
+	pid, err := e.person(key, l.NomPrenom, squadID)
 	if err != nil {
 		return err
 	}
@@ -350,86 +330,34 @@ func (e *enricher) libelleSquad(seg string, path, pathIDs []string) (string, err
 	return target, nil
 }
 
-// person resolves (or creates) the personne of a ressource code (SPEC §6.2).
-// nomPrenom (« NOM Prénom » extrait du libellé) sert de nom d'affichage ; à défaut,
-// la partie personne brute, puis le code.
-func (e *enricher) person(code, personPart, nomPrenom, squadID string) (string, error) {
-	nom := names.Normalize(personPart)
-	display := nomPrenom
-	if display == "" {
-		display = personPart
-	}
-	pid, ok := e.persByMat[code]
-	if !ok && nom != "" {
-		if pid, ok = e.persByNom[nom]; ok {
-			if _, err := e.tx.ExecContext(e.ctx, `INSERT INTO personne_matricules(personne_id, matricule) VALUES (?,?)`, pid, code); err != nil {
+// person resolves (or creates as 'brouillon') the personne of an identity key
+// names.Key (DECISIONS n° 8) ; nomPrenom (« NOM Prénom ») is its display name.
+func (e *enricher) person(key, nomPrenom, squadID string) (string, error) {
+	if pid, ok := e.persByCle[key]; ok {
+		if !e.aligned[pid] {
+			// Fiche existante encore en brouillon : nom d'affichage aligné sur « NOM Prénom ».
+			if _, err := e.tx.ExecContext(e.ctx,
+				`UPDATE personnes SET display_name = ? WHERE id = ? AND statut = 'brouillon' AND display_name <> ?`,
+				nomPrenom, pid, nomPrenom); err != nil {
 				return "", err
 			}
-			e.persByMat[code] = pid
-			e.nbMatricules++
+			e.aligned[pid] = true
 		}
+		return pid, nil
 	}
-	if !ok {
-		if display == "" {
-			display = code
-		}
-		pid = uuid.NewString()
-		var sq any
-		if squadID != "" {
-			sq = squadID
-		}
-		if _, err := e.tx.ExecContext(e.ctx,
-			`INSERT INTO personnes(id, display_name, nom_normalise, statut, squad_id, created_at) VALUES (?,?,?,'brouillon',?,?)`,
-			pid, display, names.Normalize(display), sq, e.now); err != nil {
-			return "", err
-		}
-		if _, err := e.tx.ExecContext(e.ctx, `INSERT INTO personne_matricules(personne_id, matricule) VALUES (?,?)`, pid, code); err != nil {
-			return "", err
-		}
-		e.persByMat[code] = pid
-		if k := names.Normalize(display); k != "" {
-			if _, exists := e.persByNom[k]; !exists {
-				e.persByNom[k] = pid
-			}
-		}
-		e.newPersonnes = append(e.newPersonnes, display)
-		if personPart == "" {
-			e.fromCode[pid] = true
-		}
-	} else if e.fromCode[pid] && personPart != "" {
-		// Fiche créée dans ce même import sans libellé : on lui donne le vrai nom.
-		if _, err := e.tx.ExecContext(e.ctx, `UPDATE personnes SET display_name = ?, nom_normalise = ? WHERE id = ?`, display, nom, pid); err != nil {
-			return "", err
-		}
-		for i, n := range e.newPersonnes {
-			if n == code {
-				e.newPersonnes[i] = display
-				break
-			}
-		}
-		if _, exists := e.persByNom[nom]; !exists {
-			e.persByNom[nom] = pid
-		}
-		delete(e.fromCode, pid)
+	pid := uuid.NewString()
+	var sq any
+	if squadID != "" {
+		sq = squadID
 	}
-	if ok && nomPrenom != "" {
-		// Fiche existante encore en brouillon : nom d'affichage aligné sur « NOM Prénom »
-		// (nom_normalise inchangé : Normalize ne dépend pas de l'ordre des mots).
-		if _, err := e.tx.ExecContext(e.ctx,
-			`UPDATE personnes SET display_name = ? WHERE id = ? AND statut = 'brouillon' AND display_name <> ?`,
-			nomPrenom, pid, nomPrenom); err != nil {
-			return "", err
-		}
+	if _, err := e.tx.ExecContext(e.ctx,
+		`INSERT INTO personnes(id, display_name, nom_normalise, statut, squad_id, created_at) VALUES (?,?,?,'brouillon',?,?)`,
+		pid, nomPrenom, key, sq, e.now); err != nil {
+		return "", err
 	}
-	if nom != "" && !e.aliasSet(pid)[nom] {
-		if _, err := e.tx.ExecContext(e.ctx,
-			`INSERT INTO personne_alias(personne_id, alias, alias_normalise, source, created_at) VALUES (?,?,?,'import',?)`,
-			pid, personPart, nom, e.now); err != nil {
-			return "", err
-		}
-		e.aliasSet(pid)[nom] = true
-		e.nbAlias++
-	}
+	e.persByCle[key] = pid
+	e.aligned[pid] = true
+	e.newPersonnes = append(e.newPersonnes, nomPrenom)
 	return pid, nil
 }
 

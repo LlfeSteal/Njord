@@ -72,9 +72,9 @@ func (s *Service) Preview(ctx context.Context, data []byte, filename, intitule s
 
 const insertEntry = `INSERT INTO realise_entries(version_id, row_num, entite, activite, sous_activite, trigramme,
 	tg, tg_libelle, wp, wp_libelle, description_depenses, categorie, type, categorie_fnp, employe_fournisseur,
-	matricule, fpc, cea, quantite, total_eur, date_depense, periode_comptable, compte_comptable, num_facture,
+	nom_prenom, matricule, fpc, cea, quantite, total_eur, date_depense, periode_comptable, compte_comptable, num_facture,
 	num_commande, num_ligne, lot_ifrs15, nom_ressource, fournisseur, code_article, mois_comptable,
-	statut_parsing, motif_rejet) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+	statut_parsing, motif_rejet) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 // Import parses the file and stores it as a new version (with every line,
 // dropped ones included). archiveActive=false makes the version born archived
@@ -116,7 +116,7 @@ func (s *Service) Import(ctx context.Context, data []byte, filename, intitule, i
 			}
 			if _, err := stmt.ExecContext(ctx, versionID, e.RowNum, e.Entite, e.Activite, e.SousActivite, e.Trigramme,
 				e.TG, e.TGLibelle, e.WP, e.WPLibelle, e.DescriptionDepenses, e.Categorie, e.Type, e.CategorieFNP,
-				e.EmployeFournisseur, e.Matricule, e.FPC, e.CEA, e.Quantite, e.TotalEur, e.DateDepense,
+				e.EmployeFournisseur, e.NomPrenom, e.Matricule, e.FPC, e.CEA, e.Quantite, e.TotalEur, e.DateDepense,
 				e.PeriodeComptable, e.CompteComptable, e.NumFacture, e.NumCommande, numLigne, e.LotIFRS15,
 				e.NomRessource, e.Fournisseur, e.CodeArticle, e.MoisComptable, e.StatutParsing, e.MotifRejet); err != nil {
 				return fmt.Errorf("insertion ligne %d: %w", e.RowNum, err)
@@ -150,7 +150,7 @@ type Filter struct {
 var SortFields = []string{"row_num", "date_depense", "total_eur", "tg"}
 
 const entryCols = `id, version_id, row_num, entite, activite, sous_activite, trigramme, tg, tg_libelle, wp,
-	wp_libelle, description_depenses, categorie, type, categorie_fnp, employe_fournisseur, matricule, fpc, cea,
+	wp_libelle, description_depenses, categorie, type, categorie_fnp, employe_fournisseur, nom_prenom, matricule, fpc, cea,
 	quantite, total_eur, date_depense, periode_comptable, compte_comptable, num_facture, num_commande, num_ligne,
 	lot_ifrs15, nom_ressource, fournisseur, code_article, mois_comptable, statut_parsing, motif_rejet`
 
@@ -159,7 +159,7 @@ func scanEntry(rows *sql.Rows) (domain.RealiseEntry, error) {
 	var numLigne sql.NullInt64
 	err := rows.Scan(&e.ID, &e.VersionID, &e.RowNum, &e.Entite, &e.Activite, &e.SousActivite, &e.Trigramme,
 		&e.TG, &e.TGLibelle, &e.WP, &e.WPLibelle, &e.DescriptionDepenses, &e.Categorie, &e.Type, &e.CategorieFNP,
-		&e.EmployeFournisseur, &e.Matricule, &e.FPC, &e.CEA, &e.Quantite, &e.TotalEur, &e.DateDepense,
+		&e.EmployeFournisseur, &e.NomPrenom, &e.Matricule, &e.FPC, &e.CEA, &e.Quantite, &e.TotalEur, &e.DateDepense,
 		&e.PeriodeComptable, &e.CompteComptable, &e.NumFacture, &e.NumCommande, &numLigne, &e.LotIFRS15,
 		&e.NomRessource, &e.Fournisseur, &e.CodeArticle, &e.MoisComptable, &e.StatutParsing, &e.MotifRejet)
 	if numLigne.Valid {
@@ -172,6 +172,7 @@ func scanEntry(rows *sql.Rows) (domain.RealiseEntry, error) {
 // Mask blanks the sensitive fields of e.
 func Mask(e *domain.RealiseEntry) {
 	e.EmployeFournisseur = ""
+	e.NomPrenom = ""
 	e.Matricule = ""
 	e.NumFacture = ""
 	e.NumCommande = ""
@@ -241,6 +242,7 @@ func (s *Service) query(ctx context.Context, versionID string, f Filter) ([]doma
 			return nil, err
 		}
 		if q != "" && !strings.Contains(fold(e.TG), q) && !strings.Contains(fold(e.TGLibelle), q) &&
+			!strings.Contains(fold(e.NomPrenom), q) &&
 			!(f.SearchDescription && strings.Contains(fold(e.DescriptionDepenses), q)) {
 			continue
 		}

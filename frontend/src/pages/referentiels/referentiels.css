@@ -62,7 +62,7 @@
   white-space: nowrap;
 }
 
-/* Saisie + bouton sur une ligne (ajout d'alias, de matricule). */
+/* Saisie + bouton sur une ligne (ajout d'alias de squad). */
 .ref-add {
   display: flex;
   gap: 8px;

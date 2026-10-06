@@ -11,6 +11,7 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 5. **Règle SPEC §8 r3 supprimée** (2026-10-05) : la liste des pourcentages autorisés {20,30,40,50,70,80,100} n'est plus contrôlée (60 % y manquait) ; toute valeur numérique est acceptée sans warn.
 6. **NOM Prénom** (2026-10-05) : le plan affiche « NOM Prénom » extrait du Libellé (SPEC §8 règles 9–11) à la place du libellé brut ; le référentiel Personnes adopte ce format (fiches brouillon renommées au réimport, fiches validées intactes ; l'alias d'import garde la forme brute). Le code Ressource doit valoir NOM + initiale du prénom : sinon warn, code conservé. Démo : 30 ok, 6 warn (réserves sans libellé l. 50/51/52/55, « PO », « RTE »).
 7. **Ergonomie « contrôleur de gestion »** (2026-10-05) : navigation en barre latérale (Pilotage : Vue d'ensemble, Anomalies, Écarts, Budget, Prévisions · Données : Plan de charge, Réalisé, Personnes, Squads · Réglages) ; gabarit de page unique (barre d'outils, inspecteur, filtres en popover) ; règles de densité (≤ 6 colonnes, une ligne par cellule, ≤ 3 chiffres clés). Prévisions = réalisé à date + reste à faire du plan, avec projection « tendance » sur 4 semaines ; budget de référence = Σ PPS. Anomalies traitables (traitée / ignorée + commentaire, table `anomalie_suivi`), réouvertes si leurs chiffres changent. Plan de charge : colonnes Unité, Statut, Ligne de coût et Libellé retirées, Ressource = « CODE (NOM Prénom) », ligne en anomalie teintée avec un glyphe.
+8. **Identité = NOM + Prénom uniquement** (2026-10-06) : une ressource est identifiée par son seul NOM + Prénom, dans le plan (extrait du Libellé) comme dans le réalisé (EMPLOYE/FOURNISSEUR `<NOM Prénom Civilité>`, civilité finale M./Mr./Mme./Mlle.… retirée). Clé `names.Key` = `NOM|PRÉNOM` en majuscules sans accents ni ponctuation, **ordre conservé**, égalité stricte (« CLAIRE DURAND » ≠ « DURAND Claire »). Supprimés : code Ressource comme identifiant (règle 11, départage par le code, règle « ressource vide », classification du code), matricules (`personne_matricules`), alias (`personne_alias`), fusion de fiches, confiances `matricule`/`alias`/`fuzzy`, contrôle qualité « fuzzy », catégorie d'anomalie `correspondance`. Nom tout en majuscules → dernier mot = prénom. Ligne de plan sans NOM Prénom → **non nominative** : warn à l'import, conservée au budget, sans personne, jamais rapprochée. `personnes.nom_normalise` = clé, unique. Base existante migrée au démarrage (`PRAGMA user_version` 1) : nom_prenom recalculé, fiches illisibles supprimées, homonymes fusionnés dans la plus ancienne, lignes rattachées par clé ; statuts de parsing inchangés jusqu'au réimport.
 8. **Version courante par défaut** (2026-10-05) : Plan de charge et Réalisé ouvrent directement la version active (sinon la plus récente non purgée) ; le titre de la barre d'outils est un menu « Historique » pour changer de version, importer ou gérer les versions (`/…/versions`).
 
 ## Format démo — Plan de charge
@@ -18,15 +19,15 @@ Validées avec le métier (2026-10-05) ou retenues par l'intégrateur. Tout agen
 - Lignes ignorées (non comptées) : lignes vides, **lignes de groupe** (seule la 1re cellule remplie, ex. `Squad Alpha — Plateforme`), **lignes `Somme`**.
 - **Squads imbriqués** : un groupe est suivi de sa ligne `Somme` (charge totale du groupe). Pile de groupes ouverts ; chaque ligne de données ajoute sa charge à tous les groupes ouverts ; un groupe se ferme quand son cumul atteint sa `Somme` (±0.01). Squad de la ligne = groupe ouvert le plus interne ; `groupe` = chemin `Parent > Enfant`. Squads créés avec `parent_id`. Sans `Somme` : le dernier groupe rencontré.
 - CT de 9 **ou 10** caractères acceptés (`Y99F900010`).
-- Ressource : `[inactif]` → strip + `inactive`; motif `^[A-Z0-9_]{1,12}$` sans `_` long → `internal` (ex. `DURANDC`, `R_001`) ; préfixe `2GI_` / `RES_ext_` ou longueur > 12 → `external` ; sinon `unknown` (warn).
+- Ressource : `[inactif]` → strip + `inactive` ; le code est conservé brut, sans classification ni contrôle (décision n° 8).
 
-- **Pourcentage** : pas de contrôle de valeur (voir « Validé par l'utilisateur » n° 5). Seul un pourcentage non numérique reste en warn. Sur la démo : 36 ok, 0 warn.
+- **Pourcentage** : pas de contrôle de valeur (voir « Validé par l'utilisateur » n° 5). Seul un pourcentage non numérique reste en warn. Sur la démo (fichier du 2026-10-06) : 31 ok, 5 warn (lignes non nominatives 50, 51, 53 « PO », 54 « RTE », 55), 25 personnes ; deux lignes non nominatives sans libellé ne sont jamais doublons entre elles.
 - **Alias de squad** issus des libellés (`… / Squad Alpha`) : rattachés au groupe du chemin dont le nom contient tous les tokens de l'alias (sinon groupe le plus interne) → « Squad Alpha » → « Squad Alpha — Plateforme », « Cellule Qualité » → « Cellule Transverse Qualité ».
 - Layout B : les colonnes démo additionnelles ne sont pas lues (position ambiguë avec la colonne poubelle).
 - PPS vide/non numérique → warn (0) ; charge non numérique → drop ; pourcentage non numérique → warn.
 - Les lignes drop sont stockées (consultables, filtre `statut=drop`) mais ne créent pas de personne ; l'analyse les exclut.
 - Preview : l'enrichissement des référentiels est simulé dans une transaction annulée (résultat exact de ce que créerait l'import).
-- Référentiels : alias manuel en conflit (même alias normalisé `manuel`/`confirme` sur une autre personne) → 409 ; fusion : le nom de la fiche source devient un alias `manuel` de la cible.
+- Référentiels : plus d'alias personne ni de fusion (décision n° 8) ; le nom d'une fiche n'est pas modifiable (PATCH `display_name` → 400).
 
 ## Format démo — Réalisé
 Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. Mapping :
@@ -57,7 +58,7 @@ Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. 
 - **⚫ Absence** : tuple `réel = 0 ∧ prévu > 0` **et** la personne a `Σ réel = 0` sur toute la période analysée (§9). Sinon le tuple est évalué par l'écart.
 - **Calendrier** : jours ouvrés = lun–ven ∩ [date_début, date_fin] de la ligne − `jours_feries` ; semaines ISO dont le numéro ∈ `semaines_verrouillees` → 0 jour. `charge_hebdo = charge_totale × jo(ligne ∩ semaine) / jo(ligne)`. Le tableau §4.1 de la spec n'est pas codé en dur (année différente, incohérent). Contrôle §4.2 : Σ hebdo vs charge_totale (±0.5 h) — l'écart vient des semaines verrouillées / lignes sans jour ouvré → warn qualité `plan_repartition`.
 - **Période d'analyse** en semaines ISO `YYYY-Www` ; défaut = semaines communes au plan (date_début min → date_fin max) et au réalisé (date_dépense min → max).
-- **Correspondance** (écritures `heures > 0` uniquement) : 1) `matricule` réalisé ∈ `personne_matricules` ; 2) `Normalize(employe_fournisseur)` = alias de source `manuel`/`confirme` → `alias` ; 3) = alias de source `import` ou nom normalisé d'une personne ou `names.PersonKey(libellé)` d'une ligne du plan retenu → `fuzzy` ; 4) sinon `none` → 🟠 Hors plan.
+- **Correspondance** (remplacée par la décision n° 8) : écriture MO dont `names.Key` (NOM + Prénom sans civilité) existe dans le plan retenu → `nom` ; sinon `none` → 🟠 Hors plan.
 - **Jointure** `(ct, personne_id, semaine)`. Personne résolue mais non planifiée sur ce CT → prévu 0. Réel sur semaine verrouillée → 🟠.
 - **Ressource** d'un tuple : code ressource PDC de la personne (sinon nom réalisé).
 - **Taux de conformité** : `nb 🟢 / nb tuples comparés` où tuples comparés = tuples hors 🟠, en excluant les ressources `inactive` sauf `include_inactive`.
@@ -73,7 +74,6 @@ Onglet `MyWorkSheet-1`, en-tête ligne 1, ligne `Totaux` ignorée, 16 colonnes. 
 - Confiance d'un tuple = la plus faible de ses écritures ; tuple sans réel = `plan`. Prévu/réel arrondis à 0,01 h avant flags.
 - Inactifs : exclus uniquement du taux de conformité (comptés dans flags, points, taux d'absence).
 - Règle 1 : CT présents dans les deux sources, Σ TOTAL EN € brut (MO comprise) vs Σ PPS. `DeriveProvision.eur` = TOTAL EN € brut.
-- Confirmation d'alias : promeut un alias `import` existant en `confirme` (idempotent).
 - Export réalisé enrichi : filtré par semaines seulement si fournies ; ne requiert pas de plan.
 - Erreurs analyse : version purgée → 409, id inconnu → 404, semaine invalide → 400.
 

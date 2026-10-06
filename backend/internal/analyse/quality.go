@@ -18,18 +18,17 @@ type qualityDef struct {
 
 // qualityOrder is the display order of the quality banner.
 var qualityOrder = []string{
-	"tg_ecart_budget", "mo_quantite_semaine", "fuzzy", "sans_tg", "cloture",
+	"tg_ecart_budget", "mo_quantite_semaine", "sans_tg", "cloture",
 	"plan_repartition", "mo_sans_nom", "sans_date", "periode_disjointe", "plan_warn", "realise_warn",
 }
 
 var qualityDefs = map[string]qualityDef{
 	"tg_ecart_budget":     {1, "%d CT dont le Σ € réalisé s'écarte du PPS planifié au-delà du seuil"},
 	"mo_quantite_semaine": {2, "%d imputations MO hebdomadaires dépassent le seuil d'heures par personne (physiquement impossibles)"},
-	"fuzzy":               {3, "%d correspondances par rapprochement nominal (fuzzy) : confirmez-les pour enrichir les alias"},
 	"sans_tg":             {4, "%d écritures sans TG exclues de l'analyse"},
 	"cloture":             {5, "%d écritures dont la période comptable précède la date de dépense de plus de 7 jours"},
 	"plan_repartition":    {0, "%d lignes de plan dont la répartition hebdomadaire ne retrouve pas la charge totale (±0.5 h)"},
-	"mo_sans_nom":         {0, "%d écritures MO sans nom ni matricule, classées hors plan"},
+	"mo_sans_nom":         {0, "%d écritures MO sans NOM Prénom identifiable, classées hors plan"},
 	"sans_date":           {0, "%d écritures MO sans date de dépense exclues du tableau d'écarts"},
 	"periode_disjointe":   {0, "Les périodes du plan et du réalisé ne se recouvrent pas : période par défaut = union des deux"},
 	"plan_warn":           {0, "%d lignes de plan en statut warn conservées dans l'analyse"},
@@ -55,17 +54,10 @@ func (q *qualite) get(code string) *domain.QualiteWarning {
 func (q *qualite) add(code, detail string) {
 	w := q.get(code)
 	w.Count++
-	q.detail(code, detail)
-}
-
-func (q *qualite) detail(code, detail string) {
-	w := q.get(code)
 	if detail != "" && len(w.Details) < maxDetails {
 		w.Details = append(w.Details, detail)
 	}
 }
-
-func (q *qualite) setCount(code string, n int) { q.get(code).Count = n }
 
 func (q *qualite) list() []domain.QualiteWarning {
 	out := []domain.QualiteWarning{}

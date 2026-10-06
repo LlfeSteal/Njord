@@ -14,7 +14,7 @@ Application web d'analyse des imputations des collaborateurs : **Plan de charge*
 | `internal/domain` | Types partagés = contrat JSON | intégrateur |
 | `internal/store` | SQLite, schéma complet (`schema.go`), cycle de vie générique des versions (`CreateVersion`, `Archive`, `Reactivate`, `Purge`, `ListVersions`, `GetVersion`, `ActiveVersion`), `GetSettings`/`PutSettings`, `Audit`/`ListAudit`, `Tx` | intégrateur |
 | `internal/xlsxutil` | `FindTable` (onglet + ligne d'en-tête par matcher), `NormHeader`, `IndexOf`, `Cell`, `NullDash`, `ParseNumber`, `ParseDate`/`SerialToDate`, `CodeAndLabel`, `StripAccents` | intégrateur |
-| `internal/names` | `Normalize` (clé personne), `NormalizeSquad`, `SplitLibelle`, `PersonKey`, `LooksLikeSquad` | intégrateur |
+| `internal/names` | `ParseNomPrenom` (plan), `ParseRealise` (réalisé, civilité retirée), `Key`/`KeyOf` (seule clé personne : NOM + Prénom), `NormalizeSquad`, `SplitLibelle`, `LooksLikeSquad` | intégrateur |
 | `internal/httpx` | `Error`, `BadRequest`, `Unprocessable`, `FormFile`, `Operateur`, `Pagination`, `QueryBool`, `FormBool`, `CSV`, `FormatFloat` | intégrateur |
 | `internal/core` | `/health`, `/settings`, `/audit` | intégrateur |
 | `internal/plan` | Parser PDC, import, lignes, CSV, facets ; crée personnes/squads à l'import | agent Plan |
@@ -22,9 +22,9 @@ Application web d'analyse des imputations des collaborateurs : **Plan de charge*
 | `internal/realise` | Parser réalisé, import, écritures, CSV, facets | agent Réalisé |
 | `internal/analyse` | Moteur pur `Run(Input, Settings)`, repo lecture SQL, endpoints, exports | agent Analyse |
 
-Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `personnes`, `personne_matricules`, `personne_alias`, `squads` directement et n'écrit que dans `personne_alias` (source `confirme`) et `analyse_last_result`.
+Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
 
-Tables : `versions` (plan & réalisé, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `personnes`, `personne_matricules` (codes ressource PDC + matricules réalisé, uniques), `personne_alias` (`import`|`manuel`|`confirme`), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
+Tables : `versions` (plan & réalisé, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `personnes` (clé `nom_normalise` = NOM + Prénom, unique), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
 
 Purge = suppression des lignes + version passée en `purgee` (pierre tombale visible avec « afficher purgées ») ; référentiels jamais supprimés.
 

@@ -65,10 +65,8 @@ export function rowTone(flag: Flag): 'danger' | 'warning' | undefined {
 export const ecartTone = (flag: Flag): TextTone | undefined => (flag === 'conforme' ? undefined : flag);
 
 export const CONFIDENCE_LABEL: Record<Confidence, string> = {
-  matricule: 'Matricule',
-  alias: 'Alias du référentiel',
-  fuzzy: 'Approximative (à confirmer)',
-  none: 'Aucune (hors plan)',
+  nom: 'NOM + Prénom',
+  none: 'Hors plan',
   plan: 'Plan seul',
 };
 

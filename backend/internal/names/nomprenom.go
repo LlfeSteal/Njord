@@ -24,27 +24,24 @@ type ParseStatus int
 const (
 	// NomPrenomOK: NOM and Prénom identified.
 	NomPrenomOK ParseStatus = iota
-	// NomPrenomAmbigu: only upper-case words ("ROBERT MICHEL") and the resource
-	// code does not tell which one is the family name.
-	NomPrenomAmbigu
 	// NomPrenomNonIdentifiable: empty, a single word ("PO") or a code.
 	NomPrenomNonIdentifiable
 )
 
 // ParseNomPrenom extracts NOM and Prénom from the person part of a plan Libellé
 // (output of SplitLibelle). Upper-case words are the family name; without any,
-// the SPEC order <Prénom NOM> applies; with only upper-case words, the resource
-// code (convention NOM + initiale du prénom) decides the order.
+// the SPEC order <Prénom NOM> applies; with only upper-case words, the order is
+// <NOM Prénom> (last word = first name).
 //
 //	"DURAND Claire"        → DURAND Claire
 //	"Karim PETIT"          → PETIT Karim
 //	"Antoine De La Tour"   → DE LA TOUR Antoine
-//	"ROBERT MICHEL", ROBERTM → ROBERT Michel ; sans code concordant → ambigu
+//	"ROBERT MICHEL"        → ROBERT Michel
 //	"PO", ""               → non identifiable
-func ParseNomPrenom(person, ressource string) (NomPrenom, ParseStatus) {
+func ParseNomPrenom(person string) (NomPrenom, ParseStatus) {
 	toks := []string{}
 	for _, t := range strings.Fields(stripParens(person)) {
-		if civilites[strings.ToUpper(strings.Trim(xlsxutil.StripAccents(t), "."))] {
+		if isCivilite(t) {
 			continue
 		}
 		toks = append(toks, t)
@@ -73,37 +70,49 @@ func ParseNomPrenom(person, ressource string) (NomPrenom, ParseStatus) {
 		// Convention SPEC <Prénom NOM> : premier mot = prénom.
 		return build(toks[1:], toks[:1]), NomPrenomOK
 	}
-	// Tout en majuscules : l'ordre est tranché par le code ressource.
-	nomFirst := build(toks[:len(toks)-1], toks[len(toks)-1:])
-	prenomFirst := build(toks[1:], toks[:1])
-	code := strings.ToUpper(strings.TrimSpace(ressource))
-	okNomFirst := code != "" && ExpectedRessource(nomFirst) == code
-	okPrenomFirst := code != "" && ExpectedRessource(prenomFirst) == code
-	switch {
-	case okNomFirst:
-		return nomFirst, NomPrenomOK
-	case okPrenomFirst:
-		return prenomFirst, NomPrenomOK
-	}
-	return NomPrenom{}, NomPrenomAmbigu
+	// Tout en majuscules : <NOM Prénom>, dernier mot = prénom.
+	return build(toks[:len(toks)-1], toks[len(toks)-1:]), NomPrenomOK
 }
 
-// ExpectedRessource returns the resource code expected by the convention
-// NOM + initiale du prénom: DE LA TOUR Antoine → DELATOURA, D'ARC Jeanne → DARCJ.
-func ExpectedRessource(np NomPrenom) string {
-	var b strings.Builder
-	for _, r := range strings.ToUpper(xlsxutil.StripAccents(np.Nom)) {
-		if unicode.IsLetter(r) {
-			b.WriteRune(r)
-		}
+// ParseRealise extracts NOM and Prénom from a réalisé EMPLOYE/FOURNISSEUR value
+// <NOM Prénom Civilité>: the trailing civilities (M., Mr., Mme., Mlle.…) are
+// removed first. ok is false when no NOM Prénom can be identified.
+//
+//	"DURAND Claire Mme"       → DURAND Claire
+//	"DE LA TOUR Antoine Mr."  → DE LA TOUR Antoine
+func ParseRealise(s string) (np NomPrenom, ok bool) {
+	toks := strings.Fields(stripParens(s))
+	for len(toks) > 0 && isCivilite(toks[len(toks)-1]) {
+		toks = toks[:len(toks)-1]
 	}
-	for _, r := range strings.ToUpper(xlsxutil.StripAccents(np.Prenom)) {
-		if unicode.IsLetter(r) {
-			b.WriteRune(r)
-			break
-		}
+	np, st := ParseNomPrenom(strings.Join(toks, " "))
+	return np, st == NomPrenomOK
+}
+
+// Key is the identity of a person (the only one, DECISIONS n° 8): NOM and
+// Prénom in upper case, without accents nor punctuation, order kept.
+// DE LA TOUR Antoine → "DE LA TOUR|ANTOINE". "" when NOM or Prénom is empty.
+func Key(np NomPrenom) string {
+	nom, prenom := strings.Join(tokens(np.Nom), " "), strings.Join(tokens(np.Prenom), " ")
+	if nom == "" || prenom == "" {
+		return ""
 	}
-	return b.String()
+	return nom + "|" + prenom
+}
+
+// KeyOf returns the Key of a « NOM Prénom » string (NomPrenom.String() form,
+// as stored in plan_lines.nom_prenom / realise_entries.nom_prenom); "" if none.
+func KeyOf(nomPrenom string) string {
+	np, st := ParseNomPrenom(nomPrenom)
+	if st != NomPrenomOK {
+		return ""
+	}
+	return Key(np)
+}
+
+// isCivilite: "M", "M.", "Mr.", "Mme", "Mlle."… (case and accents ignored).
+func isCivilite(t string) bool {
+	return civilites[strings.ToUpper(strings.Trim(xlsxutil.StripAccents(t), "."))]
 }
 
 func build(nom, prenom []string) NomPrenom {

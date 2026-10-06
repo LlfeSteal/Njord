@@ -206,12 +206,13 @@ func (h *Handler) lines(c *gin.Context) {
 	c.JSON(http.StatusOK, page)
 }
 
-// CSVHeader is the column list of lines.csv.
+// CSVHeader is the column list of lines.csv (ressource = code brut du fichier,
+// conservé par fidélité à la source ; l'identité est nom_prenom).
 var CSVHeader = []string{
 	"row_num", "statut_parsing", "motif_rejet",
 	"ct", "ressource", "libelle", "nom_prenom", "type_affectation", "ligne_cout", "charge_totale", "pps",
 	"pourcentage", "unite", "calcul_duree", "date_debut", "date_fin",
-	"inactive", "ressource_kind", "groupe",
+	"inactive", "groupe",
 }
 
 var unsafeFilename = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
@@ -238,7 +239,7 @@ func (h *Handler) linesCSV(c *gin.Context) {
 				l.CT, l.Ressource, l.Libelle, l.NomPrenom, l.TypeAffectation, l.LigneCout,
 				httpx.FormatFloat(l.ChargeTotale), httpx.FormatFloat(l.PPS), fmt.Sprint(l.Pourcentage),
 				l.Unite, l.CalculDuree, l.DateDebut, l.DateFin,
-				inactive, l.RessourceKind, l.Groupe,
+				inactive, l.Groupe,
 			}); err != nil {
 				return err
 			}

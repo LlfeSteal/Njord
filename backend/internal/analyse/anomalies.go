@@ -21,12 +21,11 @@ import (
 
 // categorieOrder is the display order of the categories (after gravité).
 var categorieOrder = map[domain.AnomalieCategorie]int{
-	domain.AnomalieBudget:         0,
-	domain.AnomalieCTRisque:       1,
-	domain.AnomalieEcart:          2,
-	domain.AnomalieDerive:         3,
-	domain.AnomalieQualite:        4,
-	domain.AnomalieCorrespondance: 5,
+	domain.AnomalieBudget:   0,
+	domain.AnomalieCTRisque: 1,
+	domain.AnomalieEcart:    2,
+	domain.AnomalieDerive:   3,
+	domain.AnomalieQualite:  4,
 }
 
 // ecartGravite: gravité of an ecart anomaly per flag.
@@ -101,13 +100,6 @@ func fmtSigned(v float64) string {
 
 func ptrF(v float64) *float64 { return &v }
 
-func ptrS(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
 // query builds "path?k1=v1&k2=v2" keeping the given order (values escaped).
 func query(path string, kv ...string) string {
 	var b strings.Builder
@@ -144,7 +136,6 @@ func (r *run) anomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	out = append(out, ctRisqueAnomalies(res, r.s.SeuilCTRisqueEur)...)
 	out = append(out, deriveAnomalies(res)...)
 	out = append(out, qualiteAnomalies(res)...)
-	out = append(out, correspondanceAnomalies(res)...)
 	out = append(out, budgetAnomalies(res)...)
 	for i := range out {
 		out[i].Statut = domain.AnomalieATraiter
@@ -210,9 +201,6 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 		g.prevu += row.Prevu
 		g.reel += row.Reel
 		g.weeks[row.Semaine] = true
-		if g.row.PersonneID == nil && row.PersonneID != nil {
-			g.row.PersonneID = row.PersonneID
-		}
 		if g.row.RessourceLabel == "" {
 			g.row.RessourceLabel = row.RessourceLabel
 		}
@@ -244,7 +232,6 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			CT:          g.row.CT,
 			CTLibelle:   g.row.CTLibelle,
 			Ressource:   g.row.Ressource,
-			PersonneID:  g.row.PersonneID,
 			Heures:      ptrF(round2(g.ecart)),
 			Semaines:    weeks,
 			Lien:        query("/ecarts", "ct", g.row.CT, "ressource", g.row.Ressource, "flag", string(flag)),
@@ -337,8 +324,6 @@ func qualiteAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			lien = query("/plan/"+url.PathEscape(planID), "statut", "warn")
 		case "realise_warn":
 			lien = query("/realise/"+url.PathEscape(realiseID), "statut", "warn")
-		case "fuzzy":
-			lien = query("/anomalies", "categorie", string(domain.AnomalieCorrespondance))
 		default:
 			lien = "/ecarts"
 		}
@@ -362,65 +347,6 @@ func qualiteAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			Lien:        lien,
 			Fingerprint: fingerprint(itoa(w.Count), itoa(len(w.Details))),
 		})
-	}
-	return out
-}
-
-// correspondanceAnomalies: one per fuzzy match to confirm (merged per normalised name).
-func correspondanceAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
-	out := []domain.Anomalie{}
-	idx := map[string]int{}
-	nb := map[string]int{}
-	for _, c := range res.Correspondances {
-		if c.Confidence != domain.ConfFuzzy {
-			continue
-		}
-		norm := c.NomNormalise
-		if norm == "" {
-			norm = c.NomRealise
-		}
-		k := anomalieKey("correspondance", norm)
-		if i, ok := idx[k]; ok {
-			*out[i].Heures = round2(*out[i].Heures + c.Heures)
-			nb[k] += c.NbEcritures
-			continue
-		}
-		idx[k] = len(out)
-		nb[k] = c.NbEcritures
-		personne := c.PersonneNom
-		if personne == "" && c.PersonneID != nil {
-			personne = *c.PersonneID
-		}
-		pid := ""
-		if c.PersonneID != nil {
-			pid = *c.PersonneID
-		}
-		ressource := c.Ressource
-		if ressource == "" {
-			ressource = c.NomRealise
-		}
-		out = append(out, domain.Anomalie{
-			Key:        k,
-			Categorie:  domain.AnomalieCorrespondance,
-			Gravite:    1,
-			Titre:      c.NomRealise + " → " + personne + " ?",
-			Ressource:  ressource,
-			NomRealise: c.NomRealise,
-			PersonneID: ptrS(pid),
-			Heures:     ptrF(c.Heures),
-			Lien:       query("/personnes", "personne", pid),
-		})
-	}
-	for i := range out {
-		a := &out[i]
-		n := nb[a.Key]
-		a.Detail = "Rapprochement nominal approximatif (" + pluriel(n, "écriture", "écritures") + ", " + fmtHFr(*a.Heures) +
-			" h) : confirmez l'alias si la correspondance est juste"
-		pid := ""
-		if a.PersonneID != nil {
-			pid = *a.PersonneID
-		}
-		a.Fingerprint = fingerprint(pid, fpH(*a.Heures), itoa(n))
 	}
 	return out
 }

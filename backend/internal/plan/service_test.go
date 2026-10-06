@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -55,10 +56,10 @@ func TestServiceImportDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Intitule != "demo_plancharge" || rep.Total != 36 || rep.OK != 30 || rep.Warn != 6 || rep.ActiveVersion != nil {
+	if rep.Intitule != "demo_plancharge" || rep.Total != 36 || rep.OK != 31 || rep.Warn != 5 || rep.ActiveVersion != nil {
 		t.Fatalf("preview %+v", rep)
 	}
-	if len(rep.NouvellesPersonnes) != 29 || len(rep.NouveauxSquads) != 8 {
+	if len(rep.NouvellesPersonnes) != 25 || len(rep.NouveauxSquads) != 8 {
 		t.Fatalf("preview créations : %d personnes, %d squads", len(rep.NouvellesPersonnes), len(rep.NouveauxSquads))
 	}
 	if n := count(t, st, `SELECT COUNT(*) FROM personnes`) + count(t, st, `SELECT COUNT(*) FROM squads`) +
@@ -71,7 +72,7 @@ func TestServiceImportDemo(t *testing.T) {
 		t.Fatal(err)
 	}
 	v1 := res.Version
-	if v1.Statut != domain.StatutActive || v1.NbLignes != 36 || v1.NbWarn != 6 || v1.Layout != "A" ||
+	if v1.Statut != domain.StatutActive || v1.NbLignes != 36 || v1.NbWarn != 5 || v1.Layout != "A" ||
 		v1.Intitule != "PDC sept." || v1.Importeur != "alice" || v1.PeriodeDebut != "2026-09-01" || v1.PeriodeFin != "2026-11-30" ||
 		v1.SourceFormat != domain.FormatDemo {
 		t.Fatalf("version %+v", v1)
@@ -79,28 +80,32 @@ func TestServiceImportDemo(t *testing.T) {
 	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ?`, v1.ID); n != 36 {
 		t.Fatalf("%d lignes", n)
 	}
-	// Une personne par code ressource distinct.
-	nCodes := count(t, st, `SELECT COUNT(DISTINCT ressource) FROM plan_lines WHERE version_id = ?`, v1.ID)
-	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != nCodes || n != 29 {
-		t.Fatalf("%d personnes pour %d codes", n, nCodes)
+	// Une personne par NOM Prénom distinct (clé names.Key), en brouillon.
+	nNoms := count(t, st, `SELECT COUNT(DISTINCT nom_prenom) FROM plan_lines WHERE version_id = ? AND nom_prenom <> ''`, v1.ID)
+	if n := count(t, st, `SELECT COUNT(*) FROM personnes WHERE statut = 'brouillon'`); n != nNoms || n != 25 {
+		t.Fatalf("%d personnes pour %d noms", n, nNoms)
 	}
-	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ? AND personne_id IS NULL`, v1.ID); n != 0 {
-		t.Fatalf("%d lignes sans personne", n)
+	// Lignes non nominatives (50, 51, 53, 54, 55) : sans personne.
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ? AND personne_id IS NULL AND nom_prenom = ''`, v1.ID); n != 5 {
+		t.Fatalf("%d lignes non nominatives sans personne", n)
 	}
-	// DURANDC : une seule personne, deux lignes, un alias import.
-	durand := str(t, st, `SELECT personne_id FROM personne_matricules WHERE matricule = 'DURANDC'`)
-	if n := count(t, st, `SELECT COUNT(DISTINCT personne_id) FROM plan_lines WHERE ressource = 'DURANDC'`); n != 1 {
-		t.Fatalf("DURANDC sur %d personnes", n)
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ? AND (personne_id IS NULL) <> (nom_prenom = '')`, v1.ID); n != 0 {
+		t.Fatalf("%d lignes mal rattachées", n)
+	}
+	// DURAND Claire : une seule personne (clé DURAND|CLAIRE), deux lignes.
+	durand := str(t, st, `SELECT id FROM personnes WHERE nom_normalise = 'DURAND|CLAIRE'`)
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE personne_id = ?`, durand); n != 2 {
+		t.Fatalf("DURAND Claire sur %d lignes", n)
 	}
 	if dn := str(t, st, `SELECT display_name FROM personnes WHERE id = ?`, durand); dn != "DURAND Claire" {
 		t.Errorf("display_name %q", dn)
 	}
-	if a := str(t, st, `SELECT alias_normalise || '|' || source FROM personne_alias WHERE personne_id = ?`, durand); a != "CLAIRE DURAND|import" {
-		t.Errorf("alias %q", a)
+	if k := str(t, st, `SELECT nom_normalise FROM personnes WHERE display_name = 'DE LA TOUR Antoine'`); k != "DE LA TOUR|ANTOINE" {
+		t.Errorf("clé %q", k)
 	}
-	// LEROYN ligne 52 (libellé vide) rattaché via matricule.
-	if n := count(t, st, `SELECT COUNT(DISTINCT personne_id) FROM plan_lines WHERE ressource = 'LEROYN'`); n != 1 {
-		t.Errorf("LEROYN sur %d personnes", n)
+	// LEROY Nathalie : lignes 43 (LEROYN) et 52 (code externe) → même personne.
+	if n := count(t, st, `SELECT COUNT(DISTINCT personne_id) FROM plan_lines WHERE version_id = ? AND row_num IN (43, 52)`, v1.ID); n != 1 {
+		t.Errorf("LEROY Nathalie sur %d personnes", n)
 	}
 	// Squads imbriqués.
 	sq := func(name string) (id, parent string) {
@@ -142,8 +147,8 @@ func TestServiceImportDemo(t *testing.T) {
 	if n := count(t, st, `SELECT COUNT(*) FROM squad_alias`); n != 5 {
 		t.Errorf("%d alias de squad", n)
 	}
-	if n := count(t, st, `SELECT COUNT(*) FROM audit_log WHERE action = 'referentiel_import'`); n != 1 {
-		t.Errorf("audit referentiel_import %d", n)
+	if d := str(t, st, `SELECT details FROM audit_log WHERE action = 'referentiel_import'`); d != "personnes créées=25 squads créés=8" {
+		t.Errorf("audit referentiel_import %q", d)
 	}
 
 	// Ré-import avec archivage : l'ancienne est archivée, référentiels inchangés.
@@ -165,11 +170,13 @@ func TestServiceImportDemo(t *testing.T) {
 	if old.Statut != domain.StatutArchivee {
 		t.Fatalf("v1 %s", old.Statut)
 	}
-	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != 29 {
+	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != 25 {
 		t.Errorf("%d personnes après ré-import", n)
 	}
-	if n := count(t, st, `SELECT COUNT(*) FROM personne_alias`); n != 27 { // 29 − 2 externes sans libellé
-		t.Errorf("%d alias personnes", n)
+	// Mêmes personnes retrouvées par clé.
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines a JOIN plan_lines b ON b.row_num = a.row_num
+		WHERE a.version_id = ? AND b.version_id = ? AND a.personne_id IS NOT b.personne_id`, v1.ID, res2.Version.ID); n != 0 {
+		t.Errorf("%d lignes rattachées à une autre personne au ré-import", n)
 	}
 
 	// Sans archivage : la nouvelle naît archivée.
@@ -194,19 +201,92 @@ func TestServiceSpecReferentiels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Version.Layout != "mixte" || res.Version.NbDrop != 5 || res.Version.NbLignes != 6 {
+	if res.Version.Layout != "mixte" || res.Version.NbDrop != 4 || res.Version.NbLignes != 7 || res.Version.NbWarn != 4 {
 		t.Fatalf("version %+v", res.Version)
 	}
 	// Sans groupe : « Squad Alpha » / « Squad Beta » deviennent des squads.
 	if n := count(t, st, `SELECT COUNT(*) FROM squads WHERE nom_canonique IN ('Squad Alpha','Squad Beta')`); n != 2 {
 		t.Errorf("%d squads libellé", n)
 	}
-	// R_004 (CT vide, drop) : pas de personne créée.
-	if n := count(t, st, `SELECT COUNT(*) FROM personne_matricules WHERE matricule = 'R_004'`); n != 0 {
-		t.Errorf("personne créée pour une ligne rejetée")
+	// DUPONT Jean, MARTIN Léa, PETIT Paul, ONE Ext ; pas de personne pour les lignes
+	// non nominatives ni pour les lignes rejetées.
+	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != 4 {
+		t.Errorf("%d personnes", n)
 	}
-	if dn := str(t, st, `SELECT p.display_name FROM personnes p JOIN personne_matricules m ON m.personne_id = p.id WHERE m.matricule = 'R_002'`); dn != "MARTIN Léa" {
+	if dn := str(t, st, `SELECT p.display_name FROM personnes p JOIN plan_lines l ON l.personne_id = p.id WHERE l.ressource = 'R_002'`); dn != "MARTIN Léa" {
 		t.Errorf("R_002 → %q", dn)
+	}
+	// Ligne 11 : ressource vide, plus rejetée (warn), non nominative.
+	if st11 := str(t, st, `SELECT statut_parsing || '|' || nom_prenom || '|' || COALESCE(personne_id, '-') FROM plan_lines WHERE row_num = 11`); st11 != "warn||-" {
+		t.Errorf("ligne 11 %q", st11)
+	}
+}
+
+// specRow: one layout A line of a spec-format file.
+func specRow(ct, ress, libelle string, charge any) []any {
+	return []any{ct, ress, libelle, "Standard", "MAIN D'OEUVRE SUR SITE", charge, 0, 20, "U_0001", "Dates fixes", 46266, 46356}
+}
+
+// Identité = NOM + Prénom (DECISIONS n° 8) : une personne est retrouvée par sa
+// clé d'un import à l'autre, quels que soient le code Ressource et l'ordre des
+// mots du libellé ; une ligne rejetée ne crée personne mais se rattache à une
+// personne connue.
+func TestServicePersonnesParCle(t *testing.T) {
+	ctx := context.Background()
+	st := newStore(t)
+	svc := NewService(st)
+	file1 := buildSpecXLSX(t, "Plan de charge", specHeader, [][]any{
+		specRow("CT1", "DURANDC", "DURAND Claire", 10),
+		specRow("CT2", "", "DURAND CLAIRE", 10), // même clé (tout en majuscules), code vide
+		specRow("CT1", "XX", "PO", 10),          // non nominative
+		specRow("CT3", "R1", "MARTIN Léa", -1),  // rejetée, inconnue : pas de création
+	})
+	res1, err := svc.Commit(ctx, file1, "p1.xlsx", "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(res1.Report.NouvellesPersonnes, ","); got != "DURAND Claire" {
+		t.Fatalf("créées %q", got)
+	}
+	durand := str(t, st, `SELECT id FROM personnes WHERE nom_normalise = 'DURAND|CLAIRE'`)
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ? AND personne_id = ?`, res1.Version.ID, durand); n != 2 {
+		t.Errorf("DURAND sur %d lignes", n)
+	}
+	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != 1 {
+		t.Errorf("%d personnes", n)
+	}
+	// Fiche validée renommée par l'utilisateur : nom d'affichage conservé.
+	if _, err := st.DB().Exec(`UPDATE personnes SET display_name = 'DURAND Claire (PMO)', statut = 'validee' WHERE id = ?`, durand); err != nil {
+		t.Fatal(err)
+	}
+
+	file2 := buildSpecXLSX(t, "Plan de charge", specHeader, [][]any{
+		specRow("CT9", "AUTRE", "Claire Durand / Squad X", 5), // ordre <Prénom NOM>, autre code
+		specRow("CT9", "R1", "MARTIN Léa", 5),
+		specRow("CT8", "R9", "DURAND Claire", -1), // rejetée, connue : rattachée
+	})
+	rep, err := svc.Preview(ctx, file2, "p2.xlsx", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rep.NouvellesPersonnes, ","); got != "MARTIN Léa" {
+		t.Fatalf("preview créées %q", got)
+	}
+	res2, err := svc.Commit(ctx, file2, "p2.xlsx", "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, st, `SELECT COUNT(*) FROM plan_lines WHERE version_id = ? AND personne_id = ?`, res2.Version.ID, durand); n != 2 {
+		t.Errorf("DURAND retrouvée sur %d lignes (attendu 2, dont la rejetée)", n)
+	}
+	if dn := str(t, st, `SELECT display_name FROM personnes WHERE id = ?`, durand); dn != "DURAND Claire (PMO)" {
+		t.Errorf("display_name validé écrasé : %q", dn)
+	}
+	if n := count(t, st, `SELECT COUNT(*) FROM personnes`); n != 2 {
+		t.Errorf("%d personnes", n)
+	}
+	if d := str(t, st, `SELECT details FROM audit_log WHERE action = 'referentiel_import' AND objet_id = ?`, res2.Version.ID); d != "personnes créées=1 squads créés=1" {
+		t.Errorf("audit %q", d)
 	}
 }
 
@@ -331,13 +411,25 @@ func TestHTTP(t *testing.T) {
 	if p = lines("?q=y99f900010"); p.Total != 3 {
 		t.Errorf("q=CT → %d", p.Total)
 	}
-	if p = lines("?statut=warn"); p.Total != 6 || p.Items[0].RowNum != 50 {
+	if p = lines("?q=DURANDC"); p.Total != 0 { // le code Ressource n'est plus cherché
+		t.Errorf("q=code → %d", p.Total)
+	}
+	if p = lines("?nom_prenom=" + url.QueryEscape("DURAND Claire")); p.Total != 2 || p.Items[0].RowNum != 8 || p.Items[1].RowNum != 36 {
+		t.Errorf("nom_prenom → %d", p.Total)
+	}
+	if p = lines("?sort=nom_prenom&limit=1"); p.Items[0].NomPrenom != "" {
+		t.Errorf("tri nom_prenom asc %q", p.Items[0].NomPrenom)
+	}
+	if p = lines("?sort=nom_prenom&order=desc&limit=1"); p.Items[0].NomPrenom != "SANTOS Alice" {
+		t.Errorf("tri nom_prenom desc %q", p.Items[0].NomPrenom)
+	}
+	if p = lines("?statut=warn"); p.Total != 5 || p.Items[0].RowNum != 50 {
 		t.Errorf("statut=warn → %d", p.Total)
 	}
-	if p = lines("?inactive=false"); p.Total != 36 {
+	if p = lines("?inactive=false"); p.Total != 35 {
 		t.Errorf("inactive=false → %d", p.Total)
 	}
-	if p = lines("?inactive=true"); p.Total != 0 {
+	if p = lines("?inactive=true"); p.Total != 1 || p.Items[0].RowNum != 23 {
 		t.Errorf("inactive=true → %d", p.Total)
 	}
 	if p = lines("?ligne_cout=Stockage"); p.Total != 1 {
@@ -347,8 +439,10 @@ func TestHTTP(t *testing.T) {
 	if p = lines("?date_from=2026-11-01&date_to=2026-12-31"); p.Total != 35 {
 		t.Errorf("date_from → %d", p.Total)
 	}
-	if w := do(r, http.MethodGet, "/api/plan/versions/"+id+"/lines?sort=foo", ""); w.Code != http.StatusBadRequest {
-		t.Errorf("sort invalide %d", w.Code)
+	for _, s := range []string{"foo", "ressource"} {
+		if w := do(r, http.MethodGet, "/api/plan/versions/"+id+"/lines?sort="+s, ""); w.Code != http.StatusBadRequest {
+			t.Errorf("sort %s invalide %d", s, w.Code)
+		}
 	}
 	if w := do(r, http.MethodGet, "/api/plan/versions/nope/lines", ""); w.Code != http.StatusNotFound {
 		t.Errorf("version inconnue %d", w.Code)
@@ -357,8 +451,8 @@ func TestHTTP(t *testing.T) {
 	// Facets + filtre squad.
 	w = do(r, http.MethodGet, "/api/plan/versions/"+id+"/facets", "")
 	f := decode[domain.Facets](t, w)
-	if len(f["ct"]) != 12 || len(f["squad_id"]) != 8 || len(f["statut"]) != 2 || len(f["ressource"]) != 29 {
-		t.Errorf("facets ct=%d squad=%d statut=%v ress=%d", len(f["ct"]), len(f["squad_id"]), f["statut"], len(f["ressource"]))
+	if len(f["ct"]) != 12 || len(f["squad_id"]) != 8 || len(f["statut"]) != 2 || len(f["nom_prenom"]) != 25 || f["ressource"] != nil {
+		t.Errorf("facets ct=%d squad=%d statut=%v noms=%d", len(f["ct"]), len(f["squad_id"]), f["statut"], len(f["nom_prenom"]))
 	}
 	core := str(t, st, `SELECT id FROM squads WHERE nom_canonique = 'Alpha Core Team'`)
 	if p = lines("?squad_id=" + core); p.Total != 3 {
@@ -372,10 +466,13 @@ func TestHTTP(t *testing.T) {
 		t.Fatalf("csv %d %q", w.Code, body[:min(80, len(body))])
 	}
 	recs := strings.Split(strings.TrimSpace(body), "\n")
-	if len(recs) != 31 { // en-tête + 30 lignes ok
+	if recs[0] != "\xef\xbb\xbfrow_num;statut_parsing;motif_rejet;ct;ressource;libelle;nom_prenom;type_affectation;ligne_cout;charge_totale;pps;pourcentage;unite;calcul_duree;date_debut;date_fin;inactive;groupe" {
+		t.Errorf("csv en-tête %q", recs[0])
+	}
+	if len(recs) != 32 { // en-tête + 31 lignes ok
 		t.Errorf("csv %d lignes", len(recs))
 	}
-	if !strings.Contains(recs[1], "8;ok;;Y99F90001;DURANDC;DURAND Claire / Squad Alpha;DURAND Claire;Standard;MAIN D'OEUVRE SUR SITE;219;25093.02;40;U9AAA1;Dates fixes;2026-09-01;2026-11-30;false;internal;Squad Alpha — Plateforme > Alpha Core Team") {
+	if !strings.Contains(recs[1], "8;ok;;Y99F90001;DURANDC;DURAND Claire / Squad Alpha;DURAND Claire;Standard;MAIN D'OEUVRE SUR SITE;219;25093.02;40;U9AAA1;Dates fixes;2026-09-01;2026-11-30;false;Squad Alpha — Plateforme > Alpha Core Team") {
 		t.Errorf("csv ligne 1 %q", recs[1])
 	}
 

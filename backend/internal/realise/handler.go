@@ -266,7 +266,7 @@ var CSVHeader = []string{
 	"LIGNE EXCEL", "STATUT PARSING", "MOTIF",
 	"ENTITE", "ACTIVITE", "SOUS-ACTIVITE", "TRIGRAMME", "TG", "TG - LIBELLE", "WP", "WP LIBELLE",
 	"DESCRIPTION DEPENSES", "CATEGORIE", "TYPE", "CATEGORIE DEPENSES POUR FNP AUTOMATIQUES",
-	"EMPLOYE/FOURNISSEUR", "MATRICULE", "FPC", "CEA", "QUANTITE", "TOTAL EN €", "DATE DEPENSE",
+	"EMPLOYE/FOURNISSEUR", "NOM PRENOM", "MATRICULE", "FPC", "CEA", "QUANTITE", "TOTAL EN €", "DATE DEPENSE",
 	"PERIODE COMPTABLE", "COMPTE COMPTABLE", "N° FACTURE", "n° COMMANDE", "n° LIGNE", "LOT DE PROGRAMME IFRS15",
 	"NOM RESSOURCE", "FOURNISSEUR", "CODE ARTICLE", "MOIS COMPTABLE",
 }
@@ -281,7 +281,7 @@ func CSVRecord(e domain.RealiseEntry) []string {
 		strconv.Itoa(e.RowNum), string(e.StatutParsing), e.MotifRejet,
 		e.Entite, e.Activite, e.SousActivite, e.Trigramme, e.TG, e.TGLibelle, e.WP, e.WPLibelle,
 		e.DescriptionDepenses, e.Categorie, e.Type, e.CategorieFNP,
-		e.EmployeFournisseur, e.Matricule, e.FPC, e.CEA, httpx.FormatFloat(e.Quantite), httpx.FormatFloat(e.TotalEur),
+		e.EmployeFournisseur, e.NomPrenom, e.Matricule, e.FPC, e.CEA, httpx.FormatFloat(e.Quantite), httpx.FormatFloat(e.TotalEur),
 		e.DateDepense, e.PeriodeComptable, e.CompteComptable, e.NumFacture, e.NumCommande, numLigne, e.LotIFRS15,
 		e.NomRessource, e.Fournisseur, e.CodeArticle, e.MoisComptable,
 	}

@@ -86,7 +86,7 @@ export default function PersonnesPage() {
         <Group gap={8} wrap={false}>
           <SearchField
             aria-label="Rechercher une personne"
-            placeholder="Nom, alias, matricule…"
+            placeholder="Nom ou prénom…"
             value={search}
             onChange={setSearch}
             width={280}
@@ -111,7 +111,7 @@ export default function PersonnesPage() {
   return (
     <Page
       toolbar={toolbar}
-      inspector={<PersonneInspector personneId={openId} onClose={() => setOpen(null)} onSwitch={(id) => setOpen(id)} />}
+      inspector={<PersonneInspector personneId={openId} onClose={() => setOpen(null)} />}
     >
       <ErrorAlert error={q.error} />
       {q.isLoading ? (
@@ -125,19 +125,14 @@ export default function PersonnesPage() {
           <Table hover minWidth={640}>
             <thead>
               <tr>
-                <th style={{ width: '30%' }}>Nom</th>
+                <th style={{ width: '45%' }}>Nom</th>
                 <th style={{ width: 120 }}>Statut</th>
-                <th style={{ width: '25%' }}>Squad</th>
-                <th style={{ width: '25%' }}>Matricules</th>
-                <th data-align="right" style={{ width: 72 }}>
-                  Alias
-                </th>
+                <th>Squad</th>
               </tr>
             </thead>
             <tbody>
               {pageRows.map((p) => {
                 const squadPath = squads.label(p.squad_id);
-                const matricules = p.matricules?.join(', ') ?? '';
                 return (
                   <tr
                     key={p.id}
@@ -156,14 +151,6 @@ export default function PersonnesPage() {
                     <td className={squadPath ? 'ref-ellipsis' : 'ref-ellipsis ref-muted'} title={squadPath || undefined}>
                       {squads.name(p.squad_id) || '—'}
                     </td>
-                    <td
-                      data-mono={matricules ? true : undefined}
-                      className={matricules ? 'ref-ellipsis' : 'ref-ellipsis ref-muted'}
-                      title={matricules || undefined}
-                    >
-                      {matricules || '—'}
-                    </td>
-                    <td data-align="right">{p.alias?.length ?? 0}</td>
                   </tr>
                 );
               })}

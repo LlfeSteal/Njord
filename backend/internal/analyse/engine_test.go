@@ -2,7 +2,6 @@ package analyse
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,22 +14,36 @@ import (
 
 func sp(s string) *string { return &s }
 
-func personne(id, nom string, matricules ...string) domain.Personne {
-	return domain.Personne{ID: id, DisplayName: nom, NomNormalise: names.Normalize(nom), Statut: "brouillon",
-		Matricules: append([]string{}, matricules...), Alias: []domain.PersonneAlias{}}
+// personne: a référentiel record whose key is names.KeyOf(nom) (as the import does).
+func personne(id, nom string) domain.Personne {
+	return domain.Personne{ID: id, DisplayName: nom, NomNormalise: names.KeyOf(nom), Statut: "brouillon"}
 }
 
-func withAlias(p domain.Personne, alias string, src domain.AliasSource) domain.Personne {
-	p.Alias = append(p.Alias, domain.PersonneAlias{Alias: alias, AliasNormalise: names.Normalize(alias), Source: src})
-	return p
+// libelleNomPrenom mimics the plan import: « NOM Prénom » of the libellé, "" if non nominative.
+func libelleNomPrenom(libelle string) string {
+	person, _ := names.SplitLibelle(libelle, nil)
+	if np, st := names.ParseNomPrenom(person); st == names.NomPrenomOK {
+		return np.String()
+	}
+	return ""
+}
+
+// realiseNomPrenom mimics the réalisé import: « NOM Prénom » without civilité, "" if unreadable.
+func realiseNomPrenom(nom string) string {
+	if np, ok := names.ParseRealise(nom); ok {
+		return np.String()
+	}
+	return ""
 }
 
 var rowSeq int
 
 // planLine: a plan line on a single week by default (W37 = 07 → 11/09/2026, 5 j ouvrés).
+// res is the raw Ressource code (no identity role); NomPrenom is extracted from the libellé.
 func planLine(ct, res, libelle string, pid *string, charge float64) domain.PlanLine {
 	rowSeq++
-	return domain.PlanLine{RowNum: rowSeq, CT: ct, Ressource: res, Libelle: libelle, PersonneID: pid, ChargeTotale: charge,
+	return domain.PlanLine{RowNum: rowSeq, CT: ct, Ressource: res, Libelle: libelle, NomPrenom: libelleNomPrenom(libelle),
+		PersonneID: pid, ChargeTotale: charge,
 		LigneCout: "MAIN D'OEUVRE SUR SITE", DateDebut: "2026-09-07", DateFin: "2026-09-11", StatutParsing: domain.ParsingOK}
 }
 
@@ -38,7 +51,7 @@ func planLine(ct, res, libelle string, pid *string, charge float64) domain.PlanL
 func mo(ct, nom string, h float64, date string) domain.RealiseEntry {
 	rowSeq++
 	return domain.RealiseEntry{RowNum: rowSeq, TG: ct, TGLibelle: ct + " - Libellé " + ct, Categorie: "MAIN D'OEUVRE",
-		Type: "MAIN D'OEUVRE SUR SITE", EmployeFournisseur: nom, Quantite: h, TotalEur: h * 100, DateDepense: date,
+		Type: "MAIN D'OEUVRE SUR SITE", EmployeFournisseur: nom, NomPrenom: realiseNomPrenom(nom), Quantite: h, TotalEur: h * 100, DateDepense: date,
 		PeriodeComptable: date, StatutParsing: domain.ParsingOK}
 }
 
@@ -82,10 +95,10 @@ func findQual(res domain.AnalyseResult, code string) *domain.QualiteWarning {
 func flagsScenario() Input {
 	in := baseInput()
 	in.Personnes = []domain.Personne{
-		personne("p1", "DURAND Claire", "DURANDC"),
-		personne("p2", "Antoine De La Tour", "DELATOURA"),
-		personne("p3", "MARTIN Théo", "MARTINT"),
-		personne("p4", "Sarah Blanc", "BLANCS"),
+		personne("p1", "DURAND Claire"),
+		personne("p2", "Antoine De La Tour"),
+		personne("p3", "MARTIN Théo"),
+		personne("p4", "Sarah Blanc"),
 	}
 	in.PlanLines = []domain.PlanLine{
 		planLine("CTA", "DURANDC", "DURAND Claire / Squad Alpha", sp("p1"), 10),
@@ -97,7 +110,7 @@ func flagsScenario() Input {
 	in.Entries = []domain.RealiseEntry{
 		mo("CTA", "DURAND Claire Mme", 26, "2026-09-08"),        // +16 → 🔴
 		mo("CTB", "MARTIN Théo M.", 9, "2026-09-09"),            // −31 → 🟣
-		mo("CTC", "DE LA TOUR Antoine Mr.", 25, "2026-09-10"),   // +5 → 🟢 (fuzzy)
+		mo("CTC", "DE LA TOUR Antoine Mr.", 25, "2026-09-10"),   // +5 → 🟢 (même NOM Prénom, ordre inversé au plan)
 		mo("CTE", "BARBIER Luc M.", 13, "2026-09-10"),           // non apparié → 🟠
 		mo("CTA", "DURAND Claire Mme", 8, "2026-12-15"),         // S51 verrouillée → 🟠
 		cost("CTA", "FRAIS DE MISSION", "FRAIS DE MISSION", 50), // pas d'heures
@@ -114,13 +127,13 @@ func TestFlags(t *testing.T) {
 		prevu, reel, ecart  float64
 		conf                domain.Confidence
 	}{
-		{"🔴 sur-imputation +16", "CTA", "DURANDC", "2026-W37", domain.FlagSurImputation, 10, 26, 16, domain.ConfFuzzy},
-		{"🟣 sous-imputation −31", "CTB", "MARTINT", "2026-W37", domain.FlagSousImputation, 40, 9, -31, domain.ConfFuzzy},
-		{"🟢 conforme", "CTC", "DELATOURA", "2026-W37", domain.FlagConforme, 20, 25, 5, domain.ConfFuzzy},
-		{"⚫ absence (aucun réel)", "CTA", "BLANCS", "2026-W37", domain.FlagAbsence, 20, 0, -20, domain.ConfPlan},
-		{"non-⚫ si réel ailleurs", "CTD", "MARTINT", "2026-W37", domain.FlagConforme, 20, 0, -20, domain.ConfPlan},
-		{"🟠 non apparié", "CTE", "BARBIER Luc M.", "2026-W37", domain.FlagHorsPlan, 0, 13, 13, domain.ConfNone},
-		{"🟠 semaine verrouillée", "CTA", "DURANDC", "2026-W51", domain.FlagHorsPlan, 0, 8, 8, domain.ConfFuzzy},
+		{"🔴 sur-imputation +16", "CTA", "DURAND Claire", "2026-W37", domain.FlagSurImputation, 10, 26, 16, domain.ConfNom},
+		{"🟣 sous-imputation −31", "CTB", "MARTIN Théo", "2026-W37", domain.FlagSousImputation, 40, 9, -31, domain.ConfNom},
+		{"🟢 conforme", "CTC", "DE LA TOUR Antoine", "2026-W37", domain.FlagConforme, 20, 25, 5, domain.ConfNom},
+		{"⚫ absence (aucun réel)", "CTA", "BLANC Sarah", "2026-W37", domain.FlagAbsence, 20, 0, -20, domain.ConfPlan},
+		{"non-⚫ si réel ailleurs", "CTD", "MARTIN Théo", "2026-W37", domain.FlagConforme, 20, 0, -20, domain.ConfPlan},
+		{"🟠 non apparié", "CTE", "BARBIER Luc", "2026-W37", domain.FlagHorsPlan, 0, 13, 13, domain.ConfNone},
+		{"🟠 semaine verrouillée", "CTA", "DURAND Claire", "2026-W51", domain.FlagHorsPlan, 0, 8, 8, domain.ConfNom},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -134,11 +147,11 @@ func TestFlags(t *testing.T) {
 		t.Errorf("nb tuples = %d, attendu %d", len(res.Ecarts), len(cases))
 	}
 	// Libellés & CT.
-	r := findRow(t, res, "CTC", "DELATOURA", "2026-W37")
+	r := findRow(t, res, "CTC", "DE LA TOUR Antoine", "2026-W37")
 	if r.RessourceLabel != "Antoine De La Tour" || r.PersonneID == nil || *r.PersonneID != "p2" || r.CTLibelle != "Libellé CTC" {
 		t.Errorf("row enrichie incorrecte: %+v", r)
 	}
-	if hp := findRow(t, res, "CTE", "BARBIER Luc M.", "2026-W37"); hp.PersonneID != nil {
+	if hp := findRow(t, res, "CTE", "BARBIER Luc", "2026-W37"); hp.PersonneID != nil || hp.RessourceLabel != "BARBIER Luc" {
 		t.Error("hors plan sans personne attendu")
 	}
 	// Tri : gravité desc puis |écart| desc.
@@ -185,10 +198,10 @@ func TestSeuilsParametrables(t *testing.T) {
 	s.SeuilSousImputationH = 35
 	s.DiviseurHorsPlanH = 7
 	res := Run(flagsScenario(), s)
-	if f := findRow(t, res, "CTA", "DURANDC", "2026-W37").Flag; f != domain.FlagConforme {
+	if f := findRow(t, res, "CTA", "DURAND Claire", "2026-W37").Flag; f != domain.FlagConforme {
 		t.Errorf("+16 avec seuil 20 → conforme, got %s", f)
 	}
-	if f := findRow(t, res, "CTB", "MARTINT", "2026-W37").Flag; f != domain.FlagConforme {
+	if f := findRow(t, res, "CTB", "MARTIN Théo", "2026-W37").Flag; f != domain.FlagConforme {
 		t.Errorf("−31 avec seuil 35 → conforme, got %s", f)
 	}
 	if res.KPIs.PointsHorsPlan != 3 {
@@ -213,7 +226,7 @@ func TestInactifsTauxConformite(t *testing.T) {
 	}{{false, 1, 1}, {true, 2, 0.5}} {
 		in.IncludeInactive = c.include
 		res := Run(in, store.DefaultSettings())
-		row := findRow(t, res, "CTA", "OLDA", "2026-W37")
+		row := findRow(t, res, "CTA", "OLD Ancien", "2026-W37")
 		if !row.Inactive || row.Flag != domain.FlagSousImputation {
 			t.Errorf("ligne inactive conservée avec flag: %+v", row)
 		}
@@ -226,76 +239,109 @@ func TestInactifsTauxConformite(t *testing.T) {
 
 // ---------------------------------------------------------------- correspondance
 
-func TestMatchingStrategies(t *testing.T) {
+func TestMatchingNomPrenom(t *testing.T) {
 	ps := []domain.Personne{
-		personne("p1", "DURAND Claire", "DURANDC", "A12345"),
-		withAlias(personne("p2", "Toto Dupont"), "Dupond T.", domain.AliasConfirme),
-		withAlias(personne("p3", "Antoine De La Tour"), "ADLT", domain.AliasImport),
-		withAlias(personne("p4", "Jean Manuel"), "J. MANUEL", domain.AliasManuel),
-		personne("p5", "Paul Homonyme"),
-		personne("p6", "Paul Homonyme"),
+		personne("p1", "DURAND Claire"),
+		personne("p7", "GIRARD Paul"), // fiche existante, non planifiée
 	}
 	lines := []domain.PlanLine{
-		planLine("CT1", "ROUXM", "ROUX Marc (support)", nil, 10), // sans personne_id → clé R:
-		planLine("CT1", "DELATOURA", "Antoine De La Tour", sp("p3"), 10),
-		planLine("CT1", "HOMO", "Paul Homonyme", sp("p6"), 10),
+		planLine("CT1", "DURANDC", "DURAND Claire / Squad Alpha", sp("p1"), 10),
+		planLine("CT1", "DELATOURA", "Antoine De La Tour", nil, 10),
+		planLine("CT1", "ROUXM", "ROUX Marc (support)", nil, 10),
+		planLine("CT1", "2GI_BETA", "Squad Beta", nil, 10), // non nominative
 	}
 	m := newMatcher(ps, lines)
+	if !m.planned["L:Squad Beta"] || !m.planned["N:DURAND|CLAIRE"] || !m.planned["N:DE LA TOUR|ANTOINE"] {
+		t.Fatalf("clés du plan : %v", m.planned)
+	}
 	cases := []struct {
-		name, matricule, nom string
-		key                  string
-		conf                 domain.Confidence
+		name, nom, key string
+		conf           domain.Confidence
+		pid            string
 	}{
-		{"matricule", "a12345 ", "N'importe qui", "P:p1", domain.ConfMatricule},
-		{"alias confirmé", "", "DUPOND T. M.", "P:p2", domain.ConfAlias},
-		{"alias manuel", "", "Manuel J", "P:p4", domain.ConfAlias},
-		{"fuzzy nom normalisé (DE LA TOUR Antoine Mr.)", "", "DE LA TOUR Antoine Mr.", "P:p3", domain.ConfFuzzy},
-		{"fuzzy alias import", "", "ADLT", "P:p3", domain.ConfFuzzy},
-		{"fuzzy libellé plan sans personne", "", "ROUX Marc M.", "R:ROUXM", domain.ConfFuzzy},
-		{"homonymes : le planifié gagne", "", "HOMONYME Paul", "P:p6", domain.ConfFuzzy},
-		{"none", "", "BARBIER Luc M.", "N:BARBIER LUC", domain.ConfNone},
-		{"matricule inconnu → nom", "A99999", "DURAND Claire Mme", "P:p1", domain.ConfFuzzy},
-		{"sans nom ni matricule", "", "", "X:", domain.ConfNone},
+		{"NOM Prénom + civilité", "DURAND Claire Mme", "N:DURAND|CLAIRE", domain.ConfNom, "p1"},
+		{"tout en majuscules", "DURAND CLAIRE Mme", "N:DURAND|CLAIRE", domain.ConfNom, "p1"},
+		{"ordre inversé → hors plan", "CLAIRE DURAND Mme", "N:CLAIRE|DURAND", domain.ConfNone, ""},
+		{"nom composé (plan « Prénom NOM »)", "DE LA TOUR Antoine Mr.", "N:DE LA TOUR|ANTOINE", domain.ConfNom, ""},
+		{"libellé avec note", "ROUX Marc M.", "N:ROUX|MARC", domain.ConfNom, ""},
+		{"fiche existante non planifiée", "GIRARD Paul M.", "N:GIRARD|PAUL", domain.ConfNone, "p7"},
+		{"inconnu", "BARBIER Luc M.", "N:BARBIER|LUC", domain.ConfNone, ""},
+		{"ligne non nominative jamais rapprochée", "Squad Beta", "N:BETA|SQUAD", domain.ConfNone, ""},
+		{"nom illisible", "SKYFARE", "U:SKYFARE", domain.ConfNone, ""},
+		{"sans nom", "", "X:", domain.ConfNone, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			id := m.resolve(c.matricule, c.nom)
-			if id.Key != c.key || id.Confidence != c.conf {
+			id := m.resolve(realiseNomPrenom(c.nom), c.nom)
+			if id.Key != c.key || id.Confidence != c.conf || id.matched() != (c.conf == domain.ConfNom) {
 				t.Errorf("got %s/%s, attendu %s/%s", id.Key, id.Confidence, c.key, c.conf)
 			}
-			if strings.HasPrefix(c.key, "P:") != (id.PersonneID != nil) {
-				t.Errorf("PersonneID incohérent")
+			got := ""
+			if id.PersonneID != nil {
+				got = *id.PersonneID
+			}
+			if got != c.pid {
+				t.Errorf("personne %q, attendu %q", got, c.pid)
 			}
 		})
 	}
 }
 
-func TestCorrespondancesEtAliasConfirme(t *testing.T) {
+func TestPlanNonNominatif(t *testing.T) {
+	in := baseInput()
+	beta := planLine("CTA", "2GI_BETA", "Squad Beta", nil, 10)
+	vide := planLine("CTA", "", "", nil, 5)
+	in.PlanLines = []domain.PlanLine{beta, vide, planLine("CTA", "DURANDC", "DURAND Claire", nil, 10)}
+	in.Entries = []domain.RealiseEntry{
+		mo("CTA", "Squad Beta", 10, "2026-09-08"), // même texte que le libellé : jamais rapproché
+		mo("CTA", "DURAND Claire Mme", 10, "2026-09-08"),
+	}
+	res := Run(in, store.DefaultSettings())
+	if r := findRow(t, res, "CTA", "Squad Beta", "2026-W37"); r.Confidence != domain.ConfPlan || r.Flag != domain.FlagAbsence || r.PersonneID != nil || r.Reel != 0 {
+		t.Errorf("ligne non nominative : %+v", r)
+	}
+	if r := findRow(t, res, "CTA", noLibelle, "2026-W37"); r.Prevu != 5 || r.Confidence != domain.ConfPlan {
+		t.Errorf("ligne sans libellé : %+v", r)
+	}
+	if r := findRow(t, res, "CTA", "BETA Squad", "2026-W37"); r.Flag != domain.FlagHorsPlan || r.Confidence != domain.ConfNone || r.Reel != 10 {
+		t.Errorf("réalisé « Squad Beta » : %+v", r)
+	}
+	if r := findRow(t, res, "CTA", "DURAND Claire", "2026-W37"); r.Confidence != domain.ConfNom || r.Flag != domain.FlagConforme {
+		t.Errorf("DURAND : %+v", r)
+	}
+	if len(res.Ecarts) != 4 {
+		t.Errorf("%d tuples, attendu 4", len(res.Ecarts))
+	}
+}
+
+func TestCorrespondances(t *testing.T) {
 	in := flagsScenario()
+	in.Entries = append(in.Entries, mo("CTA", "CLAIRE DURAND Mme", 3, "2026-09-08")) // ordre inversé → hors plan
 	res := Run(in, store.DefaultSettings())
 	byName := map[string]domain.Correspondance{}
 	for _, c := range res.Correspondances {
 		byName[c.NomRealise] = c
 	}
 	c := byName["DE LA TOUR Antoine Mr."]
-	if c.Confidence != domain.ConfFuzzy || c.PersonneID == nil || *c.PersonneID != "p2" || c.Ressource != "DELATOURA" || c.NbEcritures != 1 || c.Heures != 25 {
-		t.Errorf("correspondance fuzzy: %+v", c)
+	if c.Confidence != domain.ConfNom || c.PersonneID == nil || *c.PersonneID != "p2" || c.NomPrenom != "DE LA TOUR Antoine" ||
+		c.PersonneNom != "Antoine De La Tour" || c.NbEcritures != 1 || c.Heures != 25 {
+		t.Errorf("correspondance nom : %+v", c)
 	}
-	if b := byName["BARBIER Luc M."]; b.Confidence != domain.ConfNone || b.PersonneID != nil || b.Heures != 13 {
-		t.Errorf("correspondance none: %+v", b)
+	if b := byName["BARBIER Luc M."]; b.Confidence != domain.ConfNone || b.PersonneID != nil || b.NomPrenom != "BARBIER Luc" || b.Heures != 13 {
+		t.Errorf("correspondance none : %+v", b)
 	}
-	if d := byName["DURAND Claire Mme"]; d.NbEcritures != 2 || d.Heures != 34 {
-		t.Errorf("DURAND agrégé: %+v", d)
+	if d := byName["DURAND Claire Mme"]; d.NbEcritures != 2 || d.Heures != 34 || d.Confidence != domain.ConfNom {
+		t.Errorf("DURAND agrégé : %+v", d)
 	}
-	if len(res.Correspondances) != 4 || res.Correspondances[0].Confidence != domain.ConfNone {
-		t.Errorf("correspondances: %d, première %s", len(res.Correspondances), res.Correspondances[0].Confidence)
+	if x := byName["CLAIRE DURAND Mme"]; x.Confidence != domain.ConfNone || x.NomPrenom != "CLAIRE Durand" || x.PersonneID != nil {
+		t.Errorf("ordre inversé : %+v", x)
 	}
-
-	// Après confirmation de l'alias → stratégie 2 (alias).
-	in.Personnes[1] = withAlias(in.Personnes[1], "DE LA TOUR Antoine Mr.", domain.AliasConfirme)
-	res = Run(in, store.DefaultSettings())
-	if r := findRow(t, res, "CTC", "DELATOURA", "2026-W37"); r.Confidence != domain.ConfAlias {
-		t.Errorf("après confirmation: %s", r.Confidence)
+	if r := findRow(t, res, "CTA", "CLAIRE Durand", "2026-W37"); r.Flag != domain.FlagHorsPlan {
+		t.Errorf("ordre inversé : %+v", r)
+	}
+	if len(res.Correspondances) != 5 || res.Correspondances[0].Confidence != domain.ConfNone || res.Correspondances[1].Confidence != domain.ConfNone ||
+		res.Correspondances[2].Confidence != domain.ConfNom {
+		t.Errorf("correspondances : %+v", res.Correspondances)
 	}
 }
 
@@ -418,22 +464,20 @@ func TestQualite(t *testing.T) {
 	late := mo("CTA", "DURAND Claire", 120, "2026-09-08")
 	late.PeriodeComptable = "2026-08-31" // < dépense − 7 j
 	sansNom := mo("CTA", "", 4, "2026-09-09")
+	illisible := mo("CTA", "PRESTATAIRE", 2, "2026-09-09")
 	sansTG := cost("", "MATIERE", "MATIERE", 10)
 	rw := mo("CTA", "DURAND Claire", 100, "2026-09-09")
 	rw.StatutParsing = domain.ParsingWarn
-	in.Entries = []domain.RealiseEntry{late, rw, sansNom, sansTG, mo("CTA", "MARTIN Théo", 1, "2026-09-10")}
-	s := store.DefaultSettings()
-	s.SeuilFuzzyCount = 1
-	res := Run(in, s)
+	in.Entries = []domain.RealiseEntry{late, rw, sansNom, illisible, sansTG, mo("CTA", "MARTIN Théo", 1, "2026-09-10")}
+	res := Run(in, store.DefaultSettings())
 
 	want := map[string]struct{ regle, count int }{
 		"tg_ecart_budget":     {1, 1}, // réalisé 22 500 € vs PPS 200 000 €
 		"mo_quantite_semaine": {2, 1}, // DURAND 220 h en W37
-		"fuzzy":               {3, 2},
 		"sans_tg":             {4, 1},
 		"cloture":             {5, 1},
 		"plan_repartition":    {0, 1},
-		"mo_sans_nom":         {0, 1},
+		"mo_sans_nom":         {0, 2}, // sans nom + nom illisible
 		"plan_warn":           {0, 1},
 		"realise_warn":        {0, 1},
 	}
@@ -451,19 +495,17 @@ func TestQualite(t *testing.T) {
 		t.Errorf("qualité: %d warnings", len(res.Qualite))
 	}
 	// MO sans nom → 🟠 + warn ; la ligne warn du plan est signalée.
-	if r := findRow(t, res, "CTA", "(sans nom)", "2026-W37"); r.Flag != domain.FlagHorsPlan {
-		t.Errorf("sans nom: %s", r.Flag)
+	if r := findRow(t, res, "CTA", noName, "2026-W37"); r.Flag != domain.FlagHorsPlan || r.Confidence != domain.ConfNone {
+		t.Errorf("sans nom: %+v", r)
 	}
-	if r := findRow(t, res, "CTA", "MARTINT", "2026-W37"); !r.Warn {
+	if r := findRow(t, res, "CTA", "PRESTATAIRE", "2026-W37"); r.Flag != domain.FlagHorsPlan || r.Reel != 2 {
+		t.Errorf("nom illisible: %+v", r)
+	}
+	if r := findRow(t, res, "CTA", "MARTIN Théo", "2026-W37"); !r.Warn {
 		t.Error("tuple issu d'une ligne warn non signalé")
 	}
-	if r := findRow(t, res, "CTA", "DURANDC", "2026-W37"); !r.Warn {
+	if r := findRow(t, res, "CTA", "DURAND Claire", "2026-W37"); !r.Warn {
 		t.Error("tuple issu d'une écriture warn non signalé")
-	}
-	// Seuil fuzzy non dépassé → pas de warn.
-	s.SeuilFuzzyCount = 10
-	if findQual(Run(in, s), "fuzzy") != nil {
-		t.Error("fuzzy sous le seuil ne doit pas alerter")
 	}
 }
 
@@ -531,7 +573,7 @@ func TestEntreesVides(t *testing.T) {
 
 func TestNonMOPlanLinesAndNegativeHours(t *testing.T) {
 	in := baseInput()
-	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire", "DURANDC")}
+	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire")}
 	moLine := planLine("CT1", "DURANDC", "DURAND Claire", sp("p1"), 30)
 	frais := planLine("CT2", "DURANDC", "DURAND Claire", sp("p1"), 40)
 	frais.LigneCout = "FRAIS DE MISSION"
@@ -541,7 +583,7 @@ func TestNonMOPlanLinesAndNegativeHours(t *testing.T) {
 		mo("CT1", "DURAND Claire Mme", -5, "2026-09-09"), // contre-passation
 	}
 	res := Run(in, store.DefaultSettings())
-	r := findRow(t, res, "CT1", "DURANDC", "2026-W37")
+	r := findRow(t, res, "CT1", "DURAND Claire", "2026-W37")
 	if math.Abs(r.Reel-30) > 0.01 || r.Flag != domain.FlagConforme {
 		t.Errorf("réel %v flag %s, want 30 h conforme (contre-passation déduite)", r.Reel, r.Flag)
 	}

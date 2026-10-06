@@ -26,32 +26,35 @@ function Note({ children }: { children: ReactNode }) {
   );
 }
 
-/** Identité de la ressource et du CT, commune aux deux vues. */
+/** Identité de la ressource (« NOM Prénom ») et du CT, commune aux deux vues. */
 function identity(e: EcartRow): KeyValueItem[] {
-  const items: KeyValueItem[] = [{ label: 'Personne', value: e.ressource_label || e.ressource }];
-  if (e.ressource_label && e.ressource_label !== e.ressource) items.push({ label: 'Code ressource', value: e.ressource, mono: true });
-  items.push(
+  const items: KeyValueItem[] = [
+    { label: 'Personne', value: e.ressource_label || e.ressource },
     { label: 'Squad', value: e.squad_nom || '—' },
     { label: 'Correspondance', value: CONFIDENCE_LABEL[e.confidence] },
     { label: 'CT', value: e.ct, mono: true },
-  );
+  ];
   if (e.ct_libelle) items.push({ label: 'Libellé CT', value: e.ct_libelle });
   return items;
 }
 
 function Notes({ e }: { e: EcartRow }) {
-  if (!e.inactive && !e.warn && e.confidence !== 'fuzzy') return null;
+  if (!e.inactive && !e.warn) return null;
   return (
     <Stack gap={4}>
       {e.inactive && <Note>Personne inactive dans le référentiel.</Note>}
-      {e.confidence === 'fuzzy' && <Note>Correspondance approximative du nom : à confirmer dans Anomalies.</Note>}
       {e.warn && <Note>Ligne source signalée « warn » au parsing.</Note>}
     </Stack>
   );
 }
 
 const planLink = (planId: string | undefined, e: EcartRow) =>
-  planId ? `/plan/${planId}?${new URLSearchParams({ ct: e.ct, ressource: e.ressource }).toString()}` : null;
+  planId
+    ? `/plan/${planId}?${new URLSearchParams(
+        // Ligne non nominative (sans fiche) : ressource = libellé → recherche plein-texte.
+        e.personne_id ? { ct: e.ct, nom_prenom: e.ressource } : { ct: e.ct, q: e.ressource },
+      ).toString()}`
+    : null;
 
 interface RowProps {
   row: EcartRow | null;

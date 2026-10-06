@@ -1,16 +1,12 @@
-/* Détail d'un plan de charge : cellules sur une ligne, actions au survol, ligne basse de la barre. */
+/* Détail d'un plan de charge : cellules sur une ligne, ligne basse de la barre. */
 .plan-res {
   display: inline-flex;
   align-items: baseline;
   gap: 0;
   white-space: nowrap;
 }
-.plan-res__code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-.plan-res__name {
-  white-space: pre;
+.plan-res__none {
+  color: var(--text-secondary);
 }
 .plan-res__inactive {
   margin-left: 8px;
@@ -31,18 +27,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (hover: hover) {
-  .plan-table td[data-actions] > * {
-    opacity: 0;
-    transition: opacity 0.15s var(--ease);
-  }
-  .plan-table tr:hover td[data-actions] > *,
-  .plan-table tr[data-selected] td[data-actions] > *,
-  .plan-table tr:focus-within td[data-actions] > * {
-    opacity: 1;
-  }
 }
 
 .plan-bottom {

@@ -4,21 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"njord/internal/domain"
-	"njord/internal/names"
 	"njord/internal/store"
 )
 
-// Repo reads the analysis inputs from SQLite and writes the only two things
-// the module owns: confirmed aliases and the last rendered result.
+// Repo reads the analysis inputs from SQLite and writes the last rendered
+// result (the anomaly treatments are written by the handler).
 type Repo struct{ st *store.Store }
 
 func NewRepo(st *store.Store) *Repo { return &Repo{st: st} }
 
-const planCols = `id, version_id, row_num, layout, ct, ressource, libelle, type_affectation, ligne_cout,
+const planCols = `id, version_id, row_num, layout, ct, ressource, libelle, nom_prenom, type_affectation, ligne_cout,
 	charge_totale, pps, pourcentage, unite, calcul_duree, date_debut, date_fin, quantite_affectee,
 	taux_fixe, depuis, pendant, statut_parsing, motif_rejet, ressource_kind, inactive, personne_id, squad_id, groupe`
 
@@ -36,7 +34,7 @@ func (r *Repo) PlanLines(ctx context.Context, versionID string) ([]domain.PlanLi
 		var qa sql.NullFloat64
 		var pid, sid sql.NullString
 		var inactive int
-		if err := rows.Scan(&l.ID, &l.VersionID, &l.RowNum, &l.Layout, &l.CT, &l.Ressource, &l.Libelle,
+		if err := rows.Scan(&l.ID, &l.VersionID, &l.RowNum, &l.Layout, &l.CT, &l.Ressource, &l.Libelle, &l.NomPrenom,
 			&l.TypeAffectation, &l.LigneCout, &l.ChargeTotale, &l.PPS, &l.Pourcentage, &l.Unite, &l.CalculDuree,
 			&l.DateDebut, &l.DateFin, &qa, &l.TauxFixe, &l.Depuis, &l.Pendant, &l.StatutParsing, &l.MotifRejet,
 			&l.RessourceKind, &inactive, &pid, &sid, &l.Groupe); err != nil {
@@ -55,7 +53,7 @@ func (r *Repo) PlanLines(ctx context.Context, versionID string) ([]domain.PlanLi
 }
 
 const entryCols = `id, version_id, row_num, entite, activite, sous_activite, trigramme, tg, tg_libelle, wp,
-	wp_libelle, description_depenses, categorie, type, categorie_fnp, employe_fournisseur, matricule, fpc, cea,
+	wp_libelle, description_depenses, categorie, type, categorie_fnp, employe_fournisseur, nom_prenom, matricule, fpc, cea,
 	quantite, total_eur, date_depense, periode_comptable, compte_comptable, num_facture, num_commande, num_ligne,
 	lot_ifrs15, nom_ressource, fournisseur, code_article, mois_comptable, statut_parsing, motif_rejet`
 
@@ -73,7 +71,7 @@ func (r *Repo) Entries(ctx context.Context, versionID string) ([]domain.RealiseE
 		var nl sql.NullInt64
 		if err := rows.Scan(&e.ID, &e.VersionID, &e.RowNum, &e.Entite, &e.Activite, &e.SousActivite, &e.Trigramme,
 			&e.TG, &e.TGLibelle, &e.WP, &e.WPLibelle, &e.DescriptionDepenses, &e.Categorie, &e.Type, &e.CategorieFNP,
-			&e.EmployeFournisseur, &e.Matricule, &e.FPC, &e.CEA, &e.Quantite, &e.TotalEur, &e.DateDepense,
+			&e.EmployeFournisseur, &e.NomPrenom, &e.Matricule, &e.FPC, &e.CEA, &e.Quantite, &e.TotalEur, &e.DateDepense,
 			&e.PeriodeComptable, &e.CompteComptable, &e.NumFacture, &e.NumCommande, &nl, &e.LotIFRS15,
 			&e.NomRessource, &e.Fournisseur, &e.CodeArticle, &e.MoisComptable, &e.StatutParsing, &e.MotifRejet); err != nil {
 			return nil, err
@@ -95,91 +93,27 @@ func nullStr(ns sql.NullString) *string {
 	return &s
 }
 
-// Personnes returns every person with matricules and aliases (filter by id if ids given).
-func (r *Repo) Personnes(ctx context.Context, ids ...string) ([]domain.Personne, error) {
-	db := r.st.DB()
-	q := `SELECT id, display_name, nom_normalise, statut, squad_id, created_at FROM personnes`
-	args := []any{}
-	if len(ids) > 0 {
-		q += ` WHERE id IN (?` + strings.Repeat(",?", len(ids)-1) + `)`
-		for _, id := range ids {
-			args = append(args, id)
-		}
-	}
-	q += ` ORDER BY id`
-	rows, err := db.QueryContext(ctx, q, args...)
+// Personnes returns every person of the référentiel (identity = nom_normalise).
+func (r *Repo) Personnes(ctx context.Context) ([]domain.Personne, error) {
+	rows, err := r.st.DB().QueryContext(ctx,
+		`SELECT id, display_name, nom_normalise, statut, squad_id, created_at FROM personnes ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 	out := []domain.Personne{}
-	idx := map[string]int{}
 	for rows.Next() {
 		var p domain.Personne
 		var sid sql.NullString
 		var created string
 		if err := rows.Scan(&p.ID, &p.DisplayName, &p.NomNormalise, &p.Statut, &sid, &created); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		p.SquadID = nullStr(sid)
 		p.CreatedAt = store.ParseTime(created)
-		p.Matricules = []string{}
-		p.Alias = []domain.PersonneAlias{}
-		idx[p.ID] = len(out)
 		out = append(out, p)
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if len(out) == 0 {
-		return out, nil
-	}
-
-	mrows, err := db.QueryContext(ctx, `SELECT personne_id, matricule FROM personne_matricules ORDER BY personne_id, matricule`)
-	if err != nil {
-		return nil, err
-	}
-	for mrows.Next() {
-		var pid, m string
-		if err := mrows.Scan(&pid, &m); err != nil {
-			mrows.Close()
-			return nil, err
-		}
-		if i, ok := idx[pid]; ok {
-			out[i].Matricules = append(out[i].Matricules, m)
-		}
-	}
-	mrows.Close()
-
-	arows, err := db.QueryContext(ctx, `SELECT id, personne_id, alias, alias_normalise, source FROM personne_alias ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer arows.Close()
-	for arows.Next() {
-		var a domain.PersonneAlias
-		var pid string
-		if err := arows.Scan(&a.ID, &pid, &a.Alias, &a.AliasNormalise, &a.Source); err != nil {
-			return nil, err
-		}
-		if i, ok := idx[pid]; ok {
-			out[i].Alias = append(out[i].Alias, a)
-		}
-	}
-	return out, arows.Err()
-}
-
-// Personne returns one person (store.ErrNotFound if absent).
-func (r *Repo) Personne(ctx context.Context, id string) (domain.Personne, error) {
-	ps, err := r.Personnes(ctx, id)
-	if err != nil {
-		return domain.Personne{}, err
-	}
-	if len(ps) == 0 {
-		return domain.Personne{}, store.ErrNotFound
-	}
-	return ps[0], nil
+	return out, rows.Err()
 }
 
 // Squads returns every squad with its aliases.
@@ -347,35 +281,6 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 	}
 	return out, nil
 }
-
-// ConfirmAlias adds a « confirme » alias to a person (an existing « import »
-// alias with the same normalised form is upgraded to « confirme »).
-func (r *Repo) ConfirmAlias(ctx context.Context, personneID, alias, operateur string) (domain.Personne, error) {
-	alias = strings.Join(strings.Fields(alias), " ")
-	norm := names.Normalize(alias)
-	if norm == "" {
-		return domain.Personne{}, errBadAlias
-	}
-	if _, err := r.Personne(ctx, personneID); err != nil {
-		return domain.Personne{}, err
-	}
-	err := r.st.Tx(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO personne_alias(personne_id, alias, alias_normalise, source, created_at)
-			VALUES (?,?,?,'confirme',?)
-			ON CONFLICT(personne_id, alias_normalise) DO UPDATE SET source = 'confirme' WHERE source = 'import'`,
-			personneID, alias, norm, store.FormatTime(r.st.Now()))
-		if err != nil {
-			return err
-		}
-		return r.st.Audit(ctx, tx, operateur, "alias_confirm", "personne", personneID, "alias confirmé depuis l'analyse")
-	})
-	if err != nil {
-		return domain.Personne{}, err
-	}
-	return r.Personne(ctx, personneID)
-}
-
-var errBadAlias = errors.New("alias vide")
 
 // lastParams is stored with the last rendered result.
 type lastParams struct {

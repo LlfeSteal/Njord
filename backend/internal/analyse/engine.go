@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"njord/internal/domain"
-	"njord/internal/names"
 )
 
 // Input is everything the engine needs. Lines/entries in statut drop must be
@@ -22,7 +21,7 @@ type Input struct {
 	Realise   domain.Version
 	PlanLines []domain.PlanLine
 	Entries   []domain.RealiseEntry
-	Personnes []domain.Personne // avec Matricules et Alias
+	Personnes []domain.Personne // référentiel (clé nom_normalise = names.Key)
 	Squads    []domain.Squad
 	// Période d'analyse en semaines ISO "2026-W36" ; "" = défaut (semaines communes).
 	WeekFrom, WeekTo string
@@ -38,15 +37,14 @@ type tuple struct {
 	hasReal     bool
 	warn        bool
 	inactive    bool
-	conf        domain.Confidence // confiance la plus faible des écritures
-	ressource   string            // code ressource PDC de la ligne sur ce CT
+	conf        domain.Confidence // confiance des écritures (même clé → même confiance)
 	squadID     *string
 }
 
 type resInfo struct {
 	personneID *string
-	ressource  string
-	label      string
+	ressource  string // « NOM Prénom » ; libellé (ligne non nominative) ; nom brut (illisible)
+	label      string // nom de la fiche personne si elle existe, sinon ressource
 	squadID    *string
 	inactive   bool
 }
@@ -70,7 +68,7 @@ type run struct {
 	info      map[string]*resInfo
 	tuples    map[tupleKey]*tuple
 	ctLibelle map[string]string
-	corr      map[string]*domain.Correspondance
+	corr      map[string]*domain.Correspondance // par nom réalisé brut
 }
 
 // Run produces the full analysis.
@@ -119,23 +117,11 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 	r.dataQuality()
 
 	corr := make([]domain.Correspondance, 0, len(r.corr))
-	nbFuzzy := 0
 	for _, c := range r.corr {
 		c.Heures = round2(c.Heures)
 		corr = append(corr, *c)
-		if c.Confidence == domain.ConfFuzzy {
-			nbFuzzy++
-		}
 	}
 	sortCorrespondances(corr)
-	if nbFuzzy > s.SeuilFuzzyCount {
-		r.q.setCount("fuzzy", nbFuzzy)
-		for _, c := range corr {
-			if c.Confidence == domain.ConfFuzzy {
-				r.q.detail("fuzzy", c.NomRealise+" → "+c.PersonneNom)
-			}
-		}
-	}
 
 	plan, real := in.Plan, in.Realise
 	res := domain.AnalyseResult{
@@ -192,7 +178,7 @@ func (r *run) enrich() {
 			r.ctLibelle[tg] = ctLabel(tg, e.TGLibelle)
 		}
 		if r.enr[i].MO && r.enr[i].Heures != 0 { // contre-passations (heures < 0) incluses
-			id := r.m.resolve(e.Matricule, entryName(e))
+			id := r.m.resolve(e.NomPrenom, entryName(e))
 			r.ids[i] = &id
 		}
 	}
@@ -262,26 +248,21 @@ func (r *run) planSide() {
 		ct := strings.TrimSpace(l.CT)
 		inf := r.info[key]
 		if inf == nil {
-			inf = &resInfo{ressource: strings.TrimSpace(l.Ressource)}
-			if l.PersonneID != nil && *l.PersonneID != "" {
-				pid := *l.PersonneID
-				inf.personneID = &pid
-				if p := r.personnes[pid]; p != nil {
-					inf.label = p.DisplayName
+			inf = &resInfo{ressource: planLineLabel(l)}
+			inf.label = inf.ressource
+			if strings.HasPrefix(key, "N:") {
+				p := r.m.personne(key)
+				if p == nil && l.PersonneID != nil {
+					p = r.personnes[*l.PersonneID]
+				}
+				if p != nil {
+					pid := p.ID
+					inf.personneID = &pid
+					if strings.TrimSpace(p.DisplayName) != "" {
+						inf.label = p.DisplayName
+					}
 					inf.squadID = p.SquadID
 				}
-			}
-			if inf.label == "" {
-				if person, _ := names.SplitLibelle(l.Libelle, nil); person != "" {
-					inf.label = person
-				} else if inf.ressource != "" {
-					inf.label = inf.ressource
-				} else {
-					inf.label = strings.TrimSpace(l.Libelle)
-				}
-			}
-			if inf.ressource == "" {
-				inf.ressource = inf.label
 			}
 			r.info[key] = inf
 		}
@@ -316,10 +297,7 @@ func (r *run) planSide() {
 			}
 			t := r.tuple(ct, key, w)
 			t.prevu += weeks[w]
-			if !t.hasPlan {
-				t.hasPlan = true
-				t.ressource = strings.TrimSpace(l.Ressource)
-			}
+			t.hasPlan = true
 			if t.squadID == nil && l.SquadID != nil {
 				t.squadID = l.SquadID
 			}
@@ -356,26 +334,29 @@ func (r *run) realSide() {
 			continue
 		}
 		name := entryName(e)
-		if id.Key == "X:" {
+		switch {
+		case id.Key == "X:":
 			r.q.add("mo_sans_nom", "ligne "+itoa(e.RowNum)+" ("+tg+")")
+		case strings.HasPrefix(id.Key, "U:"):
+			r.q.add("mo_sans_nom", "ligne "+itoa(e.RowNum)+" ("+tg+") : « "+name+" »")
 		}
 		inf := r.info[id.Key]
 		if inf == nil {
 			inf = &resInfo{personneID: id.PersonneID}
 			switch {
+			case strings.HasPrefix(id.Key, "N:"):
+				inf.ressource = strings.TrimSpace(e.NomPrenom)
 			case name != "":
-				inf.ressource, inf.label = name, name
-			case strings.TrimSpace(e.Matricule) != "":
-				inf.ressource = strings.TrimSpace(e.Matricule)
-				inf.label = inf.ressource
+				inf.ressource = name
 			default:
-				inf.ressource, inf.label = "(sans nom)", "(sans nom)"
+				inf.ressource = noName
 			}
-			if id.PersonneID != nil {
-				if p := r.personnes[*id.PersonneID]; p != nil {
+			inf.label = inf.ressource
+			if p := r.m.personne(id.Key); p != nil {
+				if strings.TrimSpace(p.DisplayName) != "" {
 					inf.label = p.DisplayName
-					inf.squadID = p.SquadID
 				}
+				inf.squadID = p.SquadID
 			}
 			r.info[id.Key] = inf
 		}
@@ -383,29 +364,25 @@ func (r *run) realSide() {
 		t := r.tuple(tg, id.Key, en.ISOWeek)
 		t.reel += en.Heures
 		t.hasReal = true
-		t.conf = weakest(t.conf, id.Confidence)
+		t.conf = id.Confidence
 		t.warn = t.warn || e.StatutParsing == domain.ParsingWarn
 
 		wk := [2]string{id.Key, en.ISOWeek}
 		weekly[wk] += en.Heures
 		weeklyLabel[id.Key] = inf.label
 
-		ck := name + "\x00" + canon(e.Matricule)
-		c := r.corr[ck]
+		c := r.corr[name]
 		if c == nil {
 			c = &domain.Correspondance{
-				NomRealise:   name,
-				NomNormalise: names.Normalize(name),
-				PersonneID:   id.PersonneID,
-				Confidence:   id.Confidence,
+				NomRealise: name,
+				NomPrenom:  strings.TrimSpace(e.NomPrenom),
+				PersonneID: id.PersonneID,
+				Confidence: id.Confidence,
 			}
-			if id.matched() {
+			if id.matched() || id.PersonneID != nil {
 				c.PersonneNom = inf.label
-				if r.m.planned[id.Key] {
-					c.Ressource = inf.ressource
-				}
 			}
-			r.corr[ck] = c
+			r.corr[name] = c
 		}
 		c.NbEcritures++
 		c.Heures += en.Heures
@@ -455,13 +432,9 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 			SquadID:        t.squadID,
 		}
 		if t.hasPlan {
-			row.Ressource = t.ressource
 			row.Inactive = t.inactive
 		} else {
 			row.Inactive = inf.inactive
-		}
-		if row.Ressource == "" {
-			row.Ressource = inf.ressource
 		}
 		if row.SquadID == nil {
 			row.SquadID = inf.squadID

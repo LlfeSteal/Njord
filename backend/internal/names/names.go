@@ -1,12 +1,12 @@
-// Package names normalises person and squad names so that the plan de charge
-// (Libellé "DURAND Claire / Squad Alpha", "Antoine De La Tour") and the réalisé
-// (EMPLOYE/FOURNISSEUR "DURAND Claire Mme", "DE LA TOUR Antoine Mr.") can be
-// compared by exact equality (SPEC_analyse §5.1 strategy 3: no fuzzy distance).
+// Package names identifies people by NOM + Prénom only (DECISIONS n° 8): the
+// plan de charge (Libellé "DURAND Claire / Squad Alpha", "Antoine De La Tour")
+// and the réalisé (EMPLOYE/FOURNISSEUR "DURAND Claire Mme", "DE LA TOUR Antoine
+// Mr.") are both reduced to a NomPrenom whose Key is compared by exact equality.
+// It also normalises squad names.
 package names
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 	"unicode"
 
@@ -22,20 +22,6 @@ var civilites = map[string]bool{
 func tokens(s string) []string {
 	s = strings.ToUpper(xlsxutil.StripAccents(s))
 	return strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-}
-
-// Normalize returns the matching key of a person name: accents removed, upper
-// case, punctuation removed, civilities (M., Mme, Mr.…) removed, tokens sorted.
-// "DE LA TOUR Antoine Mr." and "Antoine De La Tour" → "ANTOINE DE LA TOUR".
-func Normalize(s string) string {
-	toks := []string{}
-	for _, t := range tokens(stripParens(s)) {
-		if !civilites[t] {
-			toks = append(toks, t)
-		}
-	}
-	sort.Strings(toks)
-	return strings.Join(toks, " ")
 }
 
 // NormalizeSquad returns the key of a squad name (tokens kept in order).
@@ -91,10 +77,4 @@ func SplitLibelle(libelle string, isSquad func(seg string) bool) (person, squad 
 		}
 	}
 	return person, squad
-}
-
-// PersonKey is Normalize(person part of a plan Libellé).
-func PersonKey(libelle string) string {
-	p, _ := SplitLibelle(libelle, nil)
-	return Normalize(p)
 }

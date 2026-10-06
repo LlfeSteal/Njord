@@ -312,6 +312,10 @@ func TestPlanNonNominatif(t *testing.T) {
 	if len(res.Ecarts) != 4 {
 		t.Errorf("%d tuples, attendu 4", len(res.Ecarts))
 	}
+	// Seule DURAND Claire est une personne : les lignes non nominatives (absentes) ne comptent pas.
+	if k := res.KPIs; k.NbPersonnesPlanifiees != 1 || k.NbPersonnesAbsentes != 0 {
+		t.Errorf("personnes : %d absentes / %d planifiées, attendu 0/1", k.NbPersonnesAbsentes, k.NbPersonnesPlanifiees)
+	}
 }
 
 func TestCorrespondances(t *testing.T) {

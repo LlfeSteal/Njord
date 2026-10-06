@@ -502,8 +502,9 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 		v := float64(k.NbConformes) / float64(k.NbTuplesCompares)
 		k.TauxConformite = &v
 	}
+	// Personnes = clés nominatives (« N: ») ; une ligne non nominative n'est pas une personne.
 	for key, p := range personPrevu {
-		if p > 0 {
+		if p > 0 && strings.HasPrefix(key, "N:") {
 			k.NbPersonnesPlanifiees++
 			if personReel[key] == 0 {
 				k.NbPersonnesAbsentes++

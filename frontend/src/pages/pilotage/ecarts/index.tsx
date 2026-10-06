@@ -33,6 +33,7 @@ import { useAnalyse } from '../shared/context';
 import { AnalyseGate } from '../anomalies/AnalyseGate';
 import { isAnalyseShown, norm, shortWeek } from '../anomalies/meta';
 import { EcartRowInspector, RessourceInspector } from './EcartInspector';
+import SyntheseImputations from './SyntheseImputations';
 import {
   DEFAULT_SORT,
   cmp,
@@ -44,6 +45,7 @@ import {
   rowTone,
   sortGroups,
   sortRows,
+  synthese,
   useEcartsUrl,
   type EcartsVue,
   type GroupKey,
@@ -105,17 +107,24 @@ export default function EcartsPage() {
   const labelOf = (data: { value: string; label: string }[], v: string) => data.find((d) => d.value === v)?.label ?? v;
 
   // ---------------------------------------------------------------- Filtrage, tri, regroupement
-  const filtered = useMemo(() => {
+  // La synthèse suit tous les filtres sauf le flag (sinon une seule part) ; le tableau, tous.
+  const filteredSansFlag = useMemo(() => {
     const nq = norm(state.q.trim());
     return ecarts.filter(
       (e) =>
         (!state.ct || e.ct === state.ct) &&
         (!state.ressource || e.ressource === state.ressource) &&
         (!state.squad || e.squad_id === state.squad) &&
-        (state.flags.length === 0 || state.flags.includes(e.flag)) &&
         (!nq || norm(`${e.ressource} ${e.ressource_label} ${e.ct} ${e.ct_libelle}`).includes(nq)),
     );
-  }, [ecarts, state.ct, state.ressource, state.squad, state.flags, state.q]);
+  }, [ecarts, state.ct, state.ressource, state.squad, state.q]);
+  const filtered = useMemo(
+    () => (state.flags.length === 0 ? filteredSansFlag : filteredSansFlag.filter((e) => state.flags.includes(e.flag))),
+    [filteredSansFlag, state.flags],
+  );
+  const syntheseData = useMemo(() => synthese(filteredSansFlag), [filteredSansFlag]);
+  // Clic sur une part : filtre sur ce seul flag, ou le retire s'il est déjà le seul filtré.
+  const selectFlag = (f: Flag) => update({ flags: state.flags.length === 1 && state.flags[0] === f ? [] : [f] });
   const byRessource = state.vue === 'ressource';
   const rows = useMemo(() => (byRessource ? [] : sortRows(filtered, listSort)), [byRessource, filtered, listSort]);
   const groups = useMemo(
@@ -323,7 +332,14 @@ export default function EcartsPage() {
 
   return (
     <Page toolbar={toolbar} inspector={shown ? inspector : undefined}>
-      {content}
+      {shown && filteredSansFlag.length > 0 ? (
+        <Stack gap={16}>
+          <SyntheseImputations data={syntheseData} selected={state.flags} onSelect={selectFlag} />
+          {content}
+        </Stack>
+      ) : (
+        content
+      )}
     </Page>
   );
 }

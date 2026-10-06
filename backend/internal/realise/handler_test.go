@@ -87,8 +87,8 @@ func TestHTTPImportLifecycle(t *testing.T) {
 
 	// Preview : rien n'est écrit.
 	rep := decode[domain.ImportReport](t, e.upload("/api/realise/imports/preview", demo, "demo_realise.xlsx", nil), 200)
-	if rep.Intitule != "demo_realise" || rep.Total != 482 || rep.SourceFormat != "demo" || rep.ActiveVersion != nil ||
-		rep.MontantTotalEur == nil || *rep.MontantTotalEur != 403130.43 || rep.Issues == nil || rep.Kind != domain.KindRealise {
+	if rep.Intitule != "demo_realise" || rep.Total != 461 || rep.SourceFormat != "demo" || rep.ActiveVersion != nil ||
+		rep.MontantTotalEur == nil || *rep.MontantTotalEur != 395218.67 || rep.Issues == nil || rep.Kind != domain.KindRealise {
 		t.Fatalf("preview: %+v", rep)
 	}
 	var n int
@@ -101,13 +101,13 @@ func TestHTTPImportLifecycle(t *testing.T) {
 	res := decode[domain.ImportResult](t, e.upload("/api/realise/imports", demo, "demo_realise.xlsx",
 		map[string]string{"importeur": "alice"}), 201)
 	v1 := res.Version
-	if v1.Statut != domain.StatutActive || v1.Importeur != "alice" || v1.NbLignes != 482 || v1.Intitule != "demo_realise" ||
+	if v1.Statut != domain.StatutActive || v1.Importeur != "alice" || v1.NbLignes != 461 || v1.Intitule != "demo_realise" ||
 		v1.PeriodeDebut != "2026-08-27" || v1.PeriodeFin != "2026-10-03" || v1.MontantTotalEur == nil ||
-		*v1.MontantTotalEur != 403130.43 || v1.SourceFormat != "demo" || v1.Filename != "demo_realise.xlsx" {
+		*v1.MontantTotalEur != 395218.67 || v1.SourceFormat != "demo" || v1.Filename != "demo_realise.xlsx" {
 		t.Fatalf("v1: %+v", v1)
 	}
 	e.st.DB().QueryRow(`SELECT COUNT(*) FROM realise_entries WHERE version_id = ?`, v1.ID).Scan(&n)
-	if n != 482 {
+	if n != 461 {
 		t.Fatalf("écritures stockées: %d", n)
 	}
 
@@ -408,7 +408,7 @@ func TestDemoEntriesMasked(t *testing.T) {
 	e := newEnv(t)
 	v := decode[domain.ImportResult](t, e.upload("/api/realise/imports", loadDemo(t), "demo_realise.xlsx", nil), 201).Version
 	p := decode[domain.RealiseEntriesPage](t, e.do("GET", "/api/realise/versions/"+v.ID+"/entries?limit=5000&mask_sensitive=true", ""), 200)
-	if p.Total != 482 || p.Totals.TotalEur != 403130.43 {
+	if p.Total != 461 || p.Totals.TotalEur != 395218.67 {
 		t.Fatalf("démo: %d %.2f", p.Total, p.Totals.TotalEur)
 	}
 	for _, it := range p.Items {
@@ -416,7 +416,7 @@ func TestDemoEntriesMasked(t *testing.T) {
 			t.Fatal("masquage démo")
 		}
 	}
-	if p.Totals.ParCategorie["MAIN D'OEUVRE"] != 333 {
+	if p.Totals.ParCategorie["MAIN D'OEUVRE"] != 312 {
 		t.Fatalf("par catégorie: %v", p.Totals.ParCategorie)
 	}
 	p = decode[domain.RealiseEntriesPage](t, e.do("GET", "/api/realise/versions/"+v.ID+"/entries?q=reserve%20de%20CAPACITE&limit=1", ""), 200)

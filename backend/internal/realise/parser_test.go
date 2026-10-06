@@ -31,7 +31,7 @@ func TestParseDemo(t *testing.T) {
 	if res.SourceFormat != domain.FormatDemo || res.SheetName != "MyWorkSheet-1" || res.HeaderRow != 1 {
 		t.Fatalf("détection: %s %s %d", res.SourceFormat, res.SheetName, res.HeaderRow)
 	}
-	if len(res.Entries) != 482 || res.Total != 482 {
+	if len(res.Entries) != 461 || res.Total != 461 {
 		t.Fatalf("écritures: %d / total %d", len(res.Entries), res.Total)
 	}
 	if res.OK+res.Warn+res.Drop != res.Total {
@@ -61,7 +61,7 @@ func TestParseDemo(t *testing.T) {
 	if neg != 20 || negQ != 15 {
 		t.Fatalf("montants négatifs: %d (quantités négatives: %d)", neg, negQ)
 	}
-	if res.MontantTotalEur != 403130.43 { // Totaux du fichier : 403.130419 k€ (arrondi au centime par ligne)
+	if res.MontantTotalEur != 395218.67 { // Totaux du fichier : 395.218659 k€ (arrondi au centime par ligne)
 		t.Fatalf("montant total %.2f", res.MontantTotalEur)
 	}
 	if d := sum - res.MontantTotalEur; d > 0.01 || d < -0.01 {
@@ -69,7 +69,7 @@ func TestParseDemo(t *testing.T) {
 	}
 	e := res.Entries[0]
 	if e.RowNum != 3 || e.TotalEur != 11000.89 || e.TG != "Y99F900011" ||
-		e.TGLibelle != "Y99F900011 - Réserve de capacité Site Nord" ||
+		e.TGLibelle != "Y99F900011 - Réserve de capacité Site Loire" ||
 		e.WP != "Y99F90300" || e.WPLibelle != "Y99F90300 - Réserve de capacité & aléas" {
 		t.Fatalf("1re écriture: %+v", e)
 	}
@@ -101,7 +101,7 @@ func TestParseDemo(t *testing.T) {
 			}
 		}
 	}
-	if mo != 333 || !people["DE LA TOUR Antoine"] || !people["DURAND Claire"] {
+	if mo != 312 || !people["DE LA TOUR Antoine"] || !people["DURAND Claire"] {
 		t.Fatalf("nom_prenom: %d MO, %d personnes", mo, len(people))
 	}
 	last := res.Entries[len(res.Entries)-1]

@@ -105,6 +105,31 @@ func TestAnomaliesDemo(t *testing.T) {
 	if byCat[domain.AnomalieEcart] == 0 {
 		t.Error("aucune anomalie écart")
 	}
+	// La démo couvre tous les cas (DECISIONS n° 9) : sur- et sous-imputations, personnes jamais imputées.
+	flags := map[domain.Flag]int{}
+	for _, r := range res.Ecarts {
+		flags[r.Flag]++
+	}
+	if flags[domain.FlagSurImputation] < 4 || flags[domain.FlagSousImputation] < 3 || flags[domain.FlagHorsPlan] == 0 || flags[domain.FlagConforme] == 0 {
+		t.Errorf("flags de la démo : %v", flags)
+	}
+	if k := res.KPIs; k.NbPersonnesAbsentes != 2 || k.NbPersonnesPlanifiees != 21 {
+		t.Errorf("jamais imputés : %d / %d planifiées, attendu 2 / 21", k.NbPersonnesAbsentes, k.NbPersonnesPlanifiees)
+	}
+	for _, key := range []string{
+		anomalieKey("ecart", "Y99F90004", "BLANC Sarah", string(domain.FlagSurImputation)),
+		anomalieKey("ecart", "Y99F90001", "MARTIN Théo", string(domain.FlagSousImputation)),
+		anomalieKey("ecart", "Y99F900010", "ROUX Marc", string(domain.FlagAbsence)),
+		anomalieKey("ecart", "Y99F90005", "DUBOIS Lucas", string(domain.FlagAbsence)),
+	} {
+		found := false
+		for _, a := range res.Anomalies {
+			found = found || a.Key == key
+		}
+		if !found {
+			t.Errorf("anomalie attendue absente : %s", key)
+		}
+	}
 	// Chaque écart non conforme est couvert par une anomalie, et Σ heures concorde.
 	sum := map[string]float64{}
 	for _, r := range res.Ecarts {

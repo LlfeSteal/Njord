@@ -133,6 +133,7 @@ func pluriel(n int, sing, plur string) string {
 func (r *run) anomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	out := []domain.Anomalie{}
 	out = append(out, ecartAnomalies(res)...)
+	out = append(out, erreurCTAnomalies(res)...)
 	out = append(out, ctRisqueAnomalies(res, r.s.SeuilCTRisqueEur)...)
 	out = append(out, deriveAnomalies(res)...)
 	out = append(out, qualiteAnomalies(res)...)
@@ -172,18 +173,46 @@ func SortAnomalies(as []domain.Anomalie) {
 	})
 }
 
+// residualEcart: écart d'un tuple hors heures réaffectées par une erreur de CT
+// (§6.2) — côté CT imputé à tort (prévu = 0) l'excédent baisse, côté CT planifié
+// le manque se réduit.
+func residualEcart(row domain.EcartRow) float64 {
+	if row.Reaffecte <= 0 {
+		return row.Ecart
+	}
+	if row.Prevu == 0 {
+		return row.Ecart - row.Reaffecte
+	}
+	return row.Ecart + row.Reaffecte
+}
+
+// sortedKeys returns the keys of a set, sorted.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ecartAnomalies groups the non-compliant rows per (CT, ressource, flag).
 // Inactive resources are left out unless include_inactive (as for the KPIs),
-// except hors plan rows which never depend on the plan.
+// except hors plan rows which never depend on the plan. Les erreurs de CT ont
+// leur propre anomalie (erreurCTAnomalies) ; pour un tuple resté sur / sous avec
+// des heures réaffectées, les chiffres portent sur l'écart résiduel.
 func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	type group struct {
-		row                domain.EcartRow
-		ecart, prevu, reel float64
-		weeks              map[string]bool
+		row                       domain.EcartRow
+		ecart, prevu, reel, reaff float64
+		weeks, lies               map[string]bool
 	}
 	groups := map[string]*group{}
 	var order []string
 	for _, row := range res.Ecarts {
+		if row.Flag == domain.FlagErreurCT {
+			continue
+		}
 		if _, ok := ecartGravite[row.Flag]; !ok {
 			continue
 		}
@@ -193,13 +222,110 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 		k := anomalieKey("ecart", row.CT, row.Ressource, string(row.Flag))
 		g := groups[k]
 		if g == nil {
-			g = &group{row: row, weeks: map[string]bool{}}
+			g = &group{row: row, weeks: map[string]bool{}, lies: map[string]bool{}}
 			groups[k] = g
 			order = append(order, k)
 		}
-		g.ecart += row.Ecart
+		g.ecart += residualEcart(row)
 		g.prevu += row.Prevu
 		g.reel += row.Reel
+		g.weeks[row.Semaine] = true
+		if row.Reaffecte > 0 {
+			g.reaff += row.Reaffecte
+			for _, ct := range row.CTsLies {
+				g.lies[ct] = true
+			}
+		}
+		if g.row.RessourceLabel == "" {
+			g.row.RessourceLabel = row.RessourceLabel
+		}
+		if g.row.CTLibelle == "" {
+			g.row.CTLibelle = row.CTLibelle
+		}
+	}
+	out := make([]domain.Anomalie, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		weeks := sortedKeys(g.weeks)
+		label := g.row.RessourceLabel
+		if label == "" {
+			label = g.row.Ressource
+		}
+		flag := g.row.Flag
+		detail := pluriel(len(weeks), "semaine", "semaines") + ", écart cumulé " + fmtSigned(g.ecart) +
+			" h (prévu " + fmtHFr(g.prevu) + " h, réel " + fmtHFr(g.reel) + " h)"
+		if round2(g.reaff) > 0 {
+			lies := strings.Join(sortedKeys(g.lies), ", ")
+			if g.prevu == 0 {
+				detail += ", dont " + fmtHFr(g.reaff) + " h imputées au lieu de " + lies
+			} else {
+				detail += ", dont " + fmtHFr(g.reaff) + " h imputées sur " + lies
+			}
+		}
+		out = append(out, domain.Anomalie{
+			Key:         k,
+			Categorie:   domain.AnomalieEcart,
+			Gravite:     ecartGravite[flag],
+			Titre:       label + " · " + g.row.CT + " : " + flagLibelle(flag),
+			Detail:      detail,
+			Flag:        &flag,
+			CT:          g.row.CT,
+			CTLibelle:   g.row.CTLibelle,
+			Ressource:   g.row.Ressource,
+			Heures:      ptrF(round2(g.ecart)),
+			Semaines:    weeks,
+			Lien:        query("/ecarts", "ct", g.row.CT, "ressource", g.row.Ressource, "flag", string(flag)),
+			Fingerprint: fingerprint(string(flag), fpH(g.ecart), fpH(g.prevu), fpH(g.reel), itoa(len(weeks))),
+		})
+	}
+	return out
+}
+
+// erreurCTAnomalies: une anomalie par (ressource, CT imputé à tort B), qui
+// regroupe les deux côtés de l'erreur de CT (§6.2) : « imputé sur B au lieu de A ».
+// Un tuple du CT B resté sur-imputé (erreur partielle : le résiduel dépasse encore
+// le seuil) y contribue aussi par ses heures réaffectées, son résiduel restant dans
+// l'anomalie de sur-imputation. Les tuples côté CT planifié (prévu > 0) n'ont pas
+// d'anomalie propre ; leur prévu est cité dans le détail.
+func erreurCTAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
+	type group struct {
+		row         domain.EcartRow
+		reaff       float64
+		weeks, lies map[string]bool
+	}
+	// Semaines où le transfert explique un écart (au moins un tuple erreur_ct) ;
+	// ailleurs les heures réaffectées ne sont qu'une mention de l'anomalie sur/sous.
+	resolue := map[[2]string]bool{}
+	for _, row := range res.Ecarts {
+		if row.Flag == domain.FlagErreurCT {
+			resolue[[2]string{row.Ressource, row.Semaine}] = true
+		}
+	}
+	liee := func(row domain.EcartRow, ct string) bool {
+		for _, c := range row.CTsLies {
+			if c == ct {
+				return true
+			}
+		}
+		return false
+	}
+	groups := map[string]*group{}
+	var order []string
+	for _, row := range res.Ecarts {
+		if row.Prevu != 0 || row.Reaffecte <= 0 || !resolue[[2]string{row.Ressource, row.Semaine}] {
+			continue
+		}
+		if row.Inactive && !res.Meta.IncludeInactive {
+			continue
+		}
+		k := anomalieKey("ecart", row.CT, row.Ressource, string(domain.FlagErreurCT))
+		g := groups[k]
+		if g == nil {
+			g = &group{row: row, weeks: map[string]bool{}, lies: map[string]bool{}}
+			groups[k] = g
+			order = append(order, k)
+		}
+		g.reaff += row.Reaffecte
 		g.weeks[row.Semaine] = true
 		if g.row.RessourceLabel == "" {
 			g.row.RessourceLabel = row.RessourceLabel
@@ -211,31 +337,41 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	out := make([]domain.Anomalie, 0, len(order))
 	for _, k := range order {
 		g := groups[k]
-		weeks := make([]string, 0, len(g.weeks))
-		for w := range g.weeks {
-			weeks = append(weeks, w)
+		b := g.row.CT
+		// CT planifiés en manque : tuples côté CT planifié de la même personne,
+		// mêmes semaines, liés à B et non conformes (erreur de CT, ou sous-imputation
+		// résiduelle) ; un CT resté conforme n'a reçu qu'une part du transfert.
+		var prevu float64
+		for _, row := range res.Ecarts {
+			if row.Ressource != g.row.Ressource || row.Prevu <= 0 || row.Reaffecte <= 0 || !g.weeks[row.Semaine] ||
+				row.Flag == domain.FlagConforme || !liee(row, b) {
+				continue
+			}
+			prevu += row.Prevu
+			g.lies[row.CT] = true
 		}
-		sort.Strings(weeks)
+		weeks := sortedKeys(g.weeks)
+		lies := sortedKeys(g.lies)
 		label := g.row.RessourceLabel
 		if label == "" {
 			label = g.row.Ressource
 		}
-		flag := g.row.Flag
+		flag := domain.FlagErreurCT
 		out = append(out, domain.Anomalie{
 			Key:       k,
 			Categorie: domain.AnomalieEcart,
-			Gravite:   ecartGravite[flag],
-			Titre:     label + " · " + g.row.CT + " : " + flagLibelle(flag),
-			Detail: pluriel(len(weeks), "semaine", "semaines") + ", écart cumulé " + fmtSigned(g.ecart) +
-				" h (prévu " + fmtHFr(g.prevu) + " h, réel " + fmtHFr(g.reel) + " h)",
+			Gravite:   3,
+			Titre:     label + " · imputé sur " + b + " au lieu de " + strings.Join(lies, ", "),
+			Detail: pluriel(len(weeks), "semaine", "semaines") + ", " + fmtHFr(g.reaff) + " h imputées sur " + b +
+				" au lieu de " + strings.Join(lies, ", ") + " (prévu " + fmtHFr(prevu) + " h)",
 			Flag:        &flag,
-			CT:          g.row.CT,
+			CT:          b,
 			CTLibelle:   g.row.CTLibelle,
 			Ressource:   g.row.Ressource,
-			Heures:      ptrF(round2(g.ecart)),
+			Heures:      ptrF(round2(g.reaff)),
 			Semaines:    weeks,
-			Lien:        query("/ecarts", "ct", g.row.CT, "ressource", g.row.Ressource, "flag", string(flag)),
-			Fingerprint: fingerprint(string(flag), fpH(g.ecart), fpH(g.prevu), fpH(g.reel), itoa(len(weeks))),
+			Lien:        query("/ecarts", "ressource", g.row.Ressource, "flag", string(flag)),
+			Fingerprint: fingerprint(string(flag), fpH(g.reaff), itoa(len(weeks)), strings.Join(lies, ",")),
 		})
 	}
 	return out

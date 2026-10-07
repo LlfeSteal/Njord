@@ -85,6 +85,20 @@ function shape(kind: GlyphKind, size: number): ReactNode {
           <line x1="5.6" y1="5.6" x2="18.4" y2="18.4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
         </>
       );
+    case 'swap':
+      // Carré arrondi plein (silhouette propre, distincte des cercles / triangle / octogone) + ⇄ blanc.
+      return (
+        <>
+          <rect x="3" y="3" width="18" height="18" rx="5" fill="currentColor" />
+          <path
+            d="M7 8.6h10M14.8 6.4 17 8.6l-2.2 2.2M17 15.4H7M9.2 13.2 7 15.4l2.2 2.2"
+            fill="none"
+            {...BAR}
+            strokeWidth={2.2}
+            strokeLinejoin="round"
+          />
+        </>
+      );
     case 'dot':
       return <circle cx="12" cy="12" r={Math.min(12, 4 * u)} fill="currentColor" />;
     case 'ring':
@@ -92,7 +106,7 @@ function shape(kind: GlyphKind, size: number): ReactNode {
   }
 }
 
-/** Forme pleine colorée avec marque blanche (!, ✓, i), ou point / anneau / cercle barré. */
+/** Forme pleine colorée avec marque blanche (!, ✓, i, ⇄), ou point / anneau / cercle barré. */
 export function StatusGlyph({ kind, tone, size = 15, label }: StatusGlyphProps) {
   return (
     <svg

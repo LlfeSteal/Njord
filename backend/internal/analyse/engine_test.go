@@ -2,6 +2,7 @@ package analyse
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -664,5 +665,223 @@ func TestBudgetParNature(t *testing.T) {
 	}
 	if pps != 9750 || reel != 3920 {
 		t.Errorf("Σ PPS %.2f, Σ réalisé %.2f", pps, reel)
+	}
+}
+
+// ---------------------------------------------------------------- erreur de CT (§6.2)
+
+// ctH: heures d'une ressource sur un CT (prévues ou imputées).
+type ctH struct {
+	ct string
+	h  float64
+}
+
+// erreurCTInput: DURAND Claire planifiée en W37 (prevus) et ses imputations
+// de la semaine (reels).
+func erreurCTInput(prevus, reels []ctH) Input {
+	in := baseInput()
+	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire")}
+	var lines []domain.PlanLine
+	for _, p := range prevus {
+		lines = append(lines, planLine(p.ct, "DURANDC", "DURAND Claire", sp("p1"), p.h))
+	}
+	onePlan(&in, lines...)
+	for _, r := range reels {
+		in.Entries = append(in.Entries, mo(r.ct, "DURAND Claire Mme", r.h, "2026-09-08"))
+	}
+	return in
+}
+
+func TestErreurCT(t *testing.T) {
+	type want struct {
+		ct        string
+		flag      domain.Flag
+		reaffecte float64
+		lies      string // CTsLies joints par une espace
+	}
+	cases := []struct {
+		name          string
+		prevus, reels []ctH
+		want          []want
+	}{
+		{"inversion complète", []ctH{{"CTA", 35}}, []ctH{{"CTB", 40}}, []want{
+			{"CTA", domain.FlagErreurCT, 35, "CTB"},
+			{"CTB", domain.FlagErreurCT, 35, "CTA"},
+		}},
+		{"partielle résolue (A −25 conforme)", []ctH{{"CTA", 35}}, []ctH{{"CTB", 10}}, []want{
+			{"CTA", domain.FlagErreurCT, 10, "CTB"},
+			{"CTB", domain.FlagErreurCT, 10, "CTA"},
+		}},
+		{"partielle non résolue (A reste −33)", []ctH{{"CTA", 35}}, []ctH{{"CTB", 2}}, []want{
+			{"CTA", domain.FlagSousImputation, 2, "CTB"},
+			{"CTB", domain.FlagConforme, 2, "CTA"},
+		}},
+		{"résidu sur B (+25)", []ctH{{"CTA", 35}}, []ctH{{"CTB", 60}}, []want{
+			{"CTA", domain.FlagErreurCT, 35, "CTB"},
+			{"CTB", domain.FlagSurImputation, 35, "CTA"},
+		}},
+		{"CT planifié partiellement imputé", []ctH{{"CTA", 35}}, []ctH{{"CTA", 10}, {"CTB", 25}}, []want{
+			{"CTA", domain.FlagErreurCT, 25, "CTB"},
+			{"CTB", domain.FlagErreurCT, 25, "CTA"},
+		}},
+		{"deux CT planifiés : inchangé", []ctH{{"CTA", 35}, {"CTC", 10}}, []ctH{{"CTC", 45}}, []want{
+			{"CTA", domain.FlagSousImputation, 0, ""},
+			{"CTC", domain.FlagSurImputation, 0, ""},
+		}},
+		{"deux CT imputés à tort : prorata", []ctH{{"CTA", 40}}, []ctH{{"CTB", 45}, {"CTC", 15}}, []want{
+			{"CTA", domain.FlagErreurCT, 40, "CTB CTC"},
+			{"CTB", domain.FlagErreurCT, 30, "CTA"}, // 40 × 45/60 → +15 conforme
+			{"CTC", domain.FlagErreurCT, 10, "CTA"}, // 40 × 15/60 → +5
+		}},
+		{"deux CT planifiés en manque : prorata", []ctH{{"CTA", 35}, {"CTD", 10}}, []ctH{{"CTB", 30}}, []want{
+			{"CTA", domain.FlagErreurCT, 23.33, "CTB"}, // 30 × 35/45
+			{"CTD", domain.FlagConforme, 6.67, "CTB"},  // déjà conforme, CTA en sous-imputation : reste conforme
+			{"CTB", domain.FlagErreurCT, 30, "CTA CTD"},
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := Run(erreurCTInput(c.prevus, c.reels), store.DefaultSettings())
+			if len(res.Ecarts) != len(c.want) {
+				t.Fatalf("%d tuples, attendu %d", len(res.Ecarts), len(c.want))
+			}
+			for _, w := range c.want {
+				r := findRow(t, res, w.ct, "DURAND Claire", "2026-W37")
+				if r.Flag != w.flag || r.Reaffecte != w.reaffecte || strings.Join(r.CTsLies, " ") != w.lies || r.CTsLies == nil {
+					t.Errorf("%s : flag=%s reaffecte=%v lies=%v, attendu %s %v [%s]", w.ct, r.Flag, r.Reaffecte, r.CTsLies, w.flag, w.reaffecte, w.lies)
+				}
+				if r.Ecart != round2(r.Reel-r.Prevu) {
+					t.Errorf("%s : écart brut modifié %+v", w.ct, r)
+				}
+			}
+		})
+	}
+}
+
+func TestErreurCTSemaineVerrouilleeEtHorsPlan(t *testing.T) {
+	in := baseInput()
+	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire"), personne("p2", "MARTIN Théo")}
+	// S51 verrouillée : aucune charge n'y est répartie, l'imputation y reste hors plan.
+	onePlan(&in, planLine("CTA", "DURANDC", "DURAND Claire", sp("p1"), 35),
+		planLine("CTA", "MARTINT", "MARTIN Théo", sp("p2"), 35), coverLine("CTA", "2026-09-07", "2026-12-31"))
+	in.Entries = []domain.RealiseEntry{
+		mo("CTB", "DURAND Claire Mme", 40, "2026-12-15"),
+		mo("CTB", "BARBIER Luc M.", 40, "2026-09-08"), // inconnu : jamais rapproché de MARTIN
+		mo("CTC", "MARTIN Théo", 1, "2026-09-25"),     // MARTIN a du réel ailleurs (pas d'absence)
+	}
+	in.WeekFrom, in.WeekTo = "2026-W37", "2026-W51"
+	res := Run(in, store.DefaultSettings())
+	for _, c := range []struct {
+		ct, res, week string
+		flag          domain.Flag
+	}{
+		{"CTA", "DURAND Claire", "2026-W37", domain.FlagSousImputation},
+		{"CTB", "DURAND Claire", "2026-W51", domain.FlagHorsPlan},
+		{"CTA", "MARTIN Théo", "2026-W37", domain.FlagSousImputation},
+		{"CTB", "BARBIER Luc", "2026-W37", domain.FlagHorsPlan},
+	} {
+		r := findRow(t, res, c.ct, c.res, c.week)
+		if r.Flag != c.flag || r.Reaffecte != 0 || r.CTsLies == nil || len(r.CTsLies) != 0 {
+			t.Errorf("%s %s %s : %+v, attendu %s sans réaffectation", c.ct, c.res, c.week, r, c.flag)
+		}
+	}
+	if res.KPIs.NbErreurCT != 0 {
+		t.Errorf("NbErreurCT = %d", res.KPIs.NbErreurCT)
+	}
+}
+
+func TestErreurCTKPIs(t *testing.T) {
+	in := baseInput()
+	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire"), personne("p2", "MARTIN Théo"), personne("p3", "BLANC Sarah")}
+	onePlan(&in,
+		planLine("CTA", "DURANDC", "DURAND Claire", sp("p1"), 35),
+		planLine("CTC", "MARTINT", "MARTIN Théo", sp("p2"), 35),
+		planLine("CTE", "BLANCS", "BLANC Sarah", sp("p3"), 10),
+	)
+	in.Entries = []domain.RealiseEntry{
+		mo("CTB", "DURAND Claire Mme", 40.5, "2026-09-08"), // inversion complète : 2 erreur_ct
+		mo("CTD", "MARTIN Théo M.", 60, "2026-09-08"),      // CTC erreur_ct, CTD sur (+25)
+		mo("CTE", "BLANC Sarah", 10, "2026-09-08"),         // conforme
+	}
+	res := Run(in, store.DefaultSettings())
+	k := res.KPIs
+	if k.NbErreurCT != 3 || k.PointsErreurCT != 1 || k.HeuresErreurCT != 40.5 {
+		t.Errorf("erreur de CT : %d tuples, %d pts, %v h", k.NbErreurCT, k.PointsErreurCT, k.HeuresErreurCT)
+	}
+	if k.NbSurImputation != 1 || k.NbSousImputation != 0 || k.NbAbsence != 0 || k.NbConformes != 1 {
+		t.Errorf("comptes : %+v", k)
+	}
+	if k.PointsTotal != 3 { // 2 (sur) + 1 (erreur de CT)
+		t.Errorf("points total %d", k.PointsTotal)
+	}
+	// 5 tuples comparés (les erreur_ct en font partie), 1 conforme.
+	if k.NbTuplesCompares != 5 || k.TauxConformite == nil || math.Abs(*k.TauxConformite-0.2) > 1e-9 {
+		t.Errorf("taux conformité : %d %v", k.NbTuplesCompares, k.TauxConformite)
+	}
+	// Tri : erreur_ct entre hors plan et sur-imputation.
+	if res.Ecarts[0].Flag != domain.FlagErreurCT || res.Ecarts[3].Flag != domain.FlagSurImputation {
+		t.Errorf("tri : %s … %s", res.Ecarts[0].Flag, res.Ecarts[3].Flag)
+	}
+}
+
+// TestErreurCTDemo : jeu test_data_demo/erreur_ct (README) — plan démo où PETIT
+// Karim est planifié sur Y99F90005, GIRAUD Léa sur Y99F90007 et la ligne 20 % de
+// MARTIN Théo sur Y99F90008, croisé avec le réalisé démo d'origine (ils imputent
+// toujours Y99F90003, Y99F90009 et Y99F90007).
+func TestErreurCTDemo(t *testing.T) {
+	res := Run(demoInputWith(t, "../../../test_data_demo/erreur_ct/demo_plancharge_erreur_ct.xlsx",
+		"../../../test_data_demo/demo_realise.xlsx"), store.DefaultSettings())
+	for _, c := range []struct {
+		ct, ressource, week string
+		flag                domain.Flag
+		reaffecte           float64
+		lies                string
+	}{
+		// Erreur complète.
+		{"Y99F90003", "PETIT Karim", "2026-W38", domain.FlagErreurCT, 22.5, "Y99F90005"},
+		{"Y99F90005", "PETIT Karim", "2026-W38", domain.FlagErreurCT, 22.5, "Y99F90003"},
+		{"Y99F90009", "GIRAUD Léa", "2026-W37", domain.FlagErreurCT, 22.5, "Y99F90007"},
+		{"Y99F90007", "GIRAUD Léa", "2026-W37", domain.FlagErreurCT, 22.5, "Y99F90009"},
+		// 15 h : sous les seuils des deux côtés, rien à expliquer.
+		{"Y99F90003", "PETIT Karim", "2026-W39", domain.FlagConforme, 15, "Y99F90005"},
+		{"Y99F90005", "PETIT Karim", "2026-W39", domain.FlagConforme, 15, "Y99F90003"},
+		// Partiel côté imputé : 52,5 h dont 25,66 h réaffectées, le reste dépasse encore.
+		{"Y99F90009", "GIRAUD Léa", "2026-W40", domain.FlagSurImputation, 25.66, "Y99F90007"},
+		{"Y99F90007", "GIRAUD Léa", "2026-W40", domain.FlagConforme, 25.66, "Y99F90009"},
+		// La sous-imputation de Y99F90001 est expliquée (S39) ou non (S38).
+		{"Y99F90001", "MARTIN Théo", "2026-W39", domain.FlagErreurCT, 6.04, "Y99F90007"},
+		{"Y99F90007", "MARTIN Théo", "2026-W39", domain.FlagErreurCT, 7.5, "Y99F90001 Y99F90008"},
+		{"Y99F90008", "MARTIN Théo", "2026-W39", domain.FlagConforme, 1.46, "Y99F90007"},
+		{"Y99F90001", "MARTIN Théo", "2026-W38", domain.FlagSousImputation, 3.02, "Y99F90007"},
+		{"Y99F90007", "MARTIN Théo", "2026-W38", domain.FlagConforme, 3.75, "Y99F90001 Y99F90008"},
+	} {
+		r := findRow(t, res, c.ct, c.ressource, c.week)
+		if r.Flag != c.flag || r.Reaffecte != c.reaffecte || strings.Join(r.CTsLies, " ") != c.lies {
+			t.Errorf("%s %s %s : %s %v %v, attendu %s %v [%s]", c.ressource, c.ct, c.week, r.Flag, r.Reaffecte, r.CTsLies, c.flag, c.reaffecte, c.lies)
+		}
+	}
+	if k := res.KPIs; k.NbErreurCT != 16 || k.PointsErreurCT != 8 || k.HeuresErreurCT != 160.25 {
+		t.Errorf("KPI erreur de CT : %d tuples, %d points, %v h ; attendu 16, 8, 160.25", k.NbErreurCT, k.PointsErreurCT, k.HeuresErreurCT)
+	}
+	want := map[string]string{
+		"ecart|Y99F90003|PETIT Karim|erreur_ct":       "4 semaines, 83,28 h imputées sur Y99F90003 au lieu de Y99F90005 (prévu 97,51 h)",
+		"ecart|Y99F90009|GIRAUD Léa|erreur_ct":        "3 semaines, 65,53 h imputées sur Y99F90009 au lieu de Y99F90007 (prévu 71,85 h)",
+		"ecart|Y99F90009|GIRAUD Léa|sur_imputation":   "1 semaine, écart cumulé +26,84 h (prévu 0 h, réel 52,5 h), dont 25,66 h imputées au lieu de Y99F90007",
+		"ecart|Y99F90007|MARTIN Théo|erreur_ct":       "1 semaine, 7,5 h imputées sur Y99F90007 au lieu de Y99F90001 (prévu 42,77 h)",
+		"ecart|Y99F90001|MARTIN Théo|sous_imputation": "1 semaine, écart cumulé -32,25 h (prévu 42,77 h, réel 7,5 h), dont 3,02 h imputées sur Y99F90007",
+	}
+	for _, a := range res.Anomalies {
+		if d, ok := want[a.Key]; ok {
+			if a.Detail != d {
+				t.Errorf("%s : %q, attendu %q", a.Key, a.Detail, d)
+			}
+			delete(want, a.Key)
+		}
+		if a.Key == "ecart|Y99F90003|PETIT Karim|sur_imputation" || a.Key == "ecart|Y99F90005|PETIT Karim|sous_imputation" {
+			t.Errorf("anomalie inattendue : %s", a.Key)
+		}
+	}
+	for k := range want {
+		t.Errorf("anomalie %s absente", k)
 	}
 }

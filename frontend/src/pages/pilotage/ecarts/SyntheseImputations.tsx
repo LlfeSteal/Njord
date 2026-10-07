@@ -10,12 +10,20 @@ import { fmtHours, fmtPct } from '../../../lib/format';
 import { useTokenColors } from '../shared/pilotage';
 import type { Synthese, SyntheseFlag } from './model';
 
-const TOKENS = ['--flag-hors-plan', '--flag-sur-imputation', '--flag-sous-imputation', '--flag-conforme', '--card'] as const;
-const tokenOf = (f: SyntheseFlag) => `--flag-${f.replace('_', '-')}` as (typeof TOKENS)[number];
+const TOKENS = [
+  '--flag-hors-plan',
+  '--flag-erreur-ct',
+  '--flag-sur-imputation',
+  '--flag-sous-imputation',
+  '--flag-conforme',
+  '--card',
+] as const;
+const tokenOf = (f: SyntheseFlag) => `--flag-${f.replace(/_/g, '-')}` as (typeof TOKENS)[number];
 
 /** Libellé de la part : ce que mesurent les heures de chaque flag. */
 const PART_HINT: Record<SyntheseFlag, string> = {
   hors_plan: 'heures réelles hors plan',
+  erreur_ct: 'heures imputées sur un autre CT que prévu',
   sur_imputation: 'heures au-delà du prévu',
   sous_imputation: 'heures manquantes',
   conforme: 'heures réelles conformes',

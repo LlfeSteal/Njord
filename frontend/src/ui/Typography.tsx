@@ -16,6 +16,7 @@ export type TextTone =
   | 'danger'
   | 'conforme'
   | 'hors_plan'
+  | 'erreur_ct'
   | 'sur_imputation'
   | 'sous_imputation'
   | 'absence';

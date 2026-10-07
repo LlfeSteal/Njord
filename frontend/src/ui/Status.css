@@ -13,6 +13,7 @@
 .ui-glyph[data-tone='attention'] { color: var(--warning); }
 .ui-glyph[data-tone='conforme'] { color: var(--flag-conforme); }
 .ui-glyph[data-tone='hors_plan'] { color: var(--flag-hors-plan); }
+.ui-glyph[data-tone='erreur_ct'] { color: var(--flag-erreur-ct); }
 .ui-glyph[data-tone='sur_imputation'] { color: var(--flag-sur-imputation); }
 .ui-glyph[data-tone='sous_imputation'] { color: var(--flag-sous-imputation); }
 .ui-glyph[data-tone='absence'] { color: var(--flag-absence); }

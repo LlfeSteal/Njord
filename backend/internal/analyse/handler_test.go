@@ -212,11 +212,11 @@ func TestHandlerCSV(t *testing.T) {
 	e.seed()
 	w := e.do("GET", "/api/analyse/ecarts.csv?flag=hors_plan", nil)
 	body := w.Body.String()
-	if w.Code != http.StatusOK || !strings.HasPrefix(body, "\xef\xbb\xbfRessource;CT;Semaine;Prévu (h);Réel (h);Écart (h);Flag;Confiance") {
+	if w.Code != http.StatusOK || !strings.HasPrefix(body, "\xef\xbb\xbfRessource;CT;Semaine;Prévu (h);Réel (h);Écart (h);Flag;Confiance;CT liés\n") {
 		t.Fatalf("ecarts.csv: %d %q", w.Code, body)
 	}
 	lines := strings.Split(strings.TrimSpace(body), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[1], "BARBIER Luc;Y99F900012;2026-W37;0;13;13;Hors plan;none") {
+	if len(lines) != 2 || strings.TrimSpace(lines[1]) != "BARBIER Luc;Y99F900012;2026-W37;0;13;13;Hors plan;none;" {
 		t.Errorf("filtre flag: %q", lines)
 	}
 	w = e.do("GET", "/api/analyse/ecarts.csv?ct=Y99F90001&squad_id=sq1", nil)
@@ -245,6 +245,27 @@ func TestHandlerCSV(t *testing.T) {
 	}
 	if !strings.Contains(masked, "NON_SECURISE") {
 		t.Error("colonnes dérivées absentes du masqué")
+	}
+}
+
+func TestHandlerCSVErreurCT(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	// BLANC Sarah (20 h prévues sur Y99F90004) impute 20 h sur Y99F90001 → erreur de CT des deux côtés.
+	e.exec(`INSERT INTO realise_entries(version_id,row_num,tg,tg_libelle,categorie,type,employe_fournisseur,nom_prenom,quantite,total_eur,date_depense,periode_comptable,statut_parsing)
+		VALUES ('real1',8,'Y99F90001','Y99F90001 - Socle','MAIN D''OEUVRE','MAIN D''OEUVRE SUR SITE','BLANC Sarah Mme','BLANC Sarah',20,2000,'2026-09-09','2026-09-30','ok')`)
+	w := e.do("GET", "/api/analyse/ecarts.csv?flag=erreur_ct", nil)
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	if w.Code != http.StatusOK || len(lines) != 3 {
+		t.Fatalf("ecarts.csv?flag=erreur_ct : %d %q", w.Code, lines)
+	}
+	for i, want := range []string{
+		"BLANC Sarah;Y99F90001;2026-W37;0;20;20;Erreur de CT;nom;Y99F90004",
+		"BLANC Sarah;Y99F90004;2026-W37;20;0;-20;Erreur de CT;plan;Y99F90001",
+	} {
+		if got := strings.TrimSpace(lines[i+1]); got != want {
+			t.Errorf("ligne %d : %q, attendu %q", i+1, got, want)
+		}
 	}
 }
 
@@ -406,8 +427,13 @@ func TestHandlerAnalyseTimeline(t *testing.T) {
 	if res.Meta.PlanVersion.ID != "pA" || !res.Meta.ArchivedWarning || len(res.Meta.Timeline) != 1 {
 		t.Errorf("pA : %+v", res.Meta)
 	}
-	if r := findRow(t, res, "CT2", "DURAND Claire", "2026-W41"); r.Flag != domain.FlagSurImputation || r.Prevu != 0 || *r.PlanVersionID != "pA" {
+	// Sans pB, les 35 h de CT2 compensent exactement les 35 h prévues sur CT1 : erreur de CT (§6.2).
+	if r := findRow(t, res, "CT2", "DURAND Claire", "2026-W41"); r.Flag != domain.FlagErreurCT || r.Prevu != 0 || *r.PlanVersionID != "pA" ||
+		r.Reaffecte != 35 || len(r.CTsLies) != 1 || r.CTsLies[0] != "CT1" {
 		t.Errorf("CT2 sans pB : %+v", r)
+	}
+	if r := findRow(t, res, "CT1", "DURAND Claire", "2026-W41"); r.Flag != domain.FlagErreurCT || r.Prevu != 35 || len(r.CTsLies) != 1 || r.CTsLies[0] != "CT2" {
+		t.Errorf("CT1 sans pB : %+v", r)
 	}
 
 	ctx := decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil))

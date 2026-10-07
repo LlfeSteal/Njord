@@ -37,6 +37,7 @@ export function ParsingBadge({ statut, motif }: { statut: ParsingStatut; motif?:
 export const FLAG_META: Record<Flag, { label: string; glyph: GlyphKind }> = {
   absence: { label: 'Absence totale', glyph: 'none' },
   hors_plan: { label: 'Hors plan', glyph: 'warning' },
+  erreur_ct: { label: 'Erreur de CT', glyph: 'swap' },
   sur_imputation: { label: 'Sur-imputation', glyph: 'danger' },
   sous_imputation: { label: 'Sous-imputation', glyph: 'attention' },
   conforme: { label: 'Conforme', glyph: 'success' },

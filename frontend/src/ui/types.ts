@@ -19,10 +19,10 @@ export interface BaseProps extends MarginProps {
 export type Tone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger' | 'attention';
 
 /** Ton des flags et statuts métier (mappés dans les CSS sur --flag-* / --statut-*). */
-export type FlagTone = 'conforme' | 'hors_plan' | 'sur_imputation' | 'sous_imputation' | 'absence';
+export type FlagTone = 'conforme' | 'hors_plan' | 'erreur_ct' | 'sur_imputation' | 'sous_imputation' | 'absence';
 
 /** Formes de glyphe de statut (§9) — la forme porte le sens. */
-export type GlyphKind = 'warning' | 'danger' | 'attention' | 'success' | 'none' | 'info' | 'dot' | 'ring';
+export type GlyphKind = 'warning' | 'danger' | 'attention' | 'success' | 'none' | 'info' | 'dot' | 'ring' | 'swap';
 
 /** Option d'un Select / MultiSelect / SegmentedControl. */
 export interface Option<T extends string = string> {

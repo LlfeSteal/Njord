@@ -6,7 +6,7 @@ import type { TextTone } from '../../../ui';
 
 // ------------------------------------------------------------------ URL
 export type EcartsVue = 'liste' | 'ressource';
-const FLAGS: Flag[] = ['absence', 'hors_plan', 'sur_imputation', 'sous_imputation', 'conforme'];
+const FLAGS: Flag[] = ['absence', 'hors_plan', 'erreur_ct', 'sur_imputation', 'sous_imputation', 'conforme'];
 
 export interface EcartsUrl {
   vue: EcartsVue;
@@ -54,10 +54,13 @@ export function useEcartsUrl() {
 }
 
 // ------------------------------------------------------------------ Tons
-/** Ton de ligne (§8 « Anomaly rows ») : danger pour sur-imputation et absence, warning pour hors plan et sous-imputation. */
+/**
+ * Ton de ligne (§8 « Anomaly rows ») : danger pour sur-imputation et absence, warning pour hors plan,
+ * erreur de CT et sous-imputation.
+ */
 export function rowTone(flag: Flag): 'danger' | 'warning' | undefined {
   if (flag === 'sur_imputation' || flag === 'absence') return 'danger';
-  if (flag === 'hors_plan' || flag === 'sous_imputation') return 'warning';
+  if (flag === 'hors_plan' || flag === 'erreur_ct' || flag === 'sous_imputation') return 'warning';
   return undefined;
 }
 
@@ -165,7 +168,7 @@ export const paginate = <T>(rows: T[], page: number, size: number) => rows.slice
 
 // ------------------------------------------------------------------ Synthèse des imputations
 /** Flags du camembert, dans l'ordre de gravité (l'absence est comptée à part, en personnes). */
-export const SYNTHESE_FLAGS = ['hors_plan', 'sur_imputation', 'sous_imputation', 'conforme'] as const;
+export const SYNTHESE_FLAGS = ['hors_plan', 'erreur_ct', 'sur_imputation', 'sous_imputation', 'conforme'] as const;
 export type SyntheseFlag = (typeof SYNTHESE_FLAGS)[number];
 
 export interface Synthese {
@@ -180,18 +183,23 @@ export interface Synthese {
 
 /**
  * Répartition des heures : excédent (réel − prévu) des sur-imputations, manque (prévu − réel)
- * des sous-imputations, réel hors plan, réel conforme. Les personnes = ressources ayant une fiche
- * (`personne_id`) : une ligne non nominative n'en est pas une.
+ * des sous-imputations, réel hors plan, réel conforme. Erreur de CT : le réel du CT imputé à tort
+ * (prévu = 0) forme sa part ; le CT planifié en face (prévu > 0) ne manque pas vraiment d'heures,
+ * son réel compte en conforme. Les personnes = ressources ayant une fiche (`personne_id`) : une
+ * ligne non nominative n'en est pas une.
  */
 export function synthese(rows: EcartRow[]): Synthese {
-  const h: Record<SyntheseFlag, number> = { hors_plan: 0, sur_imputation: 0, sous_imputation: 0, conforme: 0 };
+  const h: Record<SyntheseFlag, number> = { hors_plan: 0, erreur_ct: 0, sur_imputation: 0, sous_imputation: 0, conforme: 0 };
   const planifiees = new Set<string>();
   const absentes = new Set<string>();
   for (const e of rows) {
     if (e.flag === 'sur_imputation') h.sur_imputation += e.ecart;
     else if (e.flag === 'sous_imputation') h.sous_imputation -= e.ecart;
     else if (e.flag === 'hors_plan') h.hors_plan += e.reel;
-    else if (e.flag === 'conforme') h.conforme += e.reel;
+    else if (e.flag === 'erreur_ct') {
+      if (e.prevu === 0) h.erreur_ct += e.reel;
+      else h.conforme += e.reel;
+    } else if (e.flag === 'conforme') h.conforme += e.reel;
     if (e.personne_id && e.prevu > 0) planifiees.add(e.ressource);
     if (e.personne_id && e.flag === 'absence') absentes.add(e.ressource);
   }

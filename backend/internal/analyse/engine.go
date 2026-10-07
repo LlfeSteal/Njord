@@ -438,17 +438,32 @@ func (r *run) realSide() {
 	}
 }
 
-// rows evaluates the flags (§6) and the aggregates (§6.1).
+// rows evaluates the flags (§6), the erreurs de CT (§6.2) and the aggregates (§6.1).
 func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 	personReel := map[string]float64{}
 	personPrevu := map[string]float64{}
+	tks := make([]tupleKey, 0, len(r.tuples))
 	for k, t := range r.tuples {
 		personReel[k.Key] += t.reel
 		personPrevu[k.Key] += t.prevu
+		tks = append(tks, k)
 	}
-	var k domain.KPIs
-	rows := make([]domain.EcartRow, 0, len(r.tuples))
-	for tk, t := range r.tuples {
+	// Ordre stable (CT, ressource, semaine) : les maps sont aléatoires et la
+	// réaffectation des erreurs de CT dépend de l'ordre des sommes.
+	sort.Slice(tks, func(i, j int) bool {
+		a, b := tks[i], tks[j]
+		if a.CT != b.CT {
+			return a.CT < b.CT
+		}
+		if a.Key != b.Key {
+			return a.Key < b.Key
+		}
+		return a.Week < b.Week
+	})
+	rows := make([]domain.EcartRow, 0, len(tks))
+	evals := make([]flagEval, 0, len(tks))
+	for _, tk := range tks {
+		t := r.tuples[tk]
 		inf := r.info[tk.Key]
 		if inf == nil {
 			inf = &resInfo{ressource: tk.Key}
@@ -464,6 +479,7 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 			Reel:           round2(t.reel),
 			Warn:           t.warn,
 			SquadID:        t.squadID,
+			CTsLies:        []string{},
 		}
 		if t.versionID != "" {
 			vid := t.versionID
@@ -488,21 +504,16 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 		}
 
 		monday, _ := WeekMonday(tk.Week)
-		switch {
-		case t.hasReal && t.conf == domain.ConfNone:
-			row.Flag = domain.FlagHorsPlan
-		case row.Reel != 0 && r.cal.IsLockedWeek(monday):
-			row.Flag = domain.FlagHorsPlan
-		case row.Reel == 0 && row.Prevu > 0 && personReel[tk.Key] == 0:
-			row.Flag = domain.FlagAbsence
-		case row.Ecart > r.s.SeuilSurImputationH:
-			row.Flag = domain.FlagSurImputation
-		case row.Ecart < -r.s.SeuilSousImputationH:
-			row.Flag = domain.FlagSousImputation
-		default:
-			row.Flag = domain.FlagConforme
-		}
+		ev := flagEval{tk: tk, t: t, locked: r.cal.IsLockedWeek(monday), personReel: personReel[tk.Key]}
+		row.Flag = r.flagOf(ev, row.Reel, row.Prevu, row.Ecart)
+		rows = append(rows, row)
+		evals = append(evals, ev)
+	}
+	r.erreursCT(rows, evals)
 
+	var k domain.KPIs
+	for i := range rows {
+		row, t := &rows[i], evals[i].t
 		switch row.Flag {
 		case domain.FlagHorsPlan:
 			k.NbHorsPlan++
@@ -513,6 +524,12 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 			k.NbSurImputation++
 		case domain.FlagSousImputation:
 			k.NbSousImputation++
+		case domain.FlagErreurCT:
+			k.NbErreurCT++
+			if row.Prevu == 0 { // côté CT imputé à tort
+				k.PointsErreurCT++
+				k.HeuresErreurCT += t.reel
+			}
 		}
 		if row.Flag != domain.FlagHorsPlan && (!row.Inactive || r.in.IncludeInactive) {
 			k.NbTuplesCompares++
@@ -522,11 +539,11 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 		}
 		k.TotalPrevuH += t.prevu
 		k.TotalReelH += t.reel
-		rows = append(rows, row)
 	}
 	SortEcarts(rows)
 
 	k.HeuresHorsPlan = round2(k.HeuresHorsPlan)
+	k.HeuresErreurCT = round2(k.HeuresErreurCT)
 	k.TotalPrevuH = round2(k.TotalPrevuH)
 	k.TotalReelH = round2(k.TotalReelH)
 	k.PointsSurImputation = 2 * k.NbSurImputation
@@ -535,7 +552,7 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 	if r.s.DiviseurHorsPlanH > 0 {
 		k.PointsHorsPlan = int(math.Floor(k.HeuresHorsPlan / r.s.DiviseurHorsPlanH))
 	}
-	k.PointsTotal = k.PointsSurImputation + k.PointsSousImputation + k.PointsAbsence + k.PointsHorsPlan
+	k.PointsTotal = k.PointsSurImputation + k.PointsSousImputation + k.PointsAbsence + k.PointsHorsPlan + k.PointsErreurCT
 	if k.NbTuplesCompares > 0 {
 		v := float64(k.NbConformes) / float64(k.NbTuplesCompares)
 		k.TauxConformite = &v
@@ -554,6 +571,144 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 		k.TauxAbsence = &v
 	}
 	return rows, k
+}
+
+// flagEval is what the flag of a tuple depends on, besides its gap.
+type flagEval struct {
+	tk         tupleKey
+	t          *tuple
+	locked     bool    // semaine verrouillée
+	personReel float64 // Σ réel de la ressource sur la période
+}
+
+// flagOf evaluates §6 on a gap (brut, ou ajusté par la réaffectation §6.2) ;
+// reel / prevu restent les valeurs brutes du tuple.
+func (r *run) flagOf(ev flagEval, reel, prevu, ecart float64) domain.Flag {
+	switch {
+	case ev.t.hasReal && ev.t.conf == domain.ConfNone:
+		return domain.FlagHorsPlan
+	case reel != 0 && ev.locked:
+		return domain.FlagHorsPlan
+	case reel == 0 && prevu > 0 && ev.personReel == 0:
+		return domain.FlagAbsence
+	case ecart > r.s.SeuilSurImputationH:
+		return domain.FlagSurImputation
+	case ecart < -r.s.SeuilSousImputationH:
+		return domain.FlagSousImputation
+	default:
+		return domain.FlagConforme
+	}
+}
+
+// erreursCT détecte les erreurs de CT (SPEC_analyse §6.2, DECISIONS n° 14) :
+// même personne × semaine non verrouillée, des heures imputées sur des CT non
+// planifiés (prévu = 0, excédent = réel) compensent le manque des CT planifiés
+// (manque = prévu − réel). T = min(Σ excédents, Σ manques) est réparti au
+// prorata de chaque côté ; si l'écart ajusté rend conforme au moins un tuple
+// en sur/sous, les tuples devenus conformes passent en erreur_ct et les autres
+// prennent le flag du résidu. Côté planifié, si un CT est en sous-imputation,
+// seuls les CT en sous-imputation passent en erreur_ct (un CT déjà conforme qui
+// reçoit une part du transfert reste conforme, avec la note). Réaffecte / CTsLies sont renseignés dès que T > 0.
+// rows et evals sont parallèles, dans l'ordre (CT, ressource, semaine).
+func (r *run) erreursCT(rows []domain.EcartRow, evals []flagEval) {
+	type part struct {
+		i int
+		h float64 // excédent ou manque
+	}
+	type group struct{ exces, manques []part }
+	groups := map[[2]string]*group{}
+	var keys [][2]string
+	for i, ev := range evals {
+		row := &rows[i]
+		if !strings.HasPrefix(ev.tk.Key, "N:") || ev.locked || (ev.t.hasReal && ev.t.conf != domain.ConfNom) {
+			continue
+		}
+		exces := row.Prevu == 0 && row.Reel > 0
+		manque := row.Prevu > 0 && row.Reel < row.Prevu
+		if !exces && !manque {
+			continue
+		}
+		gk := [2]string{ev.tk.Key, ev.tk.Week}
+		g := groups[gk]
+		if g == nil {
+			g = &group{}
+			groups[gk] = g
+			keys = append(keys, gk)
+		}
+		if exces {
+			g.exces = append(g.exces, part{i, row.Reel})
+		} else {
+			g.manques = append(g.manques, part{i, row.Prevu - row.Reel})
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+
+	sum := func(ps []part) float64 {
+		s := 0.0
+		for _, p := range ps {
+			s += p.h
+		}
+		return s
+	}
+	cts := func(ps []part) []string {
+		out := make([]string, 0, len(ps))
+		for _, p := range ps {
+			out = append(out, rows[p.i].CT)
+		}
+		sort.Strings(out)
+		return out
+	}
+	for _, gk := range keys {
+		g := groups[gk]
+		se, sm := sum(g.exces), sum(g.manques)
+		tot := math.Min(se, sm)
+		if len(g.exces) == 0 || len(g.manques) == 0 || round2(tot) == 0 {
+			continue
+		}
+		type adj struct {
+			i     int
+			flag  domain.Flag // flag de l'écart ajusté
+			garde bool        // CT planifié conforme alors qu'un autre est en sous-imputation : il reste conforme
+		}
+		var adjs []adj
+		resolves := false
+		sous := false // un CT planifié est en sous-imputation : c'est lui que l'erreur explique
+		for _, p := range g.manques {
+			sous = sous || rows[p.i].Flag == domain.FlagSousImputation
+		}
+		apply := func(ps, autres []part, total, sign float64) {
+			for _, p := range ps {
+				row := &rows[p.i]
+				t := tot * p.h / total
+				row.Reaffecte = round2(t)
+				row.CTsLies = cts(autres)
+				f := r.flagOf(evals[p.i], row.Reel, row.Prevu, round2(row.Reel-row.Prevu+sign*t))
+				if f == domain.FlagConforme && (row.Flag == domain.FlagSurImputation || row.Flag == domain.FlagSousImputation) {
+					resolves = true
+				}
+				adjs = append(adjs, adj{p.i, f, sign > 0 && sous && row.Flag == domain.FlagConforme})
+			}
+		}
+		apply(g.exces, g.manques, se, -1) // excédent : réel − t
+		apply(g.manques, g.exces, sm, +1) // manque : réel − prévu + t
+		if !resolves {
+			continue
+		}
+		for _, a := range adjs {
+			switch {
+			case a.garde:
+			case a.flag == domain.FlagConforme:
+				rows[a.i].Flag = domain.FlagErreurCT
+			default:
+				rows[a.i].Flag = a.flag
+			}
+		}
+	}
 }
 
 // SortEcarts applies the default order: severity desc, |écart| desc, then

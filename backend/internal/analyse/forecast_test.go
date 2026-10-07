@@ -14,12 +14,17 @@ import (
 func near(a, b, tol float64) bool { return math.Abs(a-b) <= tol }
 
 func demoInput(t *testing.T) Input {
+	return demoInputWith(t, "../../../test_data_demo/demo_plancharge.xlsx", "../../../test_data_demo/demo_realise.xlsx")
+}
+
+// demoInputWith croise le plan et le réalisé donnés (fichiers au format démo).
+func demoInputWith(t *testing.T, planPath, realisePath string) Input {
 	t.Helper()
-	pd, err := os.ReadFile("../../../test_data_demo/demo_plancharge.xlsx")
+	pd, err := os.ReadFile(planPath)
 	if err != nil {
 		t.Fatalf("lecture plan démo : %v", err)
 	}
-	rd, err := os.ReadFile("../../../test_data_demo/demo_realise.xlsx")
+	rd, err := os.ReadFile(realisePath)
 	if err != nil {
 		t.Fatalf("lecture réalisé démo : %v", err)
 	}

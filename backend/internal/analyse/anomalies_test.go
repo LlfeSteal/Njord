@@ -145,18 +145,29 @@ func TestAnomaliesDemo(t *testing.T) {
 			t.Errorf("anomalie attendue absente : %s", key)
 		}
 	}
-	// Chaque écart non conforme est couvert par une anomalie, et Σ heures concorde.
+	// Chaque écart non conforme est couvert par une anomalie, et Σ heures concorde :
+	// écart résiduel hors erreur de CT, heures réaffectées côté CT imputé à tort.
 	sum := map[string]float64{}
 	for _, r := range res.Ecarts {
-		if r.Flag != domain.FlagConforme && (!r.Inactive || r.Flag == domain.FlagHorsPlan) {
-			sum[anomalieKey("ecart", r.CT, r.Ressource, string(r.Flag))] += r.Ecart
+		if r.Inactive && r.Flag != domain.FlagHorsPlan {
+			continue
+		}
+		if r.Prevu == 0 && (r.Flag == domain.FlagErreurCT || r.Reaffecte > 0) {
+			sum[anomalieKey("ecart", r.CT, r.Ressource, string(domain.FlagErreurCT))] += r.Reaffecte
+		}
+		if r.Flag != domain.FlagConforme && r.Flag != domain.FlagErreurCT {
+			sum[anomalieKey("ecart", r.CT, r.Ressource, string(r.Flag))] += residualEcart(r)
 		}
 	}
 	for _, a := range res.Anomalies {
 		if a.Categorie != domain.AnomalieEcart {
 			continue
 		}
-		if a.Heures == nil || math.Abs(*a.Heures-sum[a.Key]) > 0.01 || len(a.Semaines) == 0 || !strings.HasPrefix(a.Lien, "/ecarts?ct=") {
+		prefix := "/ecarts?ct="
+		if *a.Flag == domain.FlagErreurCT {
+			prefix = "/ecarts?ressource="
+		}
+		if a.Heures == nil || math.Abs(*a.Heures-sum[a.Key]) > 0.01 || len(a.Semaines) == 0 || !strings.HasPrefix(a.Lien, prefix) {
 			t.Errorf("écart %s : %+v (attendu %.2f h)", a.Key, a, sum[a.Key])
 		}
 		delete(sum, a.Key)
@@ -382,5 +393,186 @@ func TestAnomaliesSeed(t *testing.T) {
 		if !ok {
 			t.Errorf("anomalie absente : %s", k)
 		}
+	}
+}
+
+// ectRow builds an EcartRow for the erreur de CT tests (MARTIN Théo by default).
+func ectRow(ct, week string, prevu, reel, reaff float64, flag domain.Flag, lies ...string) domain.EcartRow {
+	if lies == nil {
+		lies = []string{}
+	}
+	return domain.EcartRow{
+		CT: ct, CTLibelle: ct + " - libellé", Ressource: "MARTIN Théo", RessourceLabel: "MARTIN Théo", Semaine: week,
+		Prevu: prevu, Reel: reel, Ecart: round2(reel - prevu), Flag: flag, Reaffecte: reaff, CTsLies: lies,
+	}
+}
+
+func ectAnomalies(rows ...domain.EcartRow) []domain.Anomalie {
+	res := domain.AnalyseResult{Ecarts: rows}
+	return (&run{}).anomalies(&res)
+}
+
+const (
+	ctA  = "Y99F900010"
+	ctA2 = "Y99F900012"
+	ctB  = "Y99F900011"
+)
+
+func TestAnomaliesErreurCTPaire(t *testing.T) {
+	rows := []domain.EcartRow{
+		ectRow(ctB, "2026-W37", 0, 12, 12, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 23, 12, domain.FlagErreurCT, ctB),
+	}
+	as := ectAnomalies(rows...)
+	checkAnomalies(t, as)
+	if len(as) != 1 {
+		t.Fatalf("%d anomalies, attendu 1 : %+v", len(as), as)
+	}
+	a := as[0]
+	if a.Key != "ecart|Y99F900011|MARTIN Théo|erreur_ct" || a.Key != anomalieKey("ecart", ctB, "MARTIN Théo", "erreur_ct") {
+		t.Errorf("clé : %q", a.Key)
+	}
+	if a.Categorie != domain.AnomalieEcart || a.Gravite != 3 || a.Flag == nil || *a.Flag != domain.FlagErreurCT ||
+		a.CT != ctB || a.CTLibelle != ctB+" - libellé" || a.Ressource != "MARTIN Théo" || a.Statut != domain.AnomalieATraiter {
+		t.Errorf("anomalie : %+v", a)
+	}
+	if a.Titre != "MARTIN Théo · imputé sur Y99F900011 au lieu de Y99F900010" {
+		t.Errorf("titre : %q", a.Titre)
+	}
+	if a.Detail != "1 semaine, 12 h imputées sur Y99F900011 au lieu de Y99F900010 (prévu 35 h)" {
+		t.Errorf("détail : %q", a.Detail)
+	}
+	if a.Heures == nil || *a.Heures != 12 || strings.Join(a.Semaines, ",") != "2026-W37" {
+		t.Errorf("heures / semaines : %v %v", a.Heures, a.Semaines)
+	}
+	if a.Lien != "/ecarts?ressource=MARTIN+Th%C3%A9o&flag=erreur_ct" {
+		t.Errorf("lien : %q", a.Lien)
+	}
+	if want := fingerprint("erreur_ct", fpH(12), "1", ctA); a.Fingerprint != want {
+		t.Errorf("empreinte : %s, attendu %s", a.Fingerprint, want)
+	}
+	// Empreinte stable, sensible aux heures réaffectées.
+	if again := ectAnomalies(rows...); again[0].Fingerprint != a.Fingerprint {
+		t.Error("empreinte instable")
+	}
+	rows[0].Reel, rows[0].Ecart, rows[0].Reaffecte = 14, 14, 14
+	rows[1].Reel, rows[1].Ecart, rows[1].Reaffecte = 21, -14, 14
+	if again := ectAnomalies(rows...); again[0].Fingerprint == a.Fingerprint || *again[0].Heures != 14 {
+		t.Errorf("empreinte inchangée malgré +2 h : %+v", again[0])
+	}
+
+	// Inactive : écartée, sauf include_inactive.
+	for i := range rows {
+		rows[i].Inactive = true
+	}
+	if as := ectAnomalies(rows...); len(as) != 0 {
+		t.Errorf("ressource inactive : %+v", as)
+	}
+	res := domain.AnalyseResult{Ecarts: rows, Meta: domain.AnalyseMeta{IncludeInactive: true}}
+	if as := (&run{}).anomalies(&res); len(as) != 1 || as[0].Key != a.Key {
+		t.Errorf("include_inactive : %+v", as)
+	}
+}
+
+func TestAnomaliesErreurCTSemaines(t *testing.T) {
+	var rows []domain.EcartRow
+	for _, w := range []string{"2026-W39", "2026-W37", "2026-W38"} {
+		rows = append(rows,
+			ectRow(ctA, w, 35, 21, 14, domain.FlagErreurCT, ctB),
+			ectRow(ctB, w, 0, 14, 14, domain.FlagErreurCT, ctA))
+	}
+	// Une autre semaine sans erreur de CT : son prévu ne compte pas.
+	rows = append(rows, ectRow(ctA, "2026-W40", 35, 35, 0, domain.FlagConforme))
+	as := ectAnomalies(rows...)
+	checkAnomalies(t, as)
+	if len(as) != 1 {
+		t.Fatalf("%d anomalies : %+v", len(as), as)
+	}
+	a := as[0]
+	if a.Detail != "3 semaines, 42 h imputées sur Y99F900011 au lieu de Y99F900010 (prévu 105 h)" {
+		t.Errorf("détail : %q", a.Detail)
+	}
+	if *a.Heures != 42 || strings.Join(a.Semaines, ",") != "2026-W37,2026-W38,2026-W39" {
+		t.Errorf("heures / semaines : %v %v", *a.Heures, a.Semaines)
+	}
+	if want := fingerprint("erreur_ct", fpH(42), "3", ctA); a.Fingerprint != want {
+		t.Errorf("empreinte : %s, attendu %s", a.Fingerprint, want)
+	}
+}
+
+func TestAnomaliesErreurCTDeuxCTPlanifies(t *testing.T) {
+	as := ectAnomalies(
+		ectRow(ctB, "2026-W37", 0, 20, 20, domain.FlagErreurCT, ctA2, ctA),
+		ectRow(ctA, "2026-W37", 35, 27, 8, domain.FlagErreurCT, ctB),
+		ectRow(ctA2, "2026-W37", 14, 2, 12, domain.FlagErreurCT, ctB),
+	)
+	checkAnomalies(t, as)
+	if len(as) != 1 {
+		t.Fatalf("%d anomalies : %+v", len(as), as)
+	}
+	a := as[0]
+	if a.Titre != "MARTIN Théo · imputé sur Y99F900011 au lieu de Y99F900010, Y99F900012" {
+		t.Errorf("titre : %q", a.Titre)
+	}
+	if a.Detail != "1 semaine, 20 h imputées sur Y99F900011 au lieu de Y99F900010, Y99F900012 (prévu 49 h)" {
+		t.Errorf("détail : %q", a.Detail)
+	}
+	if want := fingerprint("erreur_ct", fpH(20), "1", ctA+","+ctA2); a.Fingerprint != want || *a.Heures != 20 {
+		t.Errorf("empreinte / heures : %+v", a)
+	}
+}
+
+func TestAnomaliesErreurCTPartielle(t *testing.T) {
+	// Côté CT planifié resté sous-imputé : l'anomalie porte sur le manque résiduel.
+	as := ectAnomalies(
+		ectRow(ctB, "2026-W37", 0, 10, 10, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 5, 10, domain.FlagSousImputation, ctB),
+	)
+	checkAnomalies(t, as)
+	if len(as) != 2 {
+		t.Fatalf("%d anomalies : %+v", len(as), as)
+	}
+	ect := findAnomalie(as, anomalieKey("ecart", ctB, "MARTIN Théo", "erreur_ct"))
+	sous := findAnomalie(as, anomalieKey("ecart", ctA, "MARTIN Théo", "sous_imputation"))
+	if ect == nil || sous == nil {
+		t.Fatalf("anomalies : %+v", as)
+	}
+	if ect.Detail != "1 semaine, 10 h imputées sur Y99F900011 au lieu de Y99F900010 (prévu 35 h)" || *ect.Heures != 10 {
+		t.Errorf("erreur de CT : %+v", ect)
+	}
+	if *sous.Heures != -20 || sous.Detail != "1 semaine, écart cumulé -20 h (prévu 35 h, réel 5 h), dont 10 h imputées sur Y99F900011" {
+		t.Errorf("sous-imputation résiduelle : %v %q", *sous.Heures, sous.Detail)
+	}
+	if want := fingerprint("sous_imputation", fpH(-20), fpH(35), fpH(5), "1"); sous.Fingerprint != want {
+		t.Errorf("empreinte : %s, attendu %s", sous.Fingerprint, want)
+	}
+
+	// Côté CT imputé à tort resté sur-imputé : la paire garde son anomalie d'erreur
+	// de CT, le résiduel reste en sur-imputation.
+	as = ectAnomalies(
+		ectRow(ctB, "2026-W37", 0, 20, 12, domain.FlagSurImputation, ctA),
+		ectRow(ctA, "2026-W37", 35, 23, 12, domain.FlagErreurCT, ctB),
+	)
+	checkAnomalies(t, as)
+	if len(as) != 2 {
+		t.Fatalf("%d anomalies : %+v", len(as), as)
+	}
+	ect = findAnomalie(as, anomalieKey("ecart", ctB, "MARTIN Théo", "erreur_ct"))
+	sur := findAnomalie(as, anomalieKey("ecart", ctB, "MARTIN Théo", "sur_imputation"))
+	if ect == nil || sur == nil {
+		t.Fatalf("anomalies : %+v", as)
+	}
+	if *ect.Heures != 12 || ect.Detail != "1 semaine, 12 h imputées sur Y99F900011 au lieu de Y99F900010 (prévu 35 h)" {
+		t.Errorf("erreur de CT : %+v", ect)
+	}
+	if *sur.Heures != 8 || sur.Detail != "1 semaine, écart cumulé +8 h (prévu 0 h, réel 20 h), dont 12 h imputées au lieu de Y99F900010" {
+		t.Errorf("sur-imputation résiduelle : %v %q", *sur.Heures, sur.Detail)
+	}
+
+	// Sans réaffectation : rien ne change (texte et empreinte historiques).
+	as = ectAnomalies(ectRow(ctA, "2026-W37", 35, 5, 0, domain.FlagSousImputation))
+	if len(as) != 1 || as[0].Detail != "1 semaine, écart cumulé -30 h (prévu 35 h, réel 5 h)" ||
+		as[0].Fingerprint != fingerprint("sous_imputation", fpH(-30), fpH(35), fpH(5), "1") {
+		t.Errorf("sans réaffectation : %+v", as)
 	}
 }

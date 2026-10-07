@@ -125,6 +125,7 @@ func (h *Handler) analyse(c *gin.Context) {
 var FlagLabel = map[domain.Flag]string{
 	domain.FlagAbsence:        "Absence totale",
 	domain.FlagHorsPlan:       "Hors plan",
+	domain.FlagErreurCT:       "Erreur de CT",
 	domain.FlagSurImputation:  "FLAG sur-imputation",
 	domain.FlagSousImputation: "FLAG sous-imputation",
 	domain.FlagConforme:       "Conforme",
@@ -180,11 +181,11 @@ func (h *Handler) ecartsCSV(c *gin.Context) {
 	}
 	rows := FilterEcarts(res.Ecarts, strings.TrimSpace(c.Query("ct")), strings.TrimSpace(c.Query("ressource")),
 		flags, strings.TrimSpace(c.Query("squad_id")))
-	header := []string{"Ressource", "CT", "Semaine", "Prévu (h)", "Réel (h)", "Écart (h)", "Flag", "Confiance"}
+	header := []string{"Ressource", "CT", "Semaine", "Prévu (h)", "Réel (h)", "Écart (h)", "Flag", "Confiance", "CT liés"}
 	httpx.CSV(c, "ecarts.csv", header, func(write func([]string) error) error {
 		for _, r := range rows {
 			if err := write([]string{r.Ressource, r.CT, r.Semaine, httpx.FormatFloat(r.Prevu), httpx.FormatFloat(r.Reel),
-				httpx.FormatFloat(r.Ecart), FlagLabel[r.Flag], string(r.Confidence)}); err != nil {
+				httpx.FormatFloat(r.Ecart), FlagLabel[r.Flag], string(r.Confidence), strings.Join(r.CTsLies, " ")}); err != nil {
 				return err
 			}
 		}

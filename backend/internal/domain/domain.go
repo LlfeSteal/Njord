@@ -273,11 +273,14 @@ const (
 	FlagSurImputation  Flag = "sur_imputation"  // 🔴
 	FlagSousImputation Flag = "sous_imputation" // 🟣
 	FlagConforme       Flag = "conforme"        // 🟢
+	// FlagErreurCT : heures imputées sur un CT non planifié de la semaine au lieu
+	// d'un CT planifié en manque, même personne (SPEC_analyse §6.2, DECISIONS n° 14).
+	FlagErreurCT Flag = "erreur_ct"
 )
 
 // FlagSeverity orders flags for the default sort (higher = more severe).
 var FlagSeverity = map[Flag]int{
-	FlagAbsence: 5, FlagHorsPlan: 4, FlagSurImputation: 3, FlagSousImputation: 2, FlagConforme: 1,
+	FlagAbsence: 6, FlagHorsPlan: 5, FlagErreurCT: 4, FlagSurImputation: 3, FlagSousImputation: 2, FlagConforme: 1,
 }
 
 type Classification string
@@ -397,6 +400,11 @@ type EcartRow struct {
 	SquadNom       string     `json:"squad_nom"`
 	Warn           bool       `json:"warn"`            // une ligne source est en statut warn
 	PlanVersionID  *string    `json:"plan_version_id"` // version de plan qui régit la semaine (null si non couverte)
+	// Erreur de CT (§6.2) : heures réaffectées entre ce tuple et les CT liés de la
+	// même personne × semaine (0 et [] sinon). Côté CT imputé à tort (prévu = 0) :
+	// CTsLies = CT planifiés en manque ; côté CT planifié : CT imputés à tort.
+	Reaffecte float64  `json:"reaffecte"`
+	CTsLies   []string `json:"cts_lies"` // trié, jamais null
 }
 
 type KPIs struct {
@@ -407,13 +415,16 @@ type KPIs struct {
 	NbSousImputation      int      `json:"nb_sous_imputation"`
 	NbAbsence             int      `json:"nb_absence"`
 	NbHorsPlan            int      `json:"nb_hors_plan"`
+	NbErreurCT            int      `json:"nb_erreur_ct"` // tuples erreur_ct (les deux côtés)
 	PointsSurImputation   int      `json:"points_sur_imputation"`
 	PointsSousImputation  int      `json:"points_sous_imputation"`
 	PointsAbsence         int      `json:"points_absence"`
 	PointsHorsPlan        int      `json:"points_hors_plan"`
+	PointsErreurCT        int      `json:"points_erreur_ct"` // 1 × tuple erreur_ct côté CT imputé à tort
 	PointsTotal           int      `json:"points_total"`
 	HeuresHorsPlan        float64  `json:"heures_hors_plan"`
-	TauxAbsence           *float64 `json:"taux_absence"` // 0..1
+	HeuresErreurCT        float64  `json:"heures_erreur_ct"` // Σ réel des tuples erreur_ct côté CT imputé à tort
+	TauxAbsence           *float64 `json:"taux_absence"`     // 0..1
 	NbPersonnesAbsentes   int      `json:"nb_personnes_absentes"`
 	NbPersonnesPlanifiees int      `json:"nb_personnes_planifiees"`
 	PctSecurise           *float64 `json:"pct_securise"` // 0..100

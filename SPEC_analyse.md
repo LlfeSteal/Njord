@@ -171,6 +171,7 @@ Pour chaque tuple joint, avec `écart = heures_réelles − heures_prévues` :
 |---|---|---|
 | `heures_réelles == 0` et `heures_prévues > 0` | Absence totale | ⚫ |
 | ressource présente au Réalisé mais pas au plan (stratégie §5.1 a échoué) | Hors plan | 🟠 |
+| heures sur un CT non planifié de la semaine qui comblent le manque d'un CT planifié de la même personne (§6.2) | Erreur de CT | 🔀 |
 | `écart > +15 h` | FLAG sur-imputation | 🔴 |
 | `écart < −30 h` | FLAG sous-imputation | 🟣 |
 | sinon | Conforme | 🟢 |
@@ -183,8 +184,27 @@ Pour chaque tuple joint, avec `écart = heures_réelles − heures_prévues` :
 | Points FLAG sous-imputation | `1 × nb 🟣` |
 | Points absence | `2 × nb ⚫` |
 | Points hors plan | `Σ heures_hors_plan ÷ 12` (arrondi inférieur) |
+| Points erreur de CT | `1 × nb 🔀` côté CT imputé à tort |
 | Taux de conformité | `nb 🟢 ÷ nb tuples comparés` |
 | Taux d'absence | `nb personnes avec Σ réel = 0 et Σ prévu > 0 ÷ nb personnes planifiées` |
+
+### 6.2 Erreur de CT
+
+Ajout 2026-10-07 (DECISIONS n° 14). Une personne qui se trompe de CT ne doit pas produire une sur-imputation d'un côté et une sous-imputation de l'autre, mais une seule erreur de CT.
+
+Pour chaque personne (clé NOM + Prénom appariée) × semaine non verrouillée :
+
+```
+E (imputé à tort) = tuples prévu = 0 et réel > 0          excédent = réel
+M (en manque)     = tuples prévu > 0 et réel < prévu      manque   = prévu − réel
+T                 = min(Σ excédents, Σ manques)           (rien si T = 0)
+t(tuple)          = T × part du tuple dans son côté
+écart ajusté      = E : réel − t      M : réel − prévu + t
+```
+
+Le transfert **explique** l'écart si au moins un tuple concerné est 🔴/🟣 sur l'écart brut et 🟢 sur l'écart ajusté (mêmes seuils). Alors chaque tuple concerné dont l'écart ajusté est conforme devient 🔀 **Erreur de CT** ; les autres gardent le flag de leur reste (🔴/🟣). Côté CT planifié, si l'un d'eux est 🟣, seuls les 🟣 peuvent devenir 🔀 : un CT déjà conforme qui reçoit une part du transfert reste 🟢. Sinon les flags bruts sont conservés. Dès que `T > 0`, chaque tuple concerné expose les heures réaffectées et les CT de l'autre côté. Prévu, réel et écart restent les valeurs brutes. Les 🔀 sont comparés (non conformes) dans le taux de conformité.
+
+Exemples (seuils 15 h / 30 h) : A prévu 35 h, réel 0 ; B non planifié, réel 10 h → A ajusté −25 h → A et B 🔀. Avec 2 h sur B → A ajusté −33 h → A reste 🟣 (« dont 2 h imputées sur B »), B 🟢. Jeu de recette : `test_data_demo/erreur_ct/`.
 
 ## 7. Restitutions fonctionnelles
 
@@ -250,7 +270,7 @@ Ajout 2026-10-05 (contrôle de gestion). Horizon = tout le plan, indépendant de
 ### 7.8 Anomalies (boîte de réception)
 
 Ajout 2026-10-05. Liste unique des points à vérifier, chacun avec une clé stable et une empreinte de ses chiffres :
-écarts d'imputation (regroupés par ressource × CT × flag, hors conformes), CT à risque, dérives de provision, contrôles qualité (§10), correspondances approximatives à confirmer, prévisions en dépassement / vigilance.
+écarts d'imputation (regroupés par ressource × CT × flag, hors conformes ; une erreur de CT = une seule anomalie « imputé sur B au lieu de A » par ressource × CT imputé à tort), CT à risque, dérives de provision, contrôles qualité (§10), correspondances approximatives à confirmer, prévisions en dépassement / vigilance.
 Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commentaire (journal d'audit) ; si l'empreinte change, elle redevient **à traiter**.
 
 ## 8. Comportements d'écran (onglet Analyse)
@@ -258,9 +278,9 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 - Sélecteur version plan (défaut : active, override archivée possible) ;
 - sélecteur version réalisé (mêmes règles) ;
 - sélecteur de période d'analyse (par défaut : intersection des périodes couvertes) ;
-- badges couleur (⚫ 🟠 🔴 🟢 🟣) dans le tableau et les KPI ;
+- badges couleur (⚫ 🟠 🔀 🔴 🟢 🟣) dans le tableau et les KPI ;
 - **analyse budgétaire** (page Budget) : barres PPS vs réalisé par nature de coût — Provision, Main d'œuvre, Capacité, Frais de mission, Autres (DECISIONS n° 10) ;
-- **synthèse des imputations** (page Écarts) : anneau des heures sur-imputées, sous-imputées, hors plan et conformes, et nombre de personnes du plan n'ayant rien imputé sur la période (DECISIONS n° 9) ;
+- **synthèse des imputations** (page Écarts) : anneau des heures sur-imputées, sous-imputées, hors plan, imputées sur un autre CT (erreur de CT) et conformes, et nombre de personnes du plan n'ayant rien imputé sur la période (DECISIONS n° 9) ;
 - drill-down : clic sur une ligne CT → filtres pré-remplis vers le tableau d'écarts ;
 - bouton "Exporter CSV conformité" et "Exporter CSV réalisé enrichi".
 

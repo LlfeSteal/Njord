@@ -1,6 +1,20 @@
 // Inspecteur de la page Écarts : un tuple ressource × CT × semaine, ou un regroupement ressource × CT.
-import type { ReactNode } from 'react';
-import { Group, Inspector, InspectorSection, KeyValue, Link, Stack, StatusGlyph, Text, type KeyValueItem } from '../../../ui';
+// Erreur de CT (DECISIONS n° 14) : note « heures imputées ici au lieu de… » avec lien vers les CT liés.
+import { Fragment, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Group,
+  Inspector,
+  InspectorSection,
+  KeyValue,
+  Link,
+  Stack,
+  StatusGlyph,
+  Text,
+  type GlyphKind,
+  type KeyValueItem,
+  type StatusTone,
+} from '../../../ui';
 import type { EcartRow, Flag } from '../../../api/types';
 import { FLAG_META, FlagBadge, FlagGlyph } from '../../../components/badges';
 import { fmtHours, fmtHoursSigned, fmtWeek } from '../../../lib/format';
@@ -15,10 +29,10 @@ function Ecart({ flag, value }: { flag: Flag; value: number }) {
   );
 }
 
-function Note({ children }: { children: ReactNode }) {
+function Note({ glyph = 'warning', tone = 'warning', children }: { glyph?: GlyphKind; tone?: StatusTone; children: ReactNode }) {
   return (
     <Group gap={6} wrap={false}>
-      <StatusGlyph kind="warning" tone="warning" size={12} />
+      <StatusGlyph kind={glyph} tone={tone} size={12} />
       <Text size="sm" tone="secondary">
         {children}
       </Text>
@@ -44,6 +58,112 @@ function Notes({ e }: { e: EcartRow }) {
     <Stack gap={4}>
       {e.inactive && <Note>Personne inactive dans le référentiel.</Note>}
       {e.warn && <Note>Ligne source signalée « warn » au parsing.</Note>}
+    </Stack>
+  );
+}
+
+// ------------------------------------------------------------------ Erreur de CT
+/** Heures réaffectées d'un côté (CT imputé à tort ou CT planifié) et CT liés, dédoublonnés. */
+interface Reaffectation {
+  heures: number;
+  cts: string[];
+}
+
+const round1 = (v: number) => Math.round(v * 10) / 10;
+
+/**
+ * Réaffectations des tuples, séparées par côté : `ici` = ce CT a été imputé à tort (prévu = 0),
+ * `ailleurs` = ce CT était prévu et ses heures sont parties sur `cts`.
+ */
+function reaffectations(rows: EcartRow[]): { ici: Reaffectation; ailleurs: Reaffectation } {
+  const ici = { heures: 0, cts: new Set<string>() };
+  const ailleurs = { heures: 0, cts: new Set<string>() };
+  for (const r of rows) {
+    if (!(r.reaffecte > 0)) continue;
+    const side = r.prevu === 0 ? ici : ailleurs;
+    side.heures += r.reaffecte;
+    for (const ct of r.cts_lies ?? []) side.cts.add(ct);
+  }
+  const out = (x: typeof ici): Reaffectation => ({ heures: round1(x.heures), cts: [...x.cts].sort() });
+  return { ici: out(ici), ailleurs: out(ailleurs) };
+}
+
+/** CT imputés à tort qui portent l'anomalie « erreur_ct » (clé « ecart|<CT imputé à tort>|ressource|erreur_ct »). */
+function erreurCtAnomalyCts(rows: EcartRow[]): string[] {
+  const cts = new Set<string>();
+  for (const r of rows) {
+    if (r.flag !== 'erreur_ct') continue;
+    if (r.prevu === 0) cts.add(r.ct);
+    else for (const ct of r.cts_lies ?? []) cts.add(ct);
+  }
+  return [...cts].sort();
+}
+
+/** Liens « Voir l'anomalie » d'un flag ; pour l'erreur de CT, un par CT imputé à tort. */
+function AnomalyLinks({ ct, ressource, flag, rows, suffix }: { ct: string; ressource: string; flag: Flag; rows: EcartRow[]; suffix?: boolean }) {
+  const label = suffix ? `Voir l'anomalie · ${FLAG_META[flag].label}` : "Voir l'anomalie";
+  if (flag !== 'erreur_ct') return <Link to={ecartAnomalieLink(ct, ressource, flag)}>{label}</Link>;
+  const cts = erreurCtAnomalyCts(rows);
+  return (
+    <>
+      {cts.map((c) => (
+        <Link key={c} to={ecartAnomalieLink(c, ressource, flag)}>
+          {cts.length > 1 ? `${label} (${c})` : label}
+        </Link>
+      ))}
+    </>
+  );
+}
+
+/** Lien vers la page Écarts filtrée sur un CT lié et la même ressource (vue et squad conservées). */
+function useLinkedCtHref() {
+  const [sp] = useSearchParams();
+  return (ct: string, ressource: string) => {
+    const n = new URLSearchParams(sp);
+    // La recherche et le filtre de flag pourraient masquer le CT lié.
+    n.delete('q');
+    n.delete('flag');
+    n.set('ct', ct);
+    n.set('ressource', ressource);
+    return `/ecarts?${n.toString()}`;
+  };
+}
+
+/** « A », « A et B », « A, B et C » — chaque CT est un lien. */
+function CtList({ cts, ressource }: { cts: string[]; ressource: string }) {
+  const href = useLinkedCtHref();
+  return (
+    <>
+      {cts.map((ct, i) => (
+        <Fragment key={ct}>
+          {i > 0 && (i === cts.length - 1 ? ' et ' : ', ')}
+          <Link to={href(ct, ressource)} size="sm" mono title={`Voir les écarts de ${ct} pour cette personne`}>
+            {ct}
+          </Link>
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/** Notes de réaffectation (erreur de CT, totale ou partielle) ; rien si aucune heure réaffectée. */
+function ReaffectationNotes({ rows, ressource }: { rows: EcartRow[]; ressource: string }) {
+  const { ici, ailleurs } = reaffectations(rows);
+  if (!ici.heures && !ailleurs.heures) return null;
+  return (
+    <Stack gap={4}>
+      {ici.heures > 0 && (
+        <Note glyph="swap" tone="erreur_ct">
+          {fmtHours(ici.heures)} imputées sur ce CT au lieu de{' '}
+          {ici.cts.length ? <CtList cts={ici.cts} ressource={ressource} /> : 'un CT prévu'}.
+        </Note>
+      )}
+      {ailleurs.heures > 0 && (
+        <Note glyph="swap" tone="erreur_ct">
+          {fmtHours(ailleurs.heures)} imputées sur{' '}
+          {ailleurs.cts.length ? <CtList cts={ailleurs.cts} ressource={ressource} /> : 'un autre CT'} au lieu de ce CT.
+        </Note>
+      )}
     </Stack>
   );
 }
@@ -87,9 +207,10 @@ export function EcartRowInspector({ row, planId, onClose }: RowProps) {
           <InspectorSection title="Ressource">
             <KeyValue items={identity(row)} />
           </InspectorSection>
+          <ReaffectationNotes rows={[row]} ressource={row.ressource} />
           <Notes e={row} />
           <Stack gap={4} align="start">
-            {row.flag !== 'conforme' && <Link to={ecartAnomalieLink(row.ct, row.ressource, row.flag)}>Voir l'anomalie</Link>}
+            {row.flag !== 'conforme' && <AnomalyLinks ct={row.ct} ressource={row.ressource} flag={row.flag} rows={[row]} />}
             {plan && <Link to={plan}>Voir la ligne du plan</Link>}
           </Stack>
         </Stack>
@@ -145,13 +266,12 @@ export function RessourceInspector({ group, planId, onClose, onShowWeeks }: Grou
           <InspectorSection title="Ressource">
             <KeyValue items={identity(group.head)} />
           </InspectorSection>
+          <ReaffectationNotes rows={group.rows} ressource={group.head.ressource} />
           <Notes e={group.head} />
           <Stack gap={4} align="start">
             <Link onClick={() => onShowWeeks(group)}>Voir les semaines dans la liste</Link>
             {flags.map((f) => (
-              <Link key={f} to={ecartAnomalieLink(group.ct, group.head.ressource, f)}>
-                Voir l'anomalie · {FLAG_META[f].label}
-              </Link>
+              <AnomalyLinks key={f} ct={group.ct} ressource={group.head.ressource} flag={f} rows={group.rows} suffix />
             ))}
             {plan && <Link to={plan}>Voir la ligne du plan</Link>}
           </Stack>

@@ -201,14 +201,16 @@ export interface AuditEntry {
 }
 
 // ---------------------------------------------------------------- Analyse
-export type Flag = 'absence' | 'hors_plan' | 'sur_imputation' | 'sous_imputation' | 'conforme';
+/** erreur_ct : heures imputées sur un CT non planifié au lieu d'un CT planifié de la même semaine (DECISIONS n° 14). */
+export type Flag = 'absence' | 'hors_plan' | 'erreur_ct' | 'sur_imputation' | 'sous_imputation' | 'conforme';
 export type Classification = 'SECURISE' | 'NON_SECURISE' | 'NON_CLASSE';
 /** nom : même NOM + Prénom dans le plan et le réalisé ; none : hors plan ; plan : plan seul. */
 export type Confidence = 'nom' | 'none' | 'plan';
 
 export const FLAG_SEVERITY: Record<Flag, number> = {
-  absence: 5,
-  hors_plan: 4,
+  absence: 6,
+  hors_plan: 5,
+  erreur_ct: 4,
   sur_imputation: 3,
   sous_imputation: 2,
   conforme: 1,
@@ -309,6 +311,12 @@ export interface EcartRow {
   warn: boolean;
   /** Version de plan qui régit la semaine (null si aucune). */
   plan_version_id: string | null;
+  /**
+   * Erreur de CT : heures réaffectées entre ce tuple et `cts_lies` (même personne × semaine), 0 sinon.
+   * prevu = 0 → CT imputé à tort, cts_lies = CT planifiés en manque ; sinon l'inverse.
+   */
+  reaffecte: number;
+  cts_lies: string[];
 }
 
 export interface KPIs {
@@ -319,12 +327,16 @@ export interface KPIs {
   nb_sous_imputation: number;
   nb_absence: number;
   nb_hors_plan: number;
+  nb_erreur_ct: number;
   points_sur_imputation: number;
   points_sous_imputation: number;
   points_absence: number;
   points_hors_plan: number;
+  points_erreur_ct: number;
   points_total: number;
   heures_hors_plan: number;
+  /** Σ réel des tuples erreur_ct côté CT imputé à tort. */
+  heures_erreur_ct: number;
   taux_absence: number | null; // 0..1
   nb_personnes_absentes: number;
   nb_personnes_planifiees: number;

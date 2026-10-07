@@ -43,6 +43,8 @@
   --danger: var(--red);
   --flag-conforme: var(--green);
   --flag-hors-plan: var(--orange);
+  /* Erreur de CT (DECISIONS n° 14) : heures imputées sur un autre CT que prévu. */
+  --flag-erreur-ct: var(--teal);
   --flag-sur-imputation: var(--red);
   --flag-sous-imputation: var(--purple);
   --flag-absence: var(--gray);

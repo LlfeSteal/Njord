@@ -25,6 +25,7 @@
 .ui-text[data-tone='danger'] { color: var(--danger); }
 .ui-text[data-tone='conforme'] { color: var(--flag-conforme); }
 .ui-text[data-tone='hors_plan'] { color: var(--flag-hors-plan); }
+.ui-text[data-tone='erreur_ct'] { color: var(--flag-erreur-ct); }
 .ui-text[data-tone='sur_imputation'] { color: var(--flag-sur-imputation); }
 .ui-text[data-tone='sous_imputation'] { color: var(--flag-sous-imputation); }
 .ui-text[data-tone='absence'] { color: var(--flag-absence); }

@@ -100,7 +100,12 @@ export default function SyntheseImputations({
                       <Cell key={s.flag} fill={colors[tokenOf(s.flag)]} fillOpacity={dimmed(s.flag) ? 0.3 : 1} />
                     ))}
                   </Pie>
-                  <RTooltip content={<PartTooltip total={data.total} />} isAnimationActive={false} />
+                  {/* Au-dessus du total centré dans l'anneau (frère positionné peint après). */}
+                  <RTooltip
+                    content={<PartTooltip total={data.total} />}
+                    isAnimationActive={false}
+                    wrapperStyle={{ outline: 'none', zIndex: 1 }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
               <div className="ecarts-synthese__total" aria-hidden>

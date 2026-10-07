@@ -121,6 +121,15 @@
   border-left: 1px solid var(--separator);
   border-radius: 0 8px 8px 0;
 }
+/* Pied : heures non couvertes par le plan (mention discrète, hachure neutre). */
+.ecarts-synthese__foot {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--separator);
+}
+.ecarts-synthese__foot:empty {
+  display: none;
+}
 @media (max-width: 720px) {
   .ecarts-synthese__body {
     grid-template-columns: minmax(0, 1fr);

@@ -84,6 +84,9 @@ Le code `Ressource` **n'identifie plus personne** (DECISIONS n° 8) : il est con
 | `nb_warn` / `nb_drop` | entiers | issues du parsing |
 | `layout_détecté` | enum | `A`, `B`, `mixte` |
 | `période_couverte` | (date_min, date_max) | dérivée des lignes |
+| `date_effet` | date | à partir de laquelle la version remplace les précédentes dans la timeline (SPEC_analyse §4.3) ; saisie à l'import, défaut = `date_min`, modifiable (journalisé) |
+
+**Timeline** (2026-10-07) : le plan étant réactualisé chaque mois, l'analyse consolide toutes les versions non purgées selon leur date d'effet (SPEC_analyse §4.3) ; le statut `active` désigne la dernière version importée.
 
 **Règle** : au plus **une** version `active` à la fois. Importer une nouvelle version **archive automatiquement** l'ancienne si l'utilisateur le confirme (comportement par défaut), sinon la nouvelle naît en `archivée`.
 
@@ -124,7 +127,7 @@ Identité humaine identifiée **uniquement par NOM + Prénom** (DECISIONS n° 8)
 
 ### 7.1 Importer un plan
 
-**Entrée utilisateur** : fichier `.xlsx` + intitulé optionnel.
+**Entrée utilisateur** : fichier `.xlsx` + intitulé optionnel + date d'effet (pré-remplie avec la plus petite date de début du fichier).
 
 **Comportement attendu** :
 1. Lecture de l'onglet `Plan de charge`. Si absent → erreur bloquante "onglet introuvable".

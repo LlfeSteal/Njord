@@ -1,6 +1,7 @@
 // Page Capacité : agrégation des écarts de l'analyse courante par squad et par semaine (DECISIONS n° 11).
 // Calcul pur, sans appel API : Σ prévu = capacité planifiée, Σ réel (hors plan compris), utilisation = réel ÷ prévu.
-import type { EcartRow, Squad } from '../../../api/types';
+// Semaine non couverte par le plan de charge (DECISIONS n° 13) : pas d'écart, cellule « non couvert ».
+import type { EcartRow, Squad, WeekInfo } from '../../../api/types';
 
 /** Libellé de la ligne des écarts sans squad. */
 export const SANS_SQUAD = 'Sans squad';
@@ -12,6 +13,8 @@ export interface CapaciteCell {
   horsPlan: number;
   /** Réel ÷ prévu en % ; null si rien n'est prévu. */
   utilisation: number | null;
+  /** Semaine couverte par aucune version du plan (jamais vrai pour un total de période). */
+  nonCouvert?: boolean;
 }
 
 export interface CapaciteRow extends CapaciteCell {
@@ -70,14 +73,17 @@ function cell(prevu: number, reel: number, horsPlan: number): CapaciteCell {
   return { prevu: p, reel: r, horsPlan: round2(horsPlan), utilisation: p > 0 ? (r / p) * 100 : null };
 }
 
-function toRow(acc: Acc, id: string | null, nom: string, depth: number): CapaciteRow {
+function toRow(acc: Acc, id: string | null, nom: string, depth: number, uncovered: boolean[]): CapaciteRow {
   return {
     ...cell(acc.prevu, acc.reel, acc.horsPlan),
     id,
     nom,
     depth,
     personnes: acc.personnes.size,
-    weeks: acc.weeks.map((w) => cell(w.prevu, w.reel, w.horsPlan)),
+    weeks: acc.weeks.map((w, i) => {
+      const c = cell(w.prevu, w.reel, w.horsPlan);
+      return uncovered[i] ? { ...c, nonCouvert: true } : c;
+    }),
   };
 }
 
@@ -92,10 +98,12 @@ export const capaciteRows = (ecarts: EcartRow[], includeInactive: boolean) =>
  * et ceux de tous ses descendants ; seuls les squads ayant des écarts (eux ou leurs descendants) sont listés,
  * parents par nom puis leurs enfants par nom (indentés), « Sans squad » en dernier.
  * `squads` = référentiel (pour la parenté) ; un squad absent du référentiel est traité comme une racine.
+ * `weeks` = semaines de la période (`meta.weeks`) ; `couverture === 'aucune'` → cellules `nonCouvert`.
  */
-export function capacite(rows: EcartRow[], weeks: string[], squads: Squad[]): Capacite {
+export function capacite(rows: EcartRow[], weeks: Pick<WeekInfo, 'week' | 'couverture'>[], squads: Squad[]): Capacite {
   const n = weeks.length;
-  const weekIndex = new Map(weeks.map((w, i) => [w, i]));
+  const weekIndex = new Map(weeks.map((w, i) => [w.week, i]));
+  const uncovered = weeks.map((w) => w.couverture === 'aucune');
   const byId = new Map(squads.map((s) => [s.id, s]));
   const names = new Map<string, string>();
   const accs = new Map<string, Acc>();
@@ -142,7 +150,7 @@ export function capacite(rows: EcartRow[], weeks: string[], squads: Squad[]): Ca
     for (const id of children.get(parent) ?? []) {
       if (seen.has(id)) continue;
       seen.add(id);
-      out.push(toRow(accs.get(id)!, id, nomOf(id), depth));
+      out.push(toRow(accs.get(id)!, id, nomOf(id), depth, uncovered));
       walk(id, depth + 1);
     }
   };
@@ -151,12 +159,12 @@ export function capacite(rows: EcartRow[], weeks: string[], squads: Squad[]): Ca
   for (const id of [...accs.keys()].filter((k) => !seen.has(k)).sort((a, b) => byName(nomOf(a), nomOf(b)))) {
     if (seen.has(id)) continue;
     seen.add(id);
-    out.push(toRow(accs.get(id)!, id, nomOf(id), 0));
+    out.push(toRow(accs.get(id)!, id, nomOf(id), 0, uncovered));
     walk(id, 1);
   }
-  if (hasSans) out.push(toRow(sans, null, SANS_SQUAD, 0));
+  if (hasSans) out.push(toRow(sans, null, SANS_SQUAD, 0, uncovered));
 
-  return { rows: out, total: toRow(total, null, 'Total', 0) };
+  return { rows: out, total: toRow(total, null, 'Total', 0, uncovered) };
 }
 
 // ------------------------------------------------------------------ Échelle de la carte de chaleur
@@ -174,13 +182,16 @@ export interface Heat {
   horsPlan: boolean;
   /** Ni prévu ni réel. */
   empty: boolean;
+  /** Semaine non couverte par le plan de charge : ni écart ni échelle, hachure neutre. */
+  nonCouvert: boolean;
 }
 
 /** Position d'une cellule sur l'échelle divergente centrée sur 100 %. */
 export function heatOf(c: CapaciteCell): Heat {
-  if (c.utilisation == null) return { side: null, step: 0, horsPlan: c.reel > 0, empty: c.reel <= 0 };
+  if (c.nonCouvert) return { side: null, step: 0, horsPlan: false, empty: false, nonCouvert: true };
+  if (c.utilisation == null) return { side: null, step: 0, horsPlan: c.reel > 0, empty: c.reel <= 0, nonCouvert: false };
   const d = c.utilisation - 100;
   const a = Math.abs(d);
   const step = a <= HEAT_STEPS[0] ? 0 : a <= HEAT_STEPS[1] ? 1 : a <= HEAT_STEPS[2] ? 2 : 3;
-  return { side: step === 0 ? null : d < 0 ? 'sous' : 'sur', step, horsPlan: false, empty: false };
+  return { side: step === 0 ? null : d < 0 ? 'sous' : 'sur', step, horsPlan: false, empty: false, nonCouvert: false };
 }

@@ -6,7 +6,7 @@ import { EmptyState, Metric, Page, PageToolbar, SkeletonRows } from '../../../ui
 import type { AnalyseResult, Squad } from '../../../api/types';
 import { fmtHours, fmtPct, fmtWeek } from '../../../lib/format';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
 import { shortWeek } from '../anomalies/meta';
 import { useSquads } from '../../referentiels/hooks';
 import HeatmapTable, { HeatLegend } from './HeatmapTable';
@@ -72,7 +72,7 @@ export default function CapacitePage() {
       r && !squads.isLoading
         ? capacite(
             capaciteRows(r.ecarts, r.meta.include_inactive),
-            r.meta.weeks.map((w) => w.week),
+            r.meta.weeks,
             ref,
           )
         : null,
@@ -89,7 +89,7 @@ export default function CapacitePage() {
             r && (
               <>
                 {data ? `${nbSquads} squad${nbSquads > 1 ? 's' : ''} · ` : ''}
-                {periodOf(r)} <ArchivedTag result={r} />
+                {periodOf(r)} <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )
           }
@@ -102,7 +102,11 @@ export default function CapacitePage() {
           !data ? (
             <SkeletonRows rows={6} />
           ) : data.rows.length === 0 ? (
-            <EmptyState title="Aucune heure à répartir">Le plan et le réalisé ne se recoupent pas sur la période.</EmptyState>
+            <EmptyState title="Aucune heure à répartir">
+              {result.meta.weeks.length > 0 && result.meta.weeks.every((w) => w.couverture === 'aucune')
+                ? 'La période n’est couverte par aucune version du plan de charge.'
+                : 'Le plan et le réalisé ne se recoupent pas sur la période.'}
+            </EmptyState>
           ) : (
             <>
               <CapaciteMetrics data={data} />
@@ -113,7 +117,7 @@ export default function CapacitePage() {
                 period={periodOf(result)}
                 onOpen={(id) => navigate(`/ecarts?squad=${encodeURIComponent(id)}&vue=ressource`)}
               />
-              <HeatLegend />
+              <HeatLegend uncovered={result.meta.weeks.some((w) => w.couverture === 'aucune')} />
               <p className="pil-note">
                 Utilisation = heures imputées ÷ heures prévues, hors plan compris ; un squad parent cumule ses
                 sous-squads. Cliquez sur un squad pour voir ses écarts.

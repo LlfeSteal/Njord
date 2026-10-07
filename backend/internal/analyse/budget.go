@@ -53,6 +53,12 @@ func realiseNature(provCT bool, e *domain.RealiseEntry) string {
 	return "autres"
 }
 
+// uncovered: the entry is dated on a day outside the plan timeline (no anomaly).
+func (r *run) uncovered(e *domain.RealiseEntry) bool {
+	d := day(e.DateDepense)
+	return d != "" && !r.tl.Covered(d)
+}
+
 func pct(num, den float64) *float64 {
 	if den == 0 {
 		return nil
@@ -124,7 +130,7 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 		attached := r.ids[i] != nil && r.ids[i].matched()
 		isProvType := canon(e.Type) == provisionType
 		unmatchedMO := r.ids[i] != nil && !r.ids[i].matched()
-		if !attached && (isProvType || (unmatchedMO && provCT[ct])) {
+		if !attached && (isProvType || (unmatchedMO && provCT[ct])) && !r.uncovered(e) {
 			al.DeriveProvision = append(al.DeriveProvision, domain.DeriveProvision{
 				CT:                 ct,
 				RowNum:             e.RowNum,

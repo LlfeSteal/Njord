@@ -64,6 +64,7 @@ func Open(path string) (*Store, error) {
 var addedColumns = []struct{ table, column, def string }{
 	{"plan_lines", "nom_prenom", "TEXT NOT NULL DEFAULT ''"},
 	{"realise_entries", "nom_prenom", "TEXT NOT NULL DEFAULT ''"},
+	{"versions", "date_effet", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // migrate applies the schema, adds the columns missing from an older base, runs

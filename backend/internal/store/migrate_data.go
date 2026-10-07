@@ -14,6 +14,7 @@ import (
 // in a transaction, after the DDL and before schemaIndexes.
 var dataMigrations = []func(tx *sql.Tx) error{
 	identiteNomPrenom,
+	dateEffetPlan,
 }
 
 func migrateData(db *sql.DB) error {
@@ -207,4 +208,11 @@ func identiteNomPrenom(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// dateEffetPlan (DECISIONS n° 13): a plan version replaces the previous ones
+// from its date d'effet; existing versions get their first planned day.
+func dateEffetPlan(tx *sql.Tx) error {
+	_, err := tx.Exec(`UPDATE versions SET date_effet = periode_debut WHERE kind = 'plan' AND date_effet = ''`)
+	return err
 }

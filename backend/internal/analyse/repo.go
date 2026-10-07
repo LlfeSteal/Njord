@@ -160,11 +160,57 @@ func (r *Repo) Squads(ctx context.Context) ([]domain.Squad, error) {
 	return out, arows.Err()
 }
 
-// LoadInput loads every engine input for the two versions.
-func (r *Repo) LoadInput(ctx context.Context, plan, realise domain.Version) (Input, error) {
-	in := Input{Plan: plan, Realise: realise}
+// planSelection returns the plan versions of the timeline known at ref
+// (non purgées, importées au plus tard avec elle) and whether a later
+// non-purged plan version exists (DECISIONS n° 13).
+func (r *Repo) planSelection(ctx context.Context, ref domain.Version) ([]domain.Version, bool, error) {
+	all, err := r.st.ListVersions(ctx, domain.KindPlan, false)
+	if err != nil {
+		return nil, false, err
+	}
+	var sel []domain.Version
+	superseded := false
+	for _, v := range all {
+		if importedAfter(v, ref) {
+			superseded = true
+			continue
+		}
+		sel = append(sel, v)
+	}
+	return sel, superseded, nil
+}
+
+// importedAfter orders versions by (importee_le, id).
+func importedAfter(a, b domain.Version) bool {
+	if !a.ImporteeLe.Equal(b.ImporteeLe) {
+		return a.ImporteeLe.After(b.ImporteeLe)
+	}
+	return a.ID > b.ID
+}
+
+// LoadPlans loads the timeline known at ref: versions and their non-drop lines.
+func (r *Repo) LoadPlans(ctx context.Context, ref domain.Version) ([]PlanSource, bool, error) {
+	sel, superseded, err := r.planSelection(ctx, ref)
+	if err != nil {
+		return nil, false, err
+	}
+	out := make([]PlanSource, 0, len(sel))
+	for _, v := range sel {
+		lines, err := r.PlanLines(ctx, v.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		out = append(out, PlanSource{Version: v, Lines: lines})
+	}
+	return out, superseded, nil
+}
+
+// LoadInput loads every engine input: the plan timeline known at planRef and
+// the réalisé version.
+func (r *Repo) LoadInput(ctx context.Context, planRef, realise domain.Version) (Input, error) {
+	in := Input{PlanRef: planRef, Realise: realise}
 	var err error
-	if in.PlanLines, err = r.PlanLines(ctx, plan.ID); err != nil {
+	if in.Plans, in.PlanSuperseded, err = r.LoadPlans(ctx, planRef); err != nil {
 		return in, err
 	}
 	if in.Entries, err = r.Entries(ctx, realise.ID); err != nil {
@@ -185,8 +231,27 @@ const (
 	msgNoRealise = "Aucun réalisé actif : importez ou réactivez un réalisé"
 )
 
-// ResolveVersion returns the chosen version (id != "") or the active one.
-// Missing active version → store.Precondition; unknown id → store.ErrNotFound;
+// defaultVersion: the active version; for the plan, else the most recent
+// non-purged one (DECISIONS n° 13). nil if none.
+func (r *Repo) defaultVersion(ctx context.Context, kind domain.Kind) (*domain.Version, error) {
+	v, err := r.st.ActiveVersion(ctx, kind)
+	if err != nil || v != nil || kind != domain.KindPlan {
+		return v, err
+	}
+	all, err := r.st.ListVersions(ctx, kind, false)
+	if err != nil {
+		return nil, err
+	}
+	for i := range all {
+		if v == nil || importedAfter(all[i], *v) {
+			v = &all[i]
+		}
+	}
+	return v, nil
+}
+
+// ResolveVersion returns the chosen version (id != "") or the default one.
+// Missing default version → store.Precondition; unknown id → store.ErrNotFound;
 // purged version → store.Precondition.
 func (r *Repo) ResolveVersion(ctx context.Context, kind domain.Kind, id string) (domain.Version, error) {
 	if id != "" {
@@ -199,7 +264,7 @@ func (r *Repo) ResolveVersion(ctx context.Context, kind domain.Kind, id string) 
 		}
 		return v, nil
 	}
-	v, err := r.st.ActiveVersion(ctx, kind)
+	v, err := r.defaultVersion(ctx, kind)
 	if err != nil {
 		return domain.Version{}, err
 	}
@@ -212,19 +277,35 @@ func (r *Repo) ResolveVersion(ctx context.Context, kind domain.Kind, id string) 
 	return *v, nil
 }
 
-// planRange / realRange: dates covered by the non-drop lines of a version.
-func (r *Repo) planRange(ctx context.Context, versionID string) (string, string, error) {
-	var a, b sql.NullString
-	err := r.st.DB().QueryRowContext(ctx, `SELECT MIN(substr(date_debut,1,10)), MAX(substr(date_fin,1,10)) FROM plan_lines
-		WHERE version_id = ? AND statut_parsing <> 'drop' AND date_debut <> '' AND date_fin <> ''`, versionID).Scan(&a, &b)
-	return a.String, b.String, err
-}
-
 func (r *Repo) realRange(ctx context.Context, versionID string) (string, string, error) {
 	var a, b sql.NullString
 	err := r.st.DB().QueryRowContext(ctx, `SELECT MIN(substr(date_depense,1,10)), MAX(substr(date_depense,1,10)) FROM realise_entries
 		WHERE version_id = ? AND statut_parsing <> 'drop' AND date_depense <> ''`, versionID).Scan(&a, &b)
 	return a.String, b.String, err
+}
+
+// ctLibelles: libellé of every TG of the active réalisé (code stripped), for
+// the plan timeline. No active réalisé → empty map.
+func (r *Repo) ctLibelles(ctx context.Context) (map[string]string, error) {
+	out := map[string]string{}
+	v, err := r.st.ActiveVersion(ctx, domain.KindRealise)
+	if err != nil || v == nil {
+		return out, err
+	}
+	rows, err := r.st.DB().QueryContext(ctx, `SELECT TRIM(tg), MIN(tg_libelle) FROM realise_entries
+		WHERE version_id = ? AND statut_parsing <> 'drop' AND TRIM(tg) <> '' AND TRIM(tg_libelle) <> '' GROUP BY TRIM(tg)`, v.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var tg, lib string
+		if err := rows.Scan(&tg, &lib); err != nil {
+			return nil, err
+		}
+		out[tg] = ctLabel(tg, lib)
+	}
+	return out, rows.Err()
 }
 
 // Context builds the analysis screen context (versions, defaults, weeks).
@@ -234,6 +315,7 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 	if err != nil {
 		return out, err
 	}
+	cal := NewCalendar(s)
 	if out.PlanVersions, err = r.st.ListVersions(ctx, domain.KindPlan, false); err != nil {
 		return out, err
 	}
@@ -241,14 +323,18 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 		return out, err
 	}
 	var pMin, pMax, rMin, rMax string
+	var tl Timeline
 	var msgs []string
-	if v, err := r.st.ActiveVersion(ctx, domain.KindPlan); err != nil {
+	if v, err := r.defaultVersion(ctx, domain.KindPlan); err != nil {
 		return out, err
 	} else if v != nil {
 		out.DefaultPlanID = &v.ID
-		if pMin, pMax, err = r.planRange(ctx, v.ID); err != nil {
+		plans, _, err := r.LoadPlans(ctx, *v)
+		if err != nil {
 			return out, err
 		}
+		tl = BuildTimeline(cal, plans)
+		pMin, pMax = tl.Span()
 	} else {
 		msgs = append(msgs, msgNoPlan)
 	}
@@ -264,7 +350,7 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 	}
 	out.Message = strings.Join(msgs, " — ")
 	out.DefaultWeekFrom, out.DefaultWeekTo, _ = DefaultPeriod(pMin, pMax, rMin, rMax)
-	// Weeks = union des semaines couvertes par les versions par défaut.
+	// Weeks = union des semaines de la timeline et du réalisé par défaut.
 	lo, hi := "", ""
 	for _, d := range []string{pMin, rMin} {
 		if w := WeekOfDate(d); w != "" && (lo == "" || w < lo) {
@@ -277,7 +363,7 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 		}
 	}
 	if lo != "" && hi != "" {
-		out.Weeks = nonNilWeeks(Weeks(lo, hi, s))
+		out.Weeks = tl.weeks(cal, lo, hi)
 	}
 	return out, nil
 }

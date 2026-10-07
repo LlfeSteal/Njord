@@ -1,5 +1,7 @@
 // Synthèse des imputations (page Écarts) : répartition des heures par flag en anneau, et nombre de
 // personnes planifiées n'ayant rien imputé sur la période. Suit les filtres de la page, hors filtre flag.
+// Pied facultatif : heures imputées hors couverture du plan (non analysées, DECISIONS n° 13).
+import type { ReactNode } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RTooltip } from 'recharts';
 import { Card, Metric } from '../../../ui';
 import type { Flag } from '../../../api/types';
@@ -47,8 +49,11 @@ export default function SyntheseImputations({
   data,
   selected,
   onSelect,
+  footer,
 }: {
   data: Synthese;
+  /** Mention sous la synthèse (ex. heures non couvertes par le plan) ; rien si vide. */
+  footer?: ReactNode;
   /** Flags filtrés sur la page : les autres parts sont estompées. */
   selected: Flag[];
   onSelect: (flag: Flag) => void;
@@ -136,6 +141,7 @@ export default function SyntheseImputations({
           />
         </button>
       </div>
+      {footer && <div className="ecarts-synthese__foot">{footer}</div>}
     </Card>
   );
 }

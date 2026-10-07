@@ -67,13 +67,18 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 }
 
 func (e *env) version(id, kind, statut, intitule string) {
-	e.exec(`INSERT INTO versions(id, kind, intitule, importee_le, statut, archivee_le) VALUES (?,?,?,?,?,?)`,
-		id, kind, intitule, "2026-10-01T10:00:00Z", statut, map[bool]any{true: "2026-10-02T10:00:00Z", false: nil}[statut == "archivee"])
+	e.versionAt(id, kind, statut, intitule, "2026-10-01T10:00:00Z", "")
+}
+
+// versionAt inserts a version imported at importee with a date d'effet ("" = none).
+func (e *env) versionAt(id, kind, statut, intitule, importee, effet string) {
+	e.exec(`INSERT INTO versions(id, kind, intitule, importee_le, statut, archivee_le, date_effet) VALUES (?,?,?,?,?,?,?)`,
+		id, kind, intitule, importee, statut, map[bool]any{true: "2026-10-02T10:00:00Z", false: nil}[statut == "archivee"], effet)
 }
 
 func (e *env) seed() {
 	e.version("plan1", "plan", "active", "PDC octobre")
-	e.version("plan0", "plan", "archivee", "PDC septembre")
+	e.versionAt("plan0", "plan", "archivee", "PDC septembre", "2026-09-01T10:00:00Z", "")
 	e.version("real1", "realise", "active", "Réalisé S40")
 	e.exec(`INSERT INTO squads(id, nom_canonique, nom_normalise, created_at) VALUES ('sq1','Squad Alpha','SQUAD ALPHA','2026-10-01T10:00:00Z')`)
 	for _, p := range [][2]string{{"p1", "DURAND Claire"}, {"p2", "Antoine De La Tour"}, {"p3", "Sarah Blanc"}} {
@@ -263,19 +268,162 @@ func TestRepoLoadInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(in.PlanLines) != 4 || len(in.Entries) != 5 || len(in.Personnes) != 3 || len(in.Squads) != 1 {
-		t.Errorf("chargement: %d lignes, %d écritures, %d personnes, %d squads", len(in.PlanLines), len(in.Entries), len(in.Personnes), len(in.Squads))
+	// Timeline connue à plan1 : plan0 (importé avant) + plan1.
+	if len(in.Plans) != 2 || in.PlanSuperseded || in.PlanRef.ID != "plan1" {
+		t.Fatalf("versions retenues : %d, superseded %v", len(in.Plans), in.PlanSuperseded)
 	}
-	if in.PlanLines[0].PersonneID == nil || *in.PlanLines[0].PersonneID != "p1" || in.PlanLines[3].PersonneID != nil {
+	var lines []domain.PlanLine
+	for _, p := range in.Plans {
+		if p.Version.ID == "plan1" {
+			lines = p.Lines
+		}
+	}
+	if len(lines) != 4 || len(in.Entries) != 5 || len(in.Personnes) != 3 || len(in.Squads) != 1 {
+		t.Errorf("chargement: %d lignes, %d écritures, %d personnes, %d squads", len(lines), len(in.Entries), len(in.Personnes), len(in.Squads))
+	}
+	if lines[0].PersonneID == nil || *lines[0].PersonneID != "p1" || lines[3].PersonneID != nil {
 		t.Error("personne_id mal relu")
 	}
-	if in.PlanLines[0].NomPrenom != "DURAND Claire" || in.PlanLines[3].NomPrenom != "" {
-		t.Errorf("nom_prenom du plan mal relu : %q / %q", in.PlanLines[0].NomPrenom, in.PlanLines[3].NomPrenom)
+	if lines[0].NomPrenom != "DURAND Claire" || lines[3].NomPrenom != "" {
+		t.Errorf("nom_prenom du plan mal relu : %q / %q", lines[0].NomPrenom, lines[3].NomPrenom)
+	}
+	plan0, _ := e.st.GetVersion(ctx, domain.KindPlan, "plan0")
+	if in, err = repo.LoadInput(ctx, plan0, real); err != nil || len(in.Plans) != 1 || !in.PlanSuperseded {
+		t.Errorf("timeline connue à plan0 : %d versions, superseded %v, %v", len(in.Plans), in.PlanSuperseded, err)
 	}
 	if in.Entries[0].NomPrenom != "DURAND Claire" || in.Entries[0].Matricule != "A00001" {
 		t.Errorf("écriture mal relue : %+v", in.Entries[0])
 	}
 	if p := in.Personnes[0]; p.ID != "p1" || p.NomNormalise != "DURAND|CLAIRE" || p.SquadID == nil {
 		t.Errorf("personne mal relue : %+v", p)
+	}
+}
+
+// seedTimeline: pA (effet 07/09, importé le 01/09, archivé) puis pB (effet
+// 05/10, importé le 01/10, actif) ; MARTIN disparaît de pB.
+func (e *env) seedTimeline() {
+	e.versionAt("pA", "plan", "archivee", "PDC septembre", "2026-09-01T10:00:00Z", "2026-09-07")
+	e.versionAt("pB", "plan", "active", "PDC octobre", "2026-10-01T10:00:00Z", "2026-10-05")
+	e.version("real1", "realise", "active", "Réalisé S41")
+	e.exec(`INSERT INTO squads(id, nom_canonique, nom_normalise, created_at) VALUES ('sq1','Squad Alpha','SQUAD ALPHA','2026-10-01T10:00:00Z')`)
+	e.exec(`INSERT INTO personnes(id, display_name, nom_normalise, squad_id, created_at) VALUES ('p1','DURAND Claire',?,'sq1','2026-10-01T10:00:00Z')`, names.KeyOf("DURAND Claire"))
+	line := `INSERT INTO plan_lines(version_id,row_num,ct,ressource,libelle,nom_prenom,ligne_cout,charge_totale,pps,pourcentage,date_debut,date_fin,statut_parsing)
+		VALUES (?,?,?,?,?,?,'MAIN D''OEUVRE SUR SITE',?,?,100,?,?,'ok')`
+	pl := func(v string, row int, ct, lib string, charge, pps float64, debut, fin string) {
+		e.exec(line, v, row, ct, "R", lib, libelleNomPrenom(lib), charge, pps, debut, fin)
+	}
+	pl("pA", 1, "CT1", "DURAND Claire", 280, 4000, "2026-09-07", "2026-10-30")
+	pl("pA", 2, "CT1", "MARTIN Théo", 280, 1000, "2026-09-07", "2026-10-30")
+	pl("pB", 1, "CT2", "DURAND Claire", 140, 2000, "2026-10-05", "2026-10-30")
+	entry := `INSERT INTO realise_entries(version_id,row_num,tg,tg_libelle,categorie,type,employe_fournisseur,nom_prenom,quantite,total_eur,date_depense,periode_comptable,statut_parsing)
+		VALUES ('real1',?,?,?,'MAIN D''OEUVRE','MAIN D''OEUVRE SUR SITE',?,?,?,?,?,?,'ok')`
+	for i, r := range []struct {
+		tg, lib, nom string
+		h            float64
+		date         string
+	}{
+		{"CT1", "CT1 - Socle", "DURAND Claire Mme", 35, "2026-09-08"},
+		{"CT2", "CT2 - Archi", "DURAND Claire Mme", 35, "2026-10-07"},
+		{"CT1", "CT1 - Socle", "DURAND Claire Mme", 7, "2026-08-31"}, // non couvert
+	} {
+		e.exec(entry, i+2, r.tg, r.lib, r.nom, realiseNomPrenom(r.nom), r.h, r.h*100, r.date, r.date)
+	}
+}
+
+func TestHandlerPlanTimeline(t *testing.T) {
+	e := newEnv(t)
+	e.seedTimeline()
+
+	w := e.do("GET", "/api/analyse/plan-timeline", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
+	}
+	tl := decode[domain.PlanTimeline](t, w)
+	if tl.PlanVersion == nil || tl.PlanVersion.ID != "pB" || len(tl.Windows) != 2 || tl.Windows[0].Fin != "2026-10-04" || tl.Windows[1].Debut != "2026-10-05" {
+		t.Fatalf("timeline : %+v", tl)
+	}
+	if len(tl.Segments) != 3 {
+		t.Fatalf("segments : %+v", tl.Segments)
+	}
+	d1, d2, m := tl.Segments[0], tl.Segments[1], tl.Segments[2]
+	if d1.Ressource != "DURAND Claire" || d1.CT != "CT1" || d1.Debut != "2026-09-07" || d1.Fin != "2026-10-04" || d1.Charge != 140 || d1.PPS != 2000 ||
+		d1.CTLibelle != "Socle" || d1.SquadNom != "Squad Alpha" || d1.PersonneID == nil || *d1.PersonneID != "p1" || d1.VersionID != "pA" || d1.Pourcentage != 100 {
+		t.Errorf("DURAND CT1 : %+v", d1)
+	}
+	if d2.CT != "CT2" || d2.Debut != "2026-10-05" || d2.Fin != "2026-10-30" || d2.Charge != 140 || d2.VersionID != "pB" {
+		t.Errorf("DURAND CT2 : %+v", d2)
+	}
+	if m.Ressource != "MARTIN Théo" || m.Fin != "2026-10-04" || m.PersonneID != nil || m.SquadNom != "" {
+		t.Errorf("MARTIN : %+v", m)
+	}
+
+	// Timeline connue à pA : pA seule, ligne entière.
+	tl = decode[domain.PlanTimeline](t, e.do("GET", "/api/analyse/plan-timeline?plan_version_id=pA", nil))
+	if len(tl.Windows) != 1 || len(tl.Segments) != 2 || tl.Segments[0].Fin != "2026-10-30" || tl.Segments[0].Charge != 280 {
+		t.Errorf("timeline pA : %+v", tl)
+	}
+
+	w = e.do("GET", "/api/analyse/plan-timeline.csv", nil)
+	lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n")
+	if w.Code != http.StatusOK || len(lines) != 4 ||
+		!strings.HasPrefix(lines[0], "\xef\xbb\xbfRessource;CT;Libellé CT;Squad;Ligne de coût;%;Début;Fin;Charge (h);PPS;Version") ||
+		!strings.Contains(lines[1], "DURAND Claire;CT1;Socle;Squad Alpha;MAIN D'OEUVRE SUR SITE;100;2026-09-07;2026-10-04;140;2000;PDC septembre") {
+		t.Errorf("csv : %d %q", w.Code, lines)
+	}
+
+	if w := e.do("GET", "/api/analyse/plan-timeline?plan_version_id=nope", nil); w.Code != http.StatusNotFound {
+		t.Errorf("inconnue : %d", w.Code)
+	}
+	e.versionAt("pZ", "plan", "purgee", "PDC purgé", "2026-08-01T10:00:00Z", "2026-08-01")
+	if w := e.do("GET", "/api/analyse/plan-timeline?plan_version_id=pZ", nil); w.Code != http.StatusConflict {
+		t.Errorf("purgée : %d", w.Code)
+	}
+}
+
+func TestHandlerAnalyseTimeline(t *testing.T) {
+	e := newEnv(t)
+	e.seedTimeline()
+
+	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
+	if res.Meta.PlanVersion.ID != "pB" || res.Meta.ArchivedWarning || len(res.Meta.Timeline) != 2 || res.KPIs.HeuresNonCouvertes != 0 {
+		t.Errorf("défaut : %+v / %v h non couvertes", res.Meta, res.KPIs.HeuresNonCouvertes)
+	}
+	// W36 (avant la timeline) dans la période : heures non couvertes, aucun tuple.
+	wide := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse?week_from=2026-W36", nil))
+	if wide.KPIs.HeuresNonCouvertes != 7 || wide.Meta.Weeks[0].Couverture != domain.CouvertureAucune || len(wide.Ecarts) != len(res.Ecarts) {
+		t.Errorf("W36 : %v h non couvertes, %d / %d tuples", wide.KPIs.HeuresNonCouvertes, len(wide.Ecarts), len(res.Ecarts))
+	}
+	if res.Meta.WeekFrom != "2026-W37" || res.Meta.WeekTo != "2026-W41" {
+		t.Errorf("période : %s → %s", res.Meta.WeekFrom, res.Meta.WeekTo)
+	}
+	r := findRow(t, res, "CT2", "DURAND Claire", "2026-W41")
+	if r.Flag != domain.FlagConforme || r.PlanVersionID == nil || *r.PlanVersionID != "pB" {
+		t.Errorf("CT2 W41 : %+v", r)
+	}
+
+	// Timeline connue à pA (plus ancienne) : pB ignorée, avertissement.
+	res = decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse?plan_version_id=pA", nil))
+	if res.Meta.PlanVersion.ID != "pA" || !res.Meta.ArchivedWarning || len(res.Meta.Timeline) != 1 {
+		t.Errorf("pA : %+v", res.Meta)
+	}
+	if r := findRow(t, res, "CT2", "DURAND Claire", "2026-W41"); r.Flag != domain.FlagSurImputation || r.Prevu != 0 || *r.PlanVersionID != "pA" {
+		t.Errorf("CT2 sans pB : %+v", r)
+	}
+
+	ctx := decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil))
+	if ctx.DefaultPlanID == nil || *ctx.DefaultPlanID != "pB" || ctx.DefaultWeekFrom != "2026-W37" || ctx.DefaultWeekTo != "2026-W41" ||
+		len(ctx.Weeks) != 9 || ctx.Weeks[0].Week != "2026-W36" || ctx.Weeks[0].Couverture != domain.CouvertureAucune ||
+		ctx.Weeks[1].Couverture != domain.CouvertureTotale {
+		t.Errorf("context : %+v", ctx)
+	}
+
+	// Sans version active : défaut = plus récente non purgée.
+	e.exec(`UPDATE versions SET statut = 'archivee' WHERE id = 'pB'`)
+	res = decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
+	if res.Meta.PlanVersion.ID != "pB" || res.Meta.ArchivedWarning {
+		t.Errorf("défaut sans active : %+v", res.Meta)
+	}
+	if ctx := decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil)); ctx.DefaultPlanID == nil || *ctx.DefaultPlanID != "pB" || ctx.Message != "" {
+		t.Errorf("context sans active : %+v", ctx)
 	}
 }

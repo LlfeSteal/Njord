@@ -81,14 +81,15 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // fmtH formats hours / euros for messages ("12.5").
 func fmtH(v float64) string { return strconv.FormatFloat(round2(v), 'f', -1, 64) }
 
-// dataQuality: §10 rules 1, 4, 5 and the warn counts (whole versions).
+// dataQuality: §10 rules 1, 4, 5 and the warn counts (segments of the
+// timeline, whole réalisé version).
 func (r *run) dataQuality() {
 	ppsByCT := map[string]float64{}
 	for i := range r.lines {
 		l := &r.lines[i]
 		ppsByCT[strings.TrimSpace(l.CT)] += l.PPS
 		if l.StatutParsing == domain.ParsingWarn {
-			r.q.add("plan_warn", lineRef(l)+motif(l.MotifRejet))
+			r.q.add("plan_warn", r.lineRef(l)+motif(l.MotifRejet))
 		}
 	}
 	eurByTG := map[string]float64{}

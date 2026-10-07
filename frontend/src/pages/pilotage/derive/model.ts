@@ -161,17 +161,17 @@ export function formatsOf(vue: DeriveVue) {
 }
 
 // ------------------------------------------------------------------ Versions
-/** Libellé d'une version dans les sélecteurs : « Plan démo · 01/09/2026 · active ». */
+/** Libellé d'une version dans les sélecteurs : « Plan démo · effet 01/09/2026 » (DECISIONS n° 13). */
 export function versionLabel(v: Version): string {
-  return `${v.intitule} · ${fmtDate(v.importee_le)}${v.statut === 'active' ? ' · active' : ''}`;
+  return `${v.intitule} · effet ${fmtDate(v.date_effet || v.periode_debut)}`;
 }
 
-/** Page du plan à ouvrir pour une ligne : version active → /plan, sinon /plan/:id (filtre dans l'URL). */
+/** Page du plan à ouvrir pour une ligne : /plan/:id de la version concernée (filtre dans l'URL). */
 export function planLink(row: DeriveRow, vue: DeriveVue, data: PlanCompare): string | null {
   if (vue === 'personne' && row.name === NON_NOMINATIF) return null;
   // Un élément retiré n'existe que dans la référence.
   const v = row.statut === 'retire' ? data.from : data.to;
-  const base = v.statut === 'active' ? '/plan' : `/plan/${v.id}`;
+  const base = `/plan/${v.id}`;
   const q = new URLSearchParams({ [vue === 'ct' ? 'ct' : 'nom_prenom']: row.name });
   return `${base}?${q.toString()}`;
 }

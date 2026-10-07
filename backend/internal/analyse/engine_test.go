@@ -64,10 +64,23 @@ func cost(ct, typ, cat string, eur float64) domain.RealiseEntry {
 
 func baseInput() Input {
 	return Input{
-		Plan:    domain.Version{ID: "plan1", Kind: domain.KindPlan, Statut: domain.StatutActive},
+		PlanRef: domain.Version{ID: "plan1", Kind: domain.KindPlan, Statut: domain.StatutActive},
 		Realise: domain.Version{ID: "real1", Kind: domain.KindRealise, Statut: domain.StatutActive},
 		Now:     time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+// coverLine: a non-MO plan line without charge nor PPS that only extends the
+// timeline coverage (SPEC_analyse §4.3) to [debut, fin].
+func coverLine(ct, debut, fin string) domain.PlanLine {
+	l := planLine(ct, "", "Frais divers", nil, 0)
+	l.LigneCout, l.DateDebut, l.DateFin = "FRAIS DE MISSION", debut, fin
+	return l
+}
+
+// onePlan sets a timeline made of the single version in.PlanRef.
+func onePlan(in *Input, lines ...domain.PlanLine) {
+	in.Plans = []PlanSource{{Version: in.PlanRef, Lines: lines}}
 }
 
 func findRow(t *testing.T, res domain.AnalyseResult, ct, ressource, week string) domain.EcartRow {
@@ -100,13 +113,14 @@ func flagsScenario() Input {
 		personne("p3", "MARTIN Théo"),
 		personne("p4", "Sarah Blanc"),
 	}
-	in.PlanLines = []domain.PlanLine{
+	onePlan(&in,
 		planLine("CTA", "DURANDC", "DURAND Claire / Squad Alpha", sp("p1"), 10),
 		planLine("CTB", "MARTINT", "MARTIN Théo / Squad Alpha", sp("p3"), 40),
 		planLine("CTC", "DELATOURA", "Antoine De La Tour", sp("p2"), 20),
 		planLine("CTA", "BLANCS", "Sarah Blanc", sp("p4"), 20),
 		planLine("CTD", "MARTINT", "MARTIN Théo", sp("p3"), 20),
-	}
+		coverLine("CTA", "2026-09-07", "2026-12-31"),
+	)
 	in.Entries = []domain.RealiseEntry{
 		mo("CTA", "DURAND Claire Mme", 26, "2026-09-08"),        // +16 → 🔴
 		mo("CTB", "MARTIN Théo M.", 9, "2026-09-09"),            // −31 → 🟣
@@ -214,7 +228,7 @@ func TestInactifsTauxConformite(t *testing.T) {
 	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire"), personne("p9", "OLD Ancien")}
 	l := planLine("CTA", "OLDA", "OLD Ancien", sp("p9"), 40)
 	l.Inactive = true
-	in.PlanLines = []domain.PlanLine{planLine("CTA", "DURANDC", "DURAND Claire", sp("p1"), 10), l}
+	onePlan(&in, planLine("CTA", "DURANDC", "DURAND Claire", sp("p1"), 10), l)
 	in.Entries = []domain.RealiseEntry{
 		mo("CTA", "DURAND Claire", 10, "2026-09-08"),
 		mo("CTA", "OLD Ancien", 1, "2026-09-08"), // −39 → 🟣 inactif
@@ -291,7 +305,7 @@ func TestPlanNonNominatif(t *testing.T) {
 	in := baseInput()
 	beta := planLine("CTA", "2GI_BETA", "Squad Beta", nil, 10)
 	vide := planLine("CTA", "", "", nil, 5)
-	in.PlanLines = []domain.PlanLine{beta, vide, planLine("CTA", "DURANDC", "DURAND Claire", nil, 10)}
+	onePlan(&in, beta, vide, planLine("CTA", "DURANDC", "DURAND Claire", nil, 10))
 	in.Entries = []domain.RealiseEntry{
 		mo("CTA", "Squad Beta", 10, "2026-09-08"), // même texte que le libellé : jamais rapproché
 		mo("CTA", "DURAND Claire Mme", 10, "2026-09-08"),
@@ -379,8 +393,8 @@ func TestHeuresMO(t *testing.T) {
 
 func TestBudgetAvoirsEtAlertes(t *testing.T) {
 	in := baseInput()
-	in.PlanLines = []domain.PlanLine{planLine("CTX", "R1", "Un Nom", nil, 10)}
-	in.PlanLines[0].PPS = 9000
+	onePlan(&in, planLine("CTX", "R1", "Un Nom", nil, 10))
+	in.Plans[0].Lines[0].PPS = 9000
 	in.Entries = []domain.RealiseEntry{
 		cost("CTX", "FRAIS DE MISSION", "FRAIS DE MISSION", 1000),
 		cost("CTX", "FRAIS DE MISSION", "FRAIS DE MISSION", -300), // avoir
@@ -432,7 +446,7 @@ func TestDeriveProvision(t *testing.T) {
 	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire")}
 	prov := planLine("CTP", "2GI_X", "", nil, 200)
 	prov.LigneCout = "PROVISIONS POUR ALEAS"
-	in.PlanLines = []domain.PlanLine{prov, planLine("CTP", "DURANDC", "DURAND Claire", sp("p1"), 10)}
+	onePlan(&in, prov, planLine("CTP", "DURANDC", "DURAND Claire", sp("p1"), 10))
 	in.Entries = []domain.RealiseEntry{
 		mo("CTP", "BARBIER Luc M.", 12, "2026-09-08"),                // non rattachée sur CT provision → dérive
 		mo("CTP", "DURAND Claire Mme", 10, "2026-09-08"),             // rattachée → pas de dérive
@@ -464,7 +478,7 @@ func TestQualite(t *testing.T) {
 	lw.StatutParsing, lw.MotifRejet = domain.ParsingWarn, "ressource inconnue"
 	locked := planLine("CTA", "MARTINT", "MARTIN Théo", sp("p2"), 30)
 	locked.DateDebut, locked.DateFin = "2026-12-14", "2026-12-27"
-	in.PlanLines = []domain.PlanLine{l, lw, locked}
+	onePlan(&in, l, lw, locked)
 	late := mo("CTA", "DURAND Claire", 120, "2026-09-08")
 	late.PeriodeComptable = "2026-08-31" // < dépense − 7 j
 	sansNom := mo("CTA", "", 4, "2026-09-09")
@@ -518,7 +532,7 @@ func TestPeriodeParDefautEtFiltre(t *testing.T) {
 	in.Personnes = []domain.Personne{personne("p1", "DURAND Claire")}
 	l := planLine("CTA", "DURANDC", "DURAND Claire", sp("p1"), 219)
 	l.DateDebut, l.DateFin = "2026-09-01", "2026-11-30"
-	in.PlanLines = []domain.PlanLine{l}
+	onePlan(&in, l)
 	in.Entries = []domain.RealiseEntry{
 		mo("CTA", "DURAND Claire", 7, "2026-08-27"), // W35 : hors période par défaut
 		mo("CTA", "DURAND Claire", 7, "2026-10-03"), // W40
@@ -549,7 +563,7 @@ func TestPeriodeParDefautEtFiltre(t *testing.T) {
 
 func TestDeterminismeEtVersionArchivee(t *testing.T) {
 	in := flagsScenario()
-	in.Plan.Statut = domain.StatutArchivee
+	in.PlanSuperseded = true
 	a := Run(in, store.DefaultSettings())
 	b := Run(in, store.DefaultSettings())
 	if !a.Meta.ArchivedWarning || !a.Meta.GeneratedAt.Equal(in.Now) {
@@ -581,7 +595,7 @@ func TestNonMOPlanLinesAndNegativeHours(t *testing.T) {
 	moLine := planLine("CT1", "DURANDC", "DURAND Claire", sp("p1"), 30)
 	frais := planLine("CT2", "DURANDC", "DURAND Claire", sp("p1"), 40)
 	frais.LigneCout = "FRAIS DE MISSION"
-	in.PlanLines = []domain.PlanLine{moLine, frais}
+	onePlan(&in, moLine, frais)
 	in.Entries = []domain.RealiseEntry{
 		mo("CT1", "DURAND Claire Mme", 35, "2026-09-08"),
 		mo("CT1", "DURAND Claire Mme", -5, "2026-09-09"), // contre-passation
@@ -605,7 +619,7 @@ func TestBudgetParNature(t *testing.T) {
 		l.LigneCout, l.PPS = ligneCout, pps
 		return l
 	}
-	in.PlanLines = []domain.PlanLine{
+	onePlan(&in,
 		line("CTP", "MAIN D'OEUVRE SUR SITE", 1000), // CT de provision : tout y est provision
 		line("CTA", "PROVISIONS POUR ALEAS", 200),   // ligne de coût provision sur un autre CT
 		line("CTA", "MAIN D'OEUVRE SUR SITE", 5000),
@@ -613,7 +627,7 @@ func TestBudgetParNature(t *testing.T) {
 		line("CTA", "FRAIS ACHATS CAPACITE SUR SITE", 100),
 		line("CTA", "FRAIS DE MISSION", 400),
 		line("CTA", "Stockage", 50),
-	}
+	)
 	prov := mo("CTP", "DURAND Claire Mme", 5, "2026-09-08")
 	prov.TGLibelle = "CTP - Provisions pour aléas"
 	in.Entries = []domain.RealiseEntry{

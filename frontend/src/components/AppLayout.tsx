@@ -1,5 +1,5 @@
 // Coquille : barre latérale façon macOS (Pilotage · Données · Réglages) + page courante.
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { AppShell, Menu, Sidebar, useAppearance, type Appearance } from '../ui';
 import {
   IconAuto,
@@ -31,6 +31,9 @@ const APPEARANCES: { value: Appearance; label: string; icon: typeof IconSun }[] 
 export default function AppLayout() {
   const { appearance, setAppearance } = useAppearance();
   const { result } = useAnalyse();
+  const { pathname } = useLocation();
+  // /plan/timeline a sa propre entrée : « Plan de charge » n'y est pas surligné en plus.
+  const onTimeline = pathname === '/plan/timeline' || pathname.startsWith('/plan/timeline/');
   const aTraiter = result.data?.anomalies?.filter((a) => a.statut === 'a_traiter').length ?? 0;
   const CurrentIcon = APPEARANCES.find((a) => a.value === appearance)?.icon ?? IconAuto;
 
@@ -61,7 +64,8 @@ export default function AppLayout() {
         {
           title: 'Données',
           items: [
-            { to: '/plan', label: 'Plan de charge', icon: <IconCalendar size={16} /> },
+            { to: '/plan', end: onTimeline, label: 'Plan de charge', icon: <IconCalendar size={16} /> },
+            { to: '/plan/timeline', label: 'Timeline du plan', icon: <IconTimeline size={16} /> },
             { to: '/realise', label: 'Réalisé', icon: <IconFileSpreadsheet size={16} /> },
             { to: '/personnes', label: 'Personnes', icon: <IconUser size={16} /> },
             { to: '/squads', label: 'Squads', icon: <IconUsers size={16} /> },

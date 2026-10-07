@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -50,6 +51,8 @@ func buildReport(res *ParseResult, filename, intitule string) domain.ImportRepor
 		PctInactifs:  &pct,
 		Issues:       res.Issues,
 		MotifsCount:  res.MotifsCount,
+		// Date d'effet proposée à l'import = début de période (DECISIONS n° 13).
+		DateEffetProposee: res.PeriodeDebut,
 	}
 	if rep.Issues == nil {
 		rep.Issues = []domain.ParseIssue{}
@@ -86,8 +89,25 @@ func (s *Service) Preview(ctx context.Context, data []byte, filename, intitule s
 	return &rep, nil
 }
 
-// Commit parses and writes a new version (lines + référentiels) in one transaction.
+// ValidDate reports whether s is a valid "YYYY-MM-DD" date.
+func ValidDate(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil && len(s) == 10
+}
+
+// Commit parses and writes a new version (lines + référentiels) in one
+// transaction ; its date d'effet is the période start.
 func (s *Service) Commit(ctx context.Context, data []byte, filename, intitule, importeur string, archiveActive bool) (*domain.ImportResult, error) {
+	return s.CommitWithDateEffet(ctx, data, filename, intitule, importeur, "", archiveActive)
+}
+
+// CommitWithDateEffet is Commit with an explicit date d'effet ("YYYY-MM-DD",
+// DECISIONS n° 13) ; empty → periode_debut. An invalid date is refused before
+// anything is parsed or written.
+func (s *Service) CommitWithDateEffet(ctx context.Context, data []byte, filename, intitule, importeur, dateEffet string, archiveActive bool) (*domain.ImportResult, error) {
+	if dateEffet != "" && !ValidDate(dateEffet) {
+		return nil, store.Precondition("date d'effet invalide « %s » (format attendu AAAA-MM-JJ)", dateEffet)
+	}
 	res, err := Parse(data)
 	if err != nil {
 		return nil, err
@@ -110,6 +130,10 @@ func (s *Service) Commit(ctx context.Context, data []byte, filename, intitule, i
 		SourceFormat: res.SourceFormat,
 		Filename:     filename,
 		Layout:       res.Layout,
+		DateEffet:    dateEffet,
+	}
+	if v.DateEffet == "" {
+		v.DateEffet = res.PeriodeDebut
 	}
 	var en *enricher
 	err = s.st.CreateVersion(ctx, &v, archiveActive, func(tx *sql.Tx, versionID string) error {

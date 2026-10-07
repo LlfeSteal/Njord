@@ -3,6 +3,7 @@
 // Étapes : dépôt .xlsx (FileDrop) + intitulé optionnel + importeur optionnel → versionsApi.preview
 // → affichage du bilan (ImportReport : totaux ok/warn/drop, période, layout & % inactifs &
 //   nouvelles personnes/squads pour le plan, montant total pour le réalisé, motifs, issues)
+// → plan : « Date d'effet » pré-remplie avec report.date_effet_proposee (timeline, DECISIONS n° 13)
 // → si report.active_version : case « Archiver la version active « X » ? » (cochée par défaut)
 // → versionsApi.commit → notification, invalidation ['versions'] et ['analyse'], onImported.
 // Les erreurs bloquantes (422 : onglet introuvable, en-tête non conforme) s'affichent dans l'assistant.
@@ -13,6 +14,7 @@ import {
   Button,
   Card,
   Checkbox,
+  DateInput,
   FileDrop,
   Group,
   Modal,
@@ -25,7 +27,7 @@ import {
 import { IconFileSpreadsheet } from '../ui/Icons';
 import { ApiError, versionsApi } from '../api/client';
 import type { ImportReport, ImportResult, Kind } from '../api/types';
-import { fmtDateTime, fmtNumber } from '../lib/format';
+import { fmtDate, fmtDateTime, fmtNumber } from '../lib/format';
 import ErrorAlert from './ErrorAlert';
 import ImportReportView from './lifecycle/ImportReportView';
 import { errMessage, invalidateLifecycle, loadOperateur, saveOperateur } from './lifecycle/lifecycleUtils';
@@ -77,12 +79,16 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
   const [importeur, setImporteur] = useState('');
   const [report, setReport] = useState<ImportReport | null>(null);
   const [archiveActive, setArchiveActive] = useState(true);
+  /** Plan : date à partir de laquelle la version remplace les précédentes. */
+  const [dateEffet, setDateEffet] = useState('');
+  const isPlan = kind === 'plan';
 
   const preview = useMutation({
     mutationFn: (f: File) => versionsApi.preview(kind, f, intitule.trim() || undefined),
     onSuccess: (r) => {
       setReport(r);
       setArchiveActive(true);
+      setDateEffet(r.date_effet_proposee || r.periode_debut || '');
       setStep(1);
     },
   });
@@ -93,6 +99,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
         intitule: intitule.trim() || undefined,
         importeur: importeur.trim() || undefined,
         archive_active: archiveActive,
+        date_effet: isPlan ? dateEffet || undefined : undefined,
       }),
     onSuccess: (res) => {
       saveOperateur(importeur);
@@ -121,6 +128,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
     setIntitule('');
     setReport(null);
     setArchiveActive(true);
+    setDateEffet('');
     preview.reset();
     commit.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -148,6 +156,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
   const previewErr = preview.error;
   const blocking = previewErr instanceof ApiError && previewErr.status === 422;
   const active = report?.active_version ?? null;
+  const dateEffetError = isPlan && report && !dateEffet ? 'Date d\'effet requise' : undefined;
 
   // Contenu et actions de pied propres à chaque étape.
   let content: ReactNode = null;
@@ -262,6 +271,22 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
       <Stack gap={12}>
         <ImportReportView report={report} />
 
+        {isPlan && (
+          <Card padding={12}>
+            <Stack gap={8}>
+              <DateInput
+                label="Date d'effet"
+                description="Remplace les plans précédents à partir de cette date."
+                value={dateEffet}
+                onChange={setDateEffet}
+                error={dateEffetError}
+                width={220}
+              />
+              <DateEffetHint report={report} dateEffet={dateEffet} />
+            </Stack>
+          </Card>
+        )}
+
         {active ? (
           <Card padding={12}>
             <Checkbox
@@ -270,6 +295,11 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
               label={`Archiver la version active « ${active.intitule} » (importée le ${fmtDateTime(
                 active.importee_le,
               )})`}
+              description={
+                isPlan
+                  ? "Une version archivée reste dans la timeline : elle fait référence jusqu'à la date d'effet de la suivante."
+                  : undefined
+              }
             />
             {!archiveActive && (
               <Banner tone="warning" compact mt={8}>
@@ -291,7 +321,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
     footer = (
       <>
         <Button onClick={() => setStep(0)}>Retour</Button>
-        <Button variant="primary" onClick={() => setStep(2)}>
+        <Button variant="primary" onClick={() => setStep(2)} disabled={!!dateEffetError}>
           Continuer
         </Button>
       </>
@@ -315,6 +345,11 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
               Lignes : <b>{fmtNumber(report.total)}</b> (ok {fmtNumber(report.ok)}, warn {fmtNumber(report.warn)},
               drop {fmtNumber(report.drop)})
             </Text>
+            {isPlan && (
+              <Text tabular>
+                Date d'effet : <b>{fmtDate(dateEffet)}</b> (remplace les plans précédents à partir de cette date)
+              </Text>
+            )}
             <Text>
               Statut de la nouvelle version : <b>{!active || archiveActive ? 'active' : 'archivée'}</b>
               {active && archiveActive && <> — « {active.intitule} » sera archivée</>}
@@ -330,7 +365,12 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
         <Button onClick={() => setStep(1)} disabled={commit.isPending}>
           Retour
         </Button>
-        <Button variant="primary" onClick={() => commit.mutate(file)} loading={commit.isPending}>
+        <Button
+          variant="primary"
+          onClick={() => commit.mutate(file)}
+          loading={commit.isPending}
+          disabled={!!dateEffetError}
+        >
           Importer
         </Button>
       </>
@@ -354,4 +394,26 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
       </Stack>
     </Modal>
   );
+}
+
+/** Plan : avertit quand la date d'effet laisse la nouvelle version sans période de référence. */
+function DateEffetHint({ report, dateEffet }: { report: ImportReport; dateEffet: string }) {
+  const active = report.active_version;
+  if (!dateEffet) return null;
+  if (report.periode_fin && dateEffet > report.periode_fin) {
+    return (
+      <Banner tone="warning" compact>
+        Date postérieure à la fin du fichier ({fmtDate(report.periode_fin)}) : la version ne couvrira aucun jour.
+      </Banner>
+    );
+  }
+  if (active?.date_effet && dateEffet < active.date_effet) {
+    return (
+      <Banner tone="warning" compact>
+        Antérieure à la date d'effet de « {active.intitule} » ({fmtDate(active.date_effet)}) : cette version ne fera
+        référence que jusqu'à cette date.
+      </Banner>
+    );
+  }
+  return null;
 }

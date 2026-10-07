@@ -1,6 +1,7 @@
 // Carte de chaleur de la page Capacité : une ligne par squad (enfants indentés), une colonne par semaine.
 // Échelle divergente autour de 100 % : neutre 85–115 %, violet = sous-utilisé, rouge = sur-utilisé,
 // 3 intensités ; glyphe au-delà du dernier seuil pour que la couleur ne porte pas seule le sens.
+// Semaine non couverte par le plan de charge : en-tête et cellules hachurées (`data-uncovered`), « non couvert ».
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { StatusGlyph, Table, Tooltip } from '../../../ui';
 import type { WeekInfo } from '../../../api/types';
@@ -26,7 +27,8 @@ function OuterGlyph({ side, size = 11 }: { side: 'sous' | 'sur'; size?: number }
 function CellDetail({ c, squad, period }: { c: CapaciteCell; squad: string; period: string }) {
   const h = heatOf(c);
   let use: string;
-  if (h.empty) use = 'Ni prévu ni réel';
+  if (h.nonCouvert) use = 'Non couvert par le plan de charge : aucune version du plan sur cette semaine, pas d’écart calculé';
+  else if (h.empty) use = 'Ni prévu ni réel';
   else if (h.horsPlan) use = 'Hors plan : aucune heure prévue';
   else use = `Utilisation ${fmtPct(c.utilisation)} · ${zoneOf(h)}`;
   return (
@@ -44,7 +46,8 @@ function CellDetail({ c, squad, period }: { c: CapaciteCell; squad: string; peri
 function HeatCell({ c, squad, period, className }: { c: CapaciteCell; squad: string; period: string; className?: string }) {
   const h = heatOf(c);
   let content;
-  if (h.empty) content = <span className="cap-tile__none">—</span>;
+  if (h.nonCouvert) content = <span className="cap-tile__hp">non couvert</span>;
+  else if (h.empty) content = <span className="cap-tile__none">—</span>;
   else if (h.horsPlan)
     content = (
       <>
@@ -60,9 +63,15 @@ function HeatCell({ c, squad, period, className }: { c: CapaciteCell; squad: str
       </>
     );
   return (
-    <td className={className ? `cap-cell ${className}` : 'cap-cell'}>
+    <td className={className ? `cap-cell ${className}` : 'cap-cell'} data-uncovered={h.nonCouvert || undefined}>
       <Tooltip label={<CellDetail c={c} squad={squad} period={period} />} delay={200}>
-        <span className="cap-tile" data-side={h.side ?? undefined} data-step={h.step || undefined} data-empty={h.empty || undefined}>
+        <span
+          className="cap-tile"
+          data-side={h.side ?? undefined}
+          data-step={h.step || undefined}
+          data-empty={h.empty || undefined}
+          data-uncovered={h.nonCouvert || undefined}
+        >
           {content}
         </span>
       </Tooltip>
@@ -99,7 +108,8 @@ export default function HeatmapTable({ rows, total, weeks, period, onOpen }: Hea
               key={w.week}
               data-align="center"
               data-locked={w.verrouillee || undefined}
-              title={`${fmtWeek(w.week)}${w.verrouillee ? ' · verrouillée' : ''}`}
+              data-uncovered={w.couverture === 'aucune' || undefined}
+              title={`${fmtWeek(w.week)}${w.verrouillee ? ' · verrouillée' : ''}${w.couverture === 'aucune' ? ' · non couverte par le plan de charge' : w.couverture === 'partielle' ? ' · partiellement couverte par le plan de charge' : ''}`}
             >
               {shortWeek(w.week)}
             </th>
@@ -175,7 +185,7 @@ const SCALE: { side?: 'sous' | 'sur'; step?: 1 | 2 | 3; label: string }[] = [
   { side: 'sur', step: 3, label: `> ${100 + S3} %` },
 ];
 
-export function HeatLegend() {
+export function HeatLegend({ uncovered = false }: { uncovered?: boolean }) {
   return (
     <div className="cap-legend">
       <div className="cap-legend__scale" role="img" aria-label={`Échelle : sous-utilisé sous ${100 - S1} %, conforme de ${100 - S1} à ${100 + S1} %, sur-utilisé au-delà ; glyphe sous ${100 - S3} % et au-delà de ${100 + S3} %`}>
@@ -196,6 +206,12 @@ export function HeatLegend() {
         <StatusGlyph kind={FLAG_META.hors_plan.glyph} tone="hors_plan" size={11} />
         hors plan : réel sans heure prévue
       </span>
+      {uncovered && (
+        <span className="cap-legend__item">
+          <span className="cap-legend__hatch" aria-hidden />
+          non couvert : semaine couverte par aucune version du plan de charge
+        </span>
+      )}
     </div>
   );
 }

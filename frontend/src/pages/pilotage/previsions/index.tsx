@@ -18,7 +18,7 @@ import { fmtDate, fmtEur, fmtHours } from '../../../lib/format';
 import { CtLabel, RowGlyph, Signed } from '../budget/cells';
 import { ForecastChart, LoadChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
 import { cmp, fmtEurSigned, forecastOf, forecastSentence, rowTone, useSort } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
@@ -117,14 +117,14 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
   if (!fc)
     return (
       <EmptyState title="Prévisions non disponibles">
-        Le calcul d’atterrissage n’a pas encore de données pour ce plan et ce réalisé.
+        Le calcul d’atterrissage n’a pas encore de données pour la timeline du plan et ce réalisé.
       </EmptyState>
     );
   const scope = ct ? fc.par_ct.find((p) => p.ct === ct) : fc.global;
   if (!scope)
     return (
       <EmptyState title="CT absent des prévisions" action={<Button onClick={() => setCt(null)}>Tout le périmètre</Button>}>
-        Le CT {ct} n’a pas de budget au plan sélectionné.
+        Le CT {ct} n’a pas de budget dans la timeline du plan retenue.
       </EmptyState>
     );
   const future = scope.series.filter((s) => s.week > fc.as_of_week).reduce((n, s) => n + s.heures_plan, 0);
@@ -149,7 +149,7 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
 function MethodNote({ fc }: { fc: Previsions }) {
   return (
     <p className="pil-note">
-      Atterrissage = réalisé à date + reste à faire du plan. Tendance = réalisé à date + rythme moyen des 4 dernières
+      Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à date + rythme moyen des 4 dernières
       semaines. Données arrêtées au {fmtDate(fc.as_of)}.
     </p>
   );
@@ -193,7 +193,7 @@ export default function PrevisionsPage() {
             r && (
               <>
                 {fc ? `Horizon : fin du plan · données arrêtées au ${fmtDate(fc.as_of)}` : 'Atterrissage budgétaire'}{' '}
-                <ArchivedTag result={r} />
+                <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )
           }

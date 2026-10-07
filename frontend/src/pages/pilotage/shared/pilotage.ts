@@ -2,6 +2,7 @@
 // statuts de prévision. Les composants partagés sont dans charts.tsx et ContextControl.tsx.
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppearance, type GlyphKind, type SortDir, type StatusTone } from '../../../ui';
+import { fmtHours } from '../../../lib/format';
 import type { AnalyseResult, Anomalie, AnomalieCategorie, PrevisionCT, PrevisionStatut, Previsions } from '../../../api/types';
 
 // ------------------------------------------------------------------ Couleurs
@@ -76,6 +77,14 @@ export function cmp(a: string | number | null | undefined, b: string | number | 
   if (typeof a === 'number' && typeof b === 'number') return a - b;
   return String(a).localeCompare(String(b), 'fr', { numeric: true, sensitivity: 'base' });
 }
+
+// ------------------------------------------------------------------ Non couvert par le plan (DECISIONS n° 13)
+/** Heures MO imputées sur des jours couverts par aucune version du plan (non analysées). */
+export const heuresNonCouvertes = (result: AnalyseResult | undefined) => result?.kpis?.heures_non_couvertes ?? 0;
+
+/** Phrase complète de la mention « non couvert ». */
+export const uncoveredSentence = (h: number) =>
+  `${fmtHours(h)} imputées sur des périodes non couvertes par le plan (non analysées)`;
 
 // ------------------------------------------------------------------ Prévisions
 /** Prévisions exploitables (le calcul peut être absent ou vide). */

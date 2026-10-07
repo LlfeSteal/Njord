@@ -32,9 +32,11 @@ func demoInput(t *testing.T) Input {
 		t.Fatal(err)
 	}
 	in := baseInput()
+	var lines []domain.PlanLine
 	for _, l := range pr.Lines {
-		in.PlanLines = append(in.PlanLines, l.PlanLine)
+		lines = append(lines, l.PlanLine)
 	}
+	onePlan(&in, lines...)
 	in.Entries = rr.Entries
 	return in
 }
@@ -90,7 +92,7 @@ func TestPrevisionsDemo(t *testing.T) {
 	pv := res.Previsions
 
 	budget, conso := 0.0, 0.0
-	for _, l := range in.PlanLines {
+	for _, l := range in.Plans[0].Lines {
 		if l.StatutParsing != domain.ParsingDrop {
 			budget += l.PPS
 		}
@@ -174,7 +176,7 @@ func findCT(t *testing.T, pv domain.Previsions, ct string) domain.PrevisionCT {
 
 func TestPrevisionsSynthetique(t *testing.T) {
 	in := baseInput()
-	in.PlanLines = []domain.PlanLine{
+	onePlan(&in,
 		// A : 4 semaines W37..W40 (20 j ouvrés), 1 000 €/semaine ; consommé 3 000 € → ok.
 		fcLine("A", 80, 4000, "2026-09-07", "2026-10-02", "MAIN D'OEUVRE SUR SITE"),
 		// B : sans réalisé, W41..W42, 2 000 €.
@@ -185,7 +187,7 @@ func TestPrevisionsSynthetique(t *testing.T) {
 		fcLine("E", 0, 8000, "2026-09-07", "2026-10-30", "FRAIS"),
 		// F : dates invalides → PPS hors série mais dans le budget.
 		fcLine("F", 0, 500, "", "", "FRAIS"),
-	}
+	)
 	in.Entries = []domain.RealiseEntry{
 		mo("A", "DURAND Claire", 10, "2026-09-08"), // 1 000 € W37
 		mo("A", "DURAND Claire", 20, "2026-10-01"), // 2 000 € W40
@@ -260,7 +262,7 @@ func TestPrevisionsTendance(t *testing.T) {
 	s.JoursFeries = nil // 10 semaines pleines W37..W46
 	in := baseInput()
 	// 10 000 € sur W37..W46 (1 000 €/semaine) ; consommation récente 2 000 €/semaine.
-	in.PlanLines = []domain.PlanLine{fcLine("T", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS")}
+	onePlan(&in, fcLine("T", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS"))
 	for _, d := range []string{"2026-09-14", "2026-09-21", "2026-09-28", "2026-10-02"} {
 		in.Entries = append(in.Entries, fcEntry("T", 2000, d))
 	}
@@ -294,7 +296,7 @@ func TestPrevisionsTendance(t *testing.T) {
 
 func TestPrevisionsSansRealise(t *testing.T) {
 	in := baseInput()
-	in.PlanLines = []domain.PlanLine{fcLine("A", 40, 2000, "2026-09-07", "2026-09-18", "MAIN D'OEUVRE SUR SITE")}
+	onePlan(&in, fcLine("A", 40, 2000, "2026-09-07", "2026-09-18", "MAIN D'OEUVRE SUR SITE"))
 	pv := Run(in, store.DefaultSettings()).Previsions
 	if pv.AsOf != "" || pv.AsOfWeek != "" {
 		t.Fatalf("as_of = %q", pv.AsOf)

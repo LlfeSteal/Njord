@@ -13,7 +13,7 @@ import (
 )
 
 const versionCols = `id, kind, intitule, importee_le, importeur, statut, archivee_le, purgee_le,
-	nb_lignes, nb_warn, nb_drop, periode_debut, periode_fin, source_format, filename, layout, montant_total_eur`
+	nb_lignes, nb_warn, nb_drop, periode_debut, periode_fin, source_format, filename, layout, montant_total_eur, date_effet`
 
 func scanVersion(sc interface{ Scan(...any) error }) (domain.Version, error) {
 	var v domain.Version
@@ -22,7 +22,7 @@ func scanVersion(sc interface{ Scan(...any) error }) (domain.Version, error) {
 	var montant sql.NullFloat64
 	err := sc.Scan(&v.ID, &v.Kind, &v.Intitule, &importee, &v.Importeur, &v.Statut, &archivee, &purgee,
 		&v.NbLignes, &v.NbWarn, &v.NbDrop, &v.PeriodeDebut, &v.PeriodeFin, &v.SourceFormat, &v.Filename,
-		&v.Layout, &montant)
+		&v.Layout, &montant, &v.DateEffet)
 	if err != nil {
 		return v, err
 	}
@@ -137,9 +137,9 @@ func (s *Store) CreateVersion(ctx context.Context, v *domain.Version, archiveAct
 		if v.MontantTotalEur != nil {
 			montant = *v.MontantTotalEur
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO versions(`+versionCols+`) VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?)`,
+		_, err = tx.ExecContext(ctx, `INSERT INTO versions(`+versionCols+`) VALUES (?,?,?,?,?,?,?,NULL,?,?,?,?,?,?,?,?,?,?)`,
 			v.ID, v.Kind, v.Intitule, FormatTime(now), v.Importeur, v.Statut, archivee,
-			v.NbLignes, v.NbWarn, v.NbDrop, v.PeriodeDebut, v.PeriodeFin, v.SourceFormat, v.Filename, v.Layout, montant)
+			v.NbLignes, v.NbWarn, v.NbDrop, v.PeriodeDebut, v.PeriodeFin, v.SourceFormat, v.Filename, v.Layout, montant, v.DateEffet)
 		if err != nil {
 			return err
 		}
@@ -262,6 +262,36 @@ func (s *Store) Purge(ctx context.Context, kind domain.Kind, id, confirmIntitule
 			return err
 		}
 		out, err = s.getVersion(ctx, tx, kind, id)
+		return err
+	})
+	return out, err
+}
+
+// SetDateEffet changes the date d'effet of a plan version (DECISIONS n° 13):
+// "YYYY-MM-DD", refused on a purged version.
+func (s *Store) SetDateEffet(ctx context.Context, id, date, operateur string) (domain.Version, error) {
+	var out domain.Version
+	if _, err := time.Parse("2006-01-02", date); err != nil || len(date) != 10 {
+		return out, Precondition("date d'effet invalide « %s » (format attendu AAAA-MM-JJ)", date)
+	}
+	err := s.Tx(ctx, func(tx *sql.Tx) error {
+		v, err := s.getVersion(ctx, tx, domain.KindPlan, id)
+		if err != nil {
+			return err
+		}
+		if v.Statut == domain.StatutPurgee {
+			return Precondition("la version « %s » est purgée", v.Intitule)
+		}
+		if v.DateEffet != date {
+			if _, err := tx.ExecContext(ctx, `UPDATE versions SET date_effet = ? WHERE id = ?`, date, id); err != nil {
+				return err
+			}
+			if err := s.Audit(ctx, tx, operateur, "date_effet", objetType(domain.KindPlan), id,
+				fmt.Sprintf("%s → %s", v.DateEffet, date)); err != nil {
+				return err
+			}
+		}
+		out, err = s.getVersion(ctx, tx, domain.KindPlan, id)
 		return err
 	})
 	return out, err

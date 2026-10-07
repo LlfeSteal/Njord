@@ -290,8 +290,8 @@ func TestAnomaliesBudget(t *testing.T) {
 	res := domain.AnalyseResult{
 		Meta: domain.AnalyseMeta{PlanVersion: plan, RealiseVersion: real},
 		Previsions: domain.Previsions{ParCT: []domain.PrevisionCT{
-			{CT: "CT1", CTLibelle: "CT1 - Socle", Budget: 10000, AtterrissagePlan: 12500, AtterrissageTendance: 11000,
-				EcartPlan: 2500, EcartTendance: 1000, Statut: domain.PrevisionDepassement},
+			{CT: "CT1", CTLibelle: "CT1 - Socle", Budget: 10000, AtterrissagePlan: 12500, AtterrissageTendance: 15000,
+				EcartPlan: 2500, EcartTendance: 5000, Statut: domain.PrevisionDepassement},
 			{CT: "CT2", Budget: 10000, AtterrissagePlan: 9600, AtterrissageTendance: 10800,
 				EcartPlan: -400, EcartTendance: 800, Statut: domain.PrevisionVigilance},
 			{CT: "CT3", Budget: 10000, AtterrissagePlan: 8000, AtterrissageTendance: 8000, EcartPlan: -2000, EcartTendance: -2000, Statut: domain.PrevisionOK},
@@ -307,11 +307,18 @@ func TestAnomaliesBudget(t *testing.T) {
 	if a.Key != "budget|CT1" || a.Gravite != 3 || *a.Montant != 2500 || a.Lien != "/previsions?ct=CT1" || a.CTLibelle != "CT1 - Socle" || a.Statut != domain.AnomalieATraiter {
 		t.Errorf("CT1 : %+v", a)
 	}
-	if a.Detail != "Atterrissage prévu 12 500 € pour un budget de 10 000 € (tendance 11 000 €)" {
+	// Le montant est l'écart du plan (celui de la page Budget), même si la tendance est pire.
+	if a.Titre != "Atterrissage · CT1 : dépassement prévu (+"+fmtEur(2500)+")" {
+		t.Errorf("titre : %q", a.Titre)
+	}
+	if a.Detail != "Atterrissage prévu 12 500 € pour un budget de 10 000 € (tendance 15 000 €)" {
 		t.Errorf("detail : %q", a.Detail)
 	}
 	if b.Key != "budget|CT2" || b.Gravite != 2 || *b.Montant != 800 {
 		t.Errorf("CT2 (tendance plus défavorable) : %+v", b)
+	}
+	if b.Titre != "Atterrissage · CT2 : vigilance (tendance +"+fmtEur(800)+")" {
+		t.Errorf("titre CT2 : %q", b.Titre)
 	}
 	// Empreinte stable, sensible aux chiffres.
 	fp := a.Fingerprint

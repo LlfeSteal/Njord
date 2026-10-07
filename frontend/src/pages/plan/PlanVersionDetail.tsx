@@ -26,6 +26,7 @@ import ErrorAlert from '../../components/ErrorAlert';
 import ImportWizard from '../../components/ImportWizard';
 import VersionInfoInspector from '../../components/lifecycle/VersionInfoInspector';
 import VersionSwitcher from '../../components/lifecycle/VersionSwitcher';
+import { useCurrentVersion } from '../../components/lifecycle/useCurrentVersion';
 import { useVersionLifecycle } from '../../components/lifecycle/useVersionLifecycle';
 import { plural } from '../../components/lifecycle/lifecycleUtils';
 import { fmtDateTime, fmtNumber, fmtPeriod } from '../../lib/format';
@@ -34,6 +35,7 @@ import { useSquadIndex } from '../referentiels/hooks';
 import PlanLineInspector from './PlanLineInspector';
 import PlanLinesFilters from './PlanLinesFilters';
 import PlanLinesTable from './PlanLinesTable';
+import { download } from './download';
 import { PAGE_SIZES, useLineFilters, type SortKey } from './useLineFilters';
 import './plan.css';
 
@@ -42,22 +44,13 @@ const BACK = { to: '/plan', label: 'Plan de charge' };
 
 type Panel = { type: 'info' } | { type: 'line'; line: PlanLine } | null;
 
-/** Téléchargement d'un fichier servi par l'API (équivalent d'un <a href download>). */
-function download(href: string) {
-  const a = document.createElement('a');
-  a.href = href;
-  a.download = '';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
 /** `versionId` imposé = version courante affichée sur /plan ; sinon l'id de l'URL (/plan/:id). */
 export default function PlanVersionDetail({ versionId: forced }: { versionId?: string } = {}) {
   const params = useParams();
   const versionId = forced ?? params.versionId ?? '';
   const [wizard, setWizard] = useState(false);
   const { filters, sort, order, limit, page, update, query } = useLineFilters();
+  const { version: current } = useCurrentVersion('plan');
   const squads = useSquadIndex();
   const lc = useVersionLifecycle('plan');
   const [panel, setPanel] = useState<Panel>(null);
@@ -112,12 +105,13 @@ export default function PlanVersionDetail({ versionId: forced }: { versionId?: s
   ]
     .filter(Boolean)
     .join(' · ');
+  // « Plan courant » = dernière version de la timeline (DECISIONS n° 13), pas forcément l'active.
   const subtitle =
-    v.statut === 'active' ? (
+    !current || current.id === v.id ? (
       summary
     ) : (
       <>
-        {summary} · <Link to="/plan">Revenir à la version active</Link>
+        {summary} · <Link to="/plan">Revenir au plan courant</Link>
       </>
     );
 

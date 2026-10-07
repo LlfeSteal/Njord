@@ -31,6 +31,7 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	p.GET("/versions", h.listVersions)
 	p.GET("/compare", h.compare)
 	p.GET("/versions/:id", h.getVersion)
+	p.PATCH("/versions/:id", h.patchVersion)
 	p.POST("/versions/:id/archive", h.archive)
 	p.POST("/versions/:id/reactivate", h.reactivate)
 	p.POST("/versions/:id/purge", h.purge)
@@ -61,14 +62,23 @@ func (h *Handler) preview(c *gin.Context) {
 	c.JSON(http.StatusOK, rep)
 }
 
+func dateEffetError(date string) error {
+	return httpx.BadRequest("date d'effet invalide « " + date + " » (format attendu AAAA-MM-JJ)")
+}
+
 func (h *Handler) commit(c *gin.Context) {
 	data, filename, err := httpx.FormFile(c, "file")
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	res, err := h.svc.Commit(c.Request.Context(), data, filename, c.PostForm("intitule"),
-		httpx.Operateur(c, c.PostForm("importeur")), httpx.FormBool(c, "archive_active", true))
+	dateEffet := strings.TrimSpace(c.PostForm("date_effet"))
+	if dateEffet != "" && !ValidDate(dateEffet) {
+		httpx.Error(c, dateEffetError(dateEffet))
+		return
+	}
+	res, err := h.svc.CommitWithDateEffet(c.Request.Context(), data, filename, c.PostForm("intitule"),
+		httpx.Operateur(c, c.PostForm("importeur")), dateEffet, httpx.FormBool(c, "archive_active", true))
 	if err != nil {
 		httpx.Error(c, importError(err))
 		return
@@ -97,6 +107,33 @@ func (h *Handler) compare(c *gin.Context) {
 
 func (h *Handler) getVersion(c *gin.Context) {
 	v, err := h.st.GetVersion(c.Request.Context(), domain.KindPlan, c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+// patchVersion serves PATCH /plan/versions/:id {date_effet, operateur?} (DECISIONS n° 13).
+func (h *Handler) patchVersion(c *gin.Context) {
+	var b struct {
+		DateEffet string `json:"date_effet"`
+		Operateur string `json:"operateur"`
+	}
+	if err := c.ShouldBindJSON(&b); err != nil {
+		httpx.Error(c, httpx.BadRequest("corps JSON invalide"))
+		return
+	}
+	date := strings.TrimSpace(b.DateEffet)
+	if date == "" {
+		httpx.Error(c, httpx.BadRequest("date_effet manquante"))
+		return
+	}
+	if !ValidDate(date) {
+		httpx.Error(c, dateEffetError(date))
+		return
+	}
+	v, err := h.st.SetDateEffet(c.Request.Context(), c.Param("id"), date, httpx.Operateur(c, b.Operateur))
 	if err != nil {
 		httpx.Error(c, err)
 		return

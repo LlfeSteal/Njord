@@ -17,12 +17,17 @@ import (
 // Input is everything the engine needs. Lines/entries in statut drop must be
 // excluded by the caller (the repo does it); they are ignored here anyway.
 type Input struct {
-	Plan      domain.Version
-	Realise   domain.Version
-	PlanLines []domain.PlanLine
-	Entries   []domain.RealiseEntry
-	Personnes []domain.Personne // référentiel (clé nom_normalise = names.Key)
-	Squads    []domain.Squad
+	// Timeline du plan (SPEC_analyse §4.3) : versions retenues (importées au
+	// plus tard avec PlanRef) et leurs lignes.
+	Plans   []PlanSource
+	PlanRef domain.Version // version choisie (meta.plan_version)
+	// PlanSuperseded : une version de plan non purgée a été importée après
+	// PlanRef (meta.archived_warning).
+	PlanSuperseded bool
+	Realise        domain.Version
+	Entries        []domain.RealiseEntry
+	Personnes      []domain.Personne // référentiel (clé nom_normalise = names.Key)
+	Squads         []domain.Squad
 	// Période d'analyse en semaines ISO "2026-W36" ; "" = défaut (semaines communes).
 	WeekFrom, WeekTo string
 	IncludeInactive  bool
@@ -34,6 +39,8 @@ type tupleKey struct{ CT, Key, Week string }
 type tuple struct {
 	prevu, reel float64
 	hasPlan     bool
+	versionID   string // version de plan qui régit la semaine
+	realDate    string // dernière date réalisée (version des tuples sans plan)
 	hasReal     bool
 	warn        bool
 	inactive    bool
@@ -56,10 +63,14 @@ type run struct {
 	en   Enricher
 	m    *matcher
 	q    *qualite
+	tl   Timeline
 	from string
 	to   string
 
-	lines     []domain.PlanLine
+	lines     []domain.PlanLine // segments de la timeline (lignes coupées), dans l'ordre de la timeline
+	full      []*domain.PlanLine
+	multi     bool // plusieurs versions dans la timeline (références de ligne qualifiées)
+	nonCouv   float64
 	entries   []domain.RealiseEntry
 	enr       []Enrichment
 	ids       []*identity // résolution des écritures MO (heures ≠ 0), nil sinon
@@ -86,17 +97,17 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 		ctLibelle: map[string]string{},
 		corr:      map[string]*domain.Correspondance{},
 	}
-	for _, l := range in.PlanLines {
-		if l.StatutParsing != domain.ParsingDrop {
-			r.lines = append(r.lines, l)
-		}
+	r.tl = BuildTimeline(r.cal, in.Plans)
+	for _, sg := range r.tl.Segments {
+		r.lines = append(r.lines, sg.Line)
+		r.full = append(r.full, sg.Full)
 	}
+	r.multi = len(in.Plans) > 1
 	for _, e := range in.Entries {
 		if e.StatutParsing != domain.ParsingDrop {
 			r.entries = append(r.entries, e)
 		}
 	}
-	sort.SliceStable(r.lines, func(i, j int) bool { return r.lines[i].RowNum < r.lines[j].RowNum })
 	sort.SliceStable(r.entries, func(i, j int) bool { return r.entries[i].RowNum < r.entries[j].RowNum })
 	for i := range in.Personnes {
 		r.personnes[in.Personnes[i].ID] = &in.Personnes[i]
@@ -123,17 +134,20 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 	}
 	sortCorrespondances(corr)
 
-	plan, real := in.Plan, in.Realise
+	kpis.HeuresNonCouvertes = round2(r.nonCouv)
+
+	plan, real := in.PlanRef, in.Realise
 	res := domain.AnalyseResult{
 		Meta: domain.AnalyseMeta{
 			PlanVersion:     &plan,
 			RealiseVersion:  &real,
-			ArchivedWarning: plan.Statut == domain.StatutArchivee || real.Statut == domain.StatutArchivee,
+			ArchivedWarning: in.PlanSuperseded || real.Statut == domain.StatutArchivee,
 			WeekFrom:        r.from,
 			WeekTo:          r.to,
-			Weeks:           nonNilWeeks(r.cal.Weeks(r.from, r.to)),
+			Weeks:           r.tl.weeks(r.cal, r.from, r.to),
 			IncludeInactive: in.IncludeInactive,
 			GeneratedAt:     in.Now,
+			Timeline:        r.tl.Windows,
 		},
 		KPIs:            kpis,
 		Ecarts:          ecarts,
@@ -186,15 +200,8 @@ func (r *run) enrich() {
 
 // period sets r.from / r.to (explicit bounds win, defaults otherwise).
 func (r *run) period() {
-	var pMin, pMax, rMin, rMax string
-	for _, l := range r.lines {
-		if _, ok := ParseDate(l.DateDebut); ok && (pMin == "" || l.DateDebut[:10] < pMin) {
-			pMin = l.DateDebut[:10]
-		}
-		if _, ok := ParseDate(l.DateFin); ok && (pMax == "" || l.DateFin[:10] > pMax) {
-			pMax = l.DateFin[:10]
-		}
-	}
+	var rMin, rMax string
+	pMin, pMax := r.tl.Span()
 	for _, e := range r.entries {
 		if _, ok := ParseDate(e.DateDepense); ok {
 			d := e.DateDepense[:10]
@@ -274,18 +281,21 @@ func (r *run) planSide() {
 		if l.ChargeTotale == 0 || !r.en.IsMOLine(l) {
 			continue
 		}
-		weeks, ok := r.cal.Distribute(l.DateDebut, l.DateFin, l.ChargeTotale)
+		// Contrôle §4.2 sur la ligne entière ; répartition sur le segment.
+		full := r.full[i]
+		all, ok := r.cal.Distribute(full.DateDebut, full.DateFin, full.ChargeTotale)
 		if !ok {
-			r.q.add("plan_repartition", lineRef(l)+" : dates invalides, charge non répartie")
+			r.q.add("plan_repartition", r.lineRef(l)+" : dates invalides, charge non répartie")
 			continue
 		}
 		sum := 0.0
-		for _, v := range weeks {
+		for _, v := range all {
 			sum += v
 		}
-		if math.Abs(sum-l.ChargeTotale) > 0.5 {
-			r.q.add("plan_repartition", lineRef(l)+" : "+fmtH(sum)+" h répartis pour "+fmtH(l.ChargeTotale)+" h")
+		if math.Abs(sum-full.ChargeTotale) > 0.5 {
+			r.q.add("plan_repartition", r.lineRef(l)+" : "+fmtH(sum)+" h répartis pour "+fmtH(full.ChargeTotale)+" h")
 		}
+		weeks, _ := r.cal.Distribute(l.DateDebut, l.DateFin, l.ChargeTotale)
 		wk := make([]string, 0, len(weeks))
 		for w := range weeks {
 			wk = append(wk, w)
@@ -298,6 +308,7 @@ func (r *run) planSide() {
 			t := r.tuple(ct, key, w)
 			t.prevu += weeks[w]
 			t.hasPlan = true
+			t.versionID = l.VersionID // semaine à cheval : la version la plus récente l'emporte
 			if t.squadID == nil && l.SquadID != nil {
 				t.squadID = l.SquadID
 			}
@@ -309,6 +320,19 @@ func (r *run) planSide() {
 
 func lineRef(l *domain.PlanLine) string {
 	return "ligne " + itoa(l.RowNum) + " (" + strings.TrimSpace(l.CT) + ")"
+}
+
+// lineRef qualifies the line with its version when the timeline has several.
+func (r *run) lineRef(l *domain.PlanLine) string {
+	if !r.multi {
+		return lineRef(l)
+	}
+	for _, w := range r.tl.Windows {
+		if w.VersionID == l.VersionID && w.Intitule != "" {
+			return lineRef(l) + " — " + w.Intitule
+		}
+	}
+	return lineRef(l)
 }
 
 // realSide aggregates the MO hours of the period per (CT, ressource, semaine).
@@ -331,6 +355,13 @@ func (r *run) realSide() {
 			continue
 		}
 		if !r.inPeriod(en.ISOWeek) {
+			continue
+		}
+		// Jour non couvert par la timeline : ni écart, ni hors plan, ni anomalie.
+		date := e.DateDepense[:10]
+		vid := r.tl.VersionAt(date)
+		if vid == "" {
+			r.nonCouv += en.Heures
 			continue
 		}
 		name := entryName(e)
@@ -364,6 +395,9 @@ func (r *run) realSide() {
 		t := r.tuple(tg, id.Key, en.ISOWeek)
 		t.reel += en.Heures
 		t.hasReal = true
+		if !t.hasPlan && date >= t.realDate {
+			t.versionID, t.realDate = vid, date
+		}
 		t.conf = id.Confidence
 		t.warn = t.warn || e.StatutParsing == domain.ParsingWarn
 
@@ -430,6 +464,10 @@ func (r *run) rows() ([]domain.EcartRow, domain.KPIs) {
 			Reel:           round2(t.reel),
 			Warn:           t.warn,
 			SquadID:        t.squadID,
+		}
+		if t.versionID != "" {
+			vid := t.versionID
+			row.PlanVersionID = &vid
 		}
 		if t.hasPlan {
 			row.Inactive = t.inactive

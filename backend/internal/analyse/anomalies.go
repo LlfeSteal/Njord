@@ -362,13 +362,16 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 		if p.Statut == domain.PrevisionDepassement {
 			g, what = 3, "dépassement prévu"
 		}
+		// Montant = écart de l'atterrissage plan au budget (celui de la page Budget) ;
+		// la tendance n'est citée, et nommée, que si elle seule dépasse le budget.
 		montant := p.EcartPlan
-		if p.EcartTendance > montant {
-			montant = p.EcartTendance
-		}
 		titre := "Atterrissage · " + p.CT + " : " + what
-		if montant > 0 {
+		switch {
+		case montant > 0:
 			titre += " (+" + fmtEur(montant) + ")"
+		case p.EcartTendance > 0:
+			montant = p.EcartTendance
+			titre += " (tendance +" + fmtEur(montant) + ")"
 		}
 		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour un budget de " + fmtEur(p.Budget) +
 			" (tendance " + fmtEur(p.AtterrissageTendance) + ")"

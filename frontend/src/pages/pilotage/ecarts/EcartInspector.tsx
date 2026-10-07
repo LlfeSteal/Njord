@@ -48,7 +48,8 @@ function Notes({ e }: { e: EcartRow }) {
   );
 }
 
-const planLink = (planId: string | undefined, e: EcartRow) =>
+/** Lien vers la ligne du plan dans la version qui régit la semaine (sinon la version de plan de l'analyse). */
+const planLink = (fallbackPlanId: string | undefined, e: EcartRow, planId = e.plan_version_id ?? fallbackPlanId) =>
   planId
     ? `/plan/${planId}?${new URLSearchParams(
         // Ligne non nominative (sans fiche) : ressource = libellé → recherche plein-texte.
@@ -107,7 +108,9 @@ interface GroupProps {
 
 export function RessourceInspector({ group, planId, onClose, onShowWeeks }: GroupProps) {
   const flags = group ? [...new Set(group.rows.map((r) => r.flag))].filter((f) => f !== 'conforme') : [];
-  const plan = group && group.prevu > 0 ? planLink(planId, group.head) : null;
+  // Semaines régies par plusieurs versions : la plus récente semaine prévue désigne la version à ouvrir.
+  const planned = group ? [...group.rows].reverse().find((r) => r.prevu > 0) : undefined;
+  const plan = group && planned ? planLink(planId, group.head, planned.plan_version_id ?? planId) : null;
   return (
     <Inspector
       opened={!!group}

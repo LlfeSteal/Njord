@@ -9,7 +9,7 @@ Identiques aux deux SPEC gestion. Règles métier de référence (listes SECURIS
 
 ## 1. Rôle
 
-Croiser la **version active du plan de charge** avec la **version active du réalisé** pour produire :
+Croiser la **timeline du plan de charge** (§4.3, reconstruite à partir de toutes ses versions) avec la **version active du réalisé** pour produire :
 
 1. un tableau d'écarts d'imputation par ressource × CT × semaine ;
 2. une synthèse budgétaire sécurisé vs non sécurisé par CT ;
@@ -19,7 +19,7 @@ Croiser la **version active du plan de charge** avec la **version active du réa
 
 | Entrée | Origine | Défaut |
 |---|---|---|
-| Version du plan | la version `active` | override utilisateur : sélection explicite d'une version archivée pour audit |
+| Timeline du plan | toutes les versions non purgées (§4.3) | override utilisateur : timeline connue à la date d'une version antérieure (audit) |
 | Version du réalisé | la version `active` | idem |
 | Paramètres métier | configuration | seuils, calendrier, période d'analyse |
 
@@ -113,6 +113,24 @@ Le tableau correspond à une charge annuelle de référence de 550 h. Pour une a
 ### 4.2 Contrôle de cohérence
 
 `Σ charge_hebdo` sur toutes les semaines couvertes doit être égal à `charge_totale` à ±0.5 h près. Sinon : `warn` global remonté.
+
+### 4.3 Timeline du plan et couverture
+
+Ajout 2026-10-07 (DECISIONS n° 13). Le plan de charge est réactualisé chaque mois ; un fichier ne couvre que la période à partir de son mois et une personne peut apparaître ou disparaître d'une version à l'autre.
+
+```
+versions retenues = versions de plan non purgées importées au plus tard avec la version choisie
+tri               = (date_effet, importee_le)
+fenêtre(v)        = [date_effet(v), min(date_effet(suivante) − 1 j, periode_fin(v))]
+                    (vide si une version importée après v a la même date d'effet)
+segment(ligne)    = ligne ∩ fenêtre(version de la ligne)
+charge(segment)   = charge_totale × jo(segment) ÷ jo(ligne)     (idem PPS)
+couverture        = ∪ fenêtres
+```
+
+À partir de sa date d'effet, une version **remplace intégralement** les précédentes. Exemple : PDC 1 (effet 01/09) « R1 · CT1 · 01/09 → 31/12 · 100 % », PDC 2 (effet 01/10) « R1 · CT2 · 01/10 → 31/12 » ⇒ timeline R1 : CT1 01/09 → 30/09, CT2 01/10 → 31/12.
+
+Tout ce qui suit (§4.1 dépliage, §5 jointure, §6 flags, §7 budget et prévisions) s'applique aux **segments**. Un jour hors couverture est **non couvert** : aucune écriture réalisée de ce jour ne produit d'écart, de 🟠 hors plan ni d'anomalie ; les restitutions l'indiquent « Non couvert par le plan de charge ».
 
 ## 5. Corrélation identité PDC ↔ Réalisé
 
@@ -250,7 +268,8 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 
 | Cas | Comportement |
 |---|---|
-| Version plan archivée sélectionnée explicitement | analyse produite avec avertissement persistant "version archivée en lecture" |
+| Version plan antérieure sélectionnée explicitement | timeline limitée aux versions importées jusqu'à elle, avertissement persistant |
+| Écriture réalisée datée d'un jour non couvert par la timeline (§4.3) | ni écart ni anomalie ; heures comptées dans « non couvert », semaine signalée sur les courbes |
 | Version réalisé sans plan actif | analyse impossible → message invitant à importer/activer un plan |
 | Ressource `[inactif]` présente au plan | conservée, flag `inactive` affiché, exclue du calcul du taux de conformité par défaut (toggle inclus) |
 | Semaine verrouillée (S51/S52) | `heures_prévues = 0`, écritures réalisées imputées sur ces semaines → **🟠 Hors plan** |

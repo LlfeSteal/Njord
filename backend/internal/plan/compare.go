@@ -17,8 +17,8 @@ const NonNominatif = "(non nominatif)"
 const deriveSeuil = 0.01
 
 // Compare computes the plan drift between two plan versions (DECISIONS n° 12).
-// fromID / toID may be empty: to = active version, from = oldest non-purged
-// plan version other than to. Unknown, non-plan or purged ids → store.ErrNotFound;
+// fromID / toID may be empty: to = last version of the timeline (DECISIONS n° 13),
+// from = the version preceding it in the timeline. Unknown, non-plan or purged ids → store.ErrNotFound;
 // identical versions or not enough versions → store.Precondition.
 func Compare(ctx context.Context, st *store.Store, fromID, toID string) (domain.PlanCompare, error) {
 	var out domain.PlanCompare
@@ -118,36 +118,44 @@ func resolveCompareVersions(ctx context.Context, st *store.Store, fromID, toID s
 			return
 		}
 	}
-	if toID == "" {
-		active, aerr := st.ActiveVersion(ctx, domain.KindPlan)
-		if aerr != nil {
-			return from, to, aerr
-		}
-		if active == nil {
-			return from, to, store.Precondition("aucune version de plan active : précisez la version à comparer (to)")
-		}
-		to = *active
-	}
-	if fromID == "" {
+	if toID == "" || fromID == "" {
 		vs, lerr := st.ListVersions(ctx, domain.KindPlan, false)
 		if lerr != nil {
 			return from, to, lerr
 		}
-		sort.Slice(vs, func(i, j int) bool {
-			if !vs[i].ImporteeLe.Equal(vs[j].ImporteeLe) {
-				return vs[i].ImporteeLe.Before(vs[j].ImporteeLe)
+		sortTimeline(vs)
+		if toID == "" {
+			if len(vs) == 0 {
+				return from, to, store.Precondition("aucune version de plan : importez un plan de charge")
 			}
-			return vs[i].ID < vs[j].ID
-		})
-		found := false
-		for _, v := range vs {
-			if v.ID != to.ID {
-				from, found = v, true
-				break
-			}
+			to = vs[len(vs)-1]
 		}
-		if !found {
-			return from, to, store.Precondition("il faut au moins deux versions de plan non purgées pour comparer")
+		if fromID == "" {
+			// Référence = la version qui précède « to » dans la timeline : la dernière de date
+			// d'effet antérieure, sinon celle qu'un réimport à même date remplace, sinon la suivante.
+			var before, same, after *domain.Version
+			for i := range vs {
+				v := &vs[i]
+				switch {
+				case v.ID == to.ID:
+				case timelineLess(*v, to) && dateEffet(*v) < dateEffet(to):
+					before = v
+				case timelineLess(*v, to):
+					same = v
+				case after == nil:
+					after = v
+				}
+			}
+			switch {
+			case before != nil:
+				from = *before
+			case same != nil:
+				from = *same
+			case after != nil:
+				from = *after
+			default:
+				return from, to, store.Precondition("il faut au moins deux versions de plan non purgées pour comparer")
+			}
 		}
 	}
 	if from.ID == to.ID {
@@ -258,4 +266,28 @@ func round2(v float64) float64 {
 		return 0 // pas de -0
 	}
 	return r
+}
+
+// dateEffet: date from which a plan version replaces the previous ones
+// (DECISIONS n° 13), periode_debut for a version without one.
+func dateEffet(v domain.Version) string {
+	if v.DateEffet != "" {
+		return v.DateEffet
+	}
+	return v.PeriodeDebut
+}
+
+// timelineLess orders plan versions as the timeline does: date d'effet, then import.
+func timelineLess(a, b domain.Version) bool {
+	if ea, eb := dateEffet(a), dateEffet(b); ea != eb {
+		return ea < eb
+	}
+	if !a.ImporteeLe.Equal(b.ImporteeLe) {
+		return a.ImporteeLe.Before(b.ImporteeLe)
+	}
+	return a.ID < b.ID
+}
+
+func sortTimeline(vs []domain.Version) {
+	sort.Slice(vs, func(i, j int) bool { return timelineLess(vs[i], vs[j]) })
 }

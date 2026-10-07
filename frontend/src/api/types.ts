@@ -24,6 +24,8 @@ export interface Version {
   filename: string;
   layout?: string; // plan : 'A' | 'B' | 'mixte'
   montant_total_eur?: number; // réalisé
+  /** Plan : date à partir de laquelle la version remplace les précédentes (timeline, DECISIONS n° 13). */
+  date_effet?: string;
 }
 
 export interface ParseIssue {
@@ -49,6 +51,8 @@ export interface ImportReport {
   pct_inactifs?: number;
   nouvelles_personnes?: string[];
   nouveaux_squads?: string[];
+  /** Plan : date d'effet proposée (= periode_debut) pour pré-remplir l'import. */
+  date_effet_proposee?: string;
   montant_total_eur?: number;
   issues: ParseIssue[];
   motifs_count: Record<string, number>;
@@ -216,6 +220,51 @@ export interface WeekInfo {
   fin: string;
   jours_ouvres: number;
   verrouillee: boolean;
+  /** Couverture de la semaine par la timeline du plan. */
+  couverture: Couverture;
+}
+
+/** 'aucune' = semaine non couverte par le plan de charge : ni écart ni anomalie. */
+export type Couverture = 'totale' | 'partielle' | 'aucune';
+
+/** Période pendant laquelle une version de plan fait référence ('' / '' = entièrement remplacée). */
+export interface TimelineWindow {
+  version_id: string;
+  intitule: string;
+  statut: VersionStatut;
+  date_effet: string;
+  debut: string;
+  fin: string;
+}
+
+/** Ligne de plan coupée à la fenêtre de sa version. */
+export interface TimelineSegment {
+  version_id: string;
+  line_id: number;
+  row_num: number;
+  ct: string;
+  ct_libelle: string;
+  /** '' = ligne non nominative. */
+  nom_prenom: string;
+  /** « NOM Prénom » ou libellé (ligne non nominative). */
+  ressource: string;
+  personne_id: string | null;
+  squad_id: string | null;
+  squad_nom: string;
+  ligne_cout: string;
+  pourcentage: number;
+  debut: string;
+  fin: string;
+  /** Heures du segment (charge × jours ouvrés du segment ÷ jours ouvrés de la ligne). */
+  charge: number;
+  pps: number;
+  inactive: boolean;
+}
+
+export interface PlanTimeline {
+  plan_version: Version | null;
+  windows: TimelineWindow[];
+  segments: TimelineSegment[];
 }
 
 export interface AnalyseContext {
@@ -238,6 +287,8 @@ export interface AnalyseMeta {
   weeks: WeekInfo[];
   include_inactive: boolean;
   generated_at: string;
+  /** Fenêtres des versions de plan retenues ; hors fenêtres = non couvert. */
+  timeline: TimelineWindow[];
 }
 
 export interface EcartRow {
@@ -256,6 +307,8 @@ export interface EcartRow {
   squad_id: string | null;
   squad_nom: string;
   warn: boolean;
+  /** Version de plan qui régit la semaine (null si aucune). */
+  plan_version_id: string | null;
 }
 
 export interface KPIs {
@@ -279,6 +332,8 @@ export interface KPIs {
   nb_ct_risque: number;
   total_prevu_h: number;
   total_reel_h: number;
+  /** Heures MO de la période imputées hors couverture du plan (non analysées). */
+  heures_non_couvertes: number;
 }
 
 /** Analyse budgétaire : PPS et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10). */
@@ -388,6 +443,7 @@ export interface PrevisionPoint {
   tendance_cumul: number | null;
   heures_plan: number;
   heures_reel: number | null;
+  couverture: Couverture;
 }
 
 export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';

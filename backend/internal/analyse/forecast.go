@@ -67,7 +67,7 @@ func (r *run) previsions() domain.Previsions {
 		}
 	}
 
-	// Plan : budget, dépense prévue et heures MO par semaine.
+	// Plan : budget, dépense prévue et heures MO par semaine (segments de la timeline).
 	for i := range r.lines {
 		l := &r.lines[i]
 		b := get(strings.TrimSpace(l.CT))
@@ -115,8 +115,10 @@ func (r *run) previsions() domain.Previsions {
 	asOfWeek := WeekOfDate(asOf)
 
 	var axis []string
-	for _, wi := range r.cal.Weeks(axisMin, axisMax) {
+	var cov []domain.Couverture
+	for _, wi := range r.tl.weeks(r.cal, axisMin, axisMax) {
 		axis = append(axis, wi.Week)
+		cov = append(cov, wi.Couverture)
 	}
 	asIdx := -1
 	for i, w := range axis {
@@ -165,10 +167,10 @@ func (r *run) previsions() domain.Previsions {
 		if ct == "" {
 			continue // lignes sans CT / écritures sans TG : comptées dans le global seulement
 		}
-		out.ParCT = append(out.ParCT, fcBuild(ct, r.ctLibelle[ct], c, axis, asIdx))
+		out.ParCT = append(out.ParCT, fcBuild(ct, r.ctLibelle[ct], c, axis, cov, asIdx))
 	}
 	g.sr = fcRemaining(axis, asOfWeek, g.fin)
-	out.Global = fcBuild("", "Périmètre", g, axis, asIdx)
+	out.Global = fcBuild("", "Périmètre", g, axis, cov, asIdx)
 
 	rank := map[domain.PrevisionStatut]int{domain.PrevisionDepassement: 0, domain.PrevisionVigilance: 1, domain.PrevisionOK: 2}
 	sort.SliceStable(out.ParCT, func(i, j int) bool {
@@ -328,7 +330,7 @@ func fcPtr(v float64) *float64 {
 }
 
 // fcBuild rounds the figures and builds the weekly points.
-func fcBuild(ct, libelle string, c fcCalc, axis []string, asIdx int) domain.PrevisionCT {
+func fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couverture, asIdx int) domain.PrevisionCT {
 	p := domain.PrevisionCT{
 		CT:                   ct,
 		CTLibelle:            libelle,
@@ -347,7 +349,7 @@ func fcBuild(ct, libelle string, c fcCalc, axis []string, asIdx int) domain.Prev
 		Series:               make([]domain.PrevisionPoint, 0, len(axis)),
 	}
 	for i, w := range axis {
-		pt := domain.PrevisionPoint{Week: w, BudgetCumul: round2(c.budgetCum[i]), HeuresPlan: round2(c.hp[i])}
+		pt := domain.PrevisionPoint{Week: w, BudgetCumul: round2(c.budgetCum[i]), HeuresPlan: round2(c.hp[i]), Couverture: cov[i]}
 		if m, err := WeekMonday(w); err == nil {
 			pt.Debut = m.Format(time.DateOnly)
 		}

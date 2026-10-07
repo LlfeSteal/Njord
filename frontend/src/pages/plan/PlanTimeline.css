@@ -1,0 +1,341 @@
+/* Timeline du plan de charge : Gantt en grille HTML (DECISIONS n° 13). Tokens uniquement.
+   Une teinte (piste « prévu ») ; relève de version = filet vertical + encoche --accent à gauche de la barre ;
+   périodes non couvertes = --uncovered-hatch. */
+.ptl-view {
+  flex: none;
+}
+
+.ptl {
+  overflow: hidden;
+}
+.ptl__scroll {
+  overflow-x: auto;
+}
+.ptl__grid {
+  position: relative;
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- Lignes */
+.ptl__row {
+  position: relative;
+  display: flex;
+  height: 28px;
+}
+.ptl__label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  width: 220px;
+  padding: 0 12px 0 16px;
+  background: var(--card);
+  border-right: 0.5px solid var(--separator);
+  color: var(--text);
+  font-size: 13px;
+  min-width: 0;
+}
+/* Ligne non nominative (libellé brut) : italique secondaire. */
+.ptl__label:not([data-nominative]):not(.ptl__label--head):not(.ptl__label--group) {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.ptl__label--head {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ptl__label--group {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.ptl__ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Personne présente dans plusieurs squads : rappel discret (liste complète en title). */
+.ptl__more {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: normal;
+  white-space: nowrap;
+}
+.ptl__count {
+  flex: none;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.ptl__plot {
+  position: relative;
+  z-index: 1;
+  flex: none;
+}
+
+.ptl__row--axis {
+  border-bottom: 0.5px solid var(--separator);
+}
+.ptl__row--band {
+  height: 32px;
+  border-bottom: 0.5px solid var(--separator);
+}
+.ptl__row--group {
+  border-top: 0.5px solid var(--separator);
+}
+.ptl__row--group .ptl__label {
+  padding-top: 6px;
+}
+/* Survol de ligne : --row-hover, posé sur --card dans la colonne collante (opaque). */
+.ptl__body .ptl__row:not(.ptl__row--group):hover > .ptl__plot {
+  background: var(--row-hover);
+}
+.ptl__body .ptl__row:not(.ptl__row--group):hover > .ptl__label {
+  background: linear-gradient(var(--row-hover), var(--row-hover)), var(--card);
+}
+
+/* ---------------------------------------------------------------- Axe des mois */
+.ptl__month {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  border-left: 0.5px solid var(--separator);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ptl__month[data-compact] {
+  padding-left: 3px;
+  font-size: 10px;
+}
+
+/* ---------------------------------------------------------------- Marques positionnées */
+.ptl__slot {
+  position: absolute;
+  top: 4px;
+  height: 20px;
+  min-width: 2px;
+}
+.ptl__row--band .ptl__slot {
+  top: 6px;
+}
+.ptl__slot > .ui-tooltip-anchor {
+  width: 100%;
+  height: 100%;
+}
+
+/* Fenêtre d'une version (bande du haut). */
+.ptl__window {
+  width: 100%;
+  height: 100%;
+  /* 2 px de surface entre deux fenêtres contiguës. */
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-left: 2px solid var(--card);
+  border-radius: 4px;
+  background: var(--fill);
+  box-shadow: inset 2px 0 0 var(--text-tertiary);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  background-clip: padding-box;
+}
+.ptl__window:hover {
+  background-color: var(--fill-pressed);
+}
+
+/* Période non couverte (bande du haut + fond du corps). */
+.ptl__gap {
+  border-radius: 4px;
+  background: var(--uncovered-hatch);
+}
+.ptl__gap-label {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Libellé dans une marque (fenêtre, barre, période non couverte) : tronqué à la largeur de la marque. */
+.ptl__text {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Segment de plan : piste « prévu », coins 4 px, libellé « CT · % » tronqué (rien sous 28 px). */
+.ptl__bar {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--series-planned);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+}
+/* « CT · % » : la partie « · % » est un élément flex qui passe à la ligne (hors de la barre, masquée)
+   quand le tout ne tient pas ; le CT reste seul sur la première ligne et se tronque par ellipse. */
+.ptl__bar-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  height: 20px;
+  line-height: 20px;
+  overflow: hidden;
+}
+.ptl__bar-ct {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ptl__bar-pct {
+  flex: none;
+  white-space: nowrap;
+}
+.ptl__bar:hover {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.ptl__bar[data-relief] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ptl__bar[data-inactive] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text-secondary);
+}
+.ptl__bar:focus-visible,
+.ptl__window:focus-visible,
+.ptl__gap-label:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- Fond du corps */
+.ptl__body {
+  position: relative;
+}
+.ptl__backdrop {
+  position: absolute;
+  top: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.ptl__gridline,
+.ptl__boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 0.5px solid var(--separator);
+}
+.ptl__boundary {
+  border-left: 1px solid var(--text-tertiary);
+}
+.ptl__gap-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--uncovered-hatch);
+}
+
+/* ---------------------------------------------------------------- Légende et bulle */
+.ptl__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 16px;
+  border-top: 0.5px solid var(--separator);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.ptl__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ptl__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.ptl__swatch[data-kind='bar'] {
+  background: var(--series-planned);
+}
+.ptl__swatch[data-kind='relief'] {
+  background: var(--series-planned);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.ptl__swatch[data-kind='gap'] {
+  background: var(--uncovered-hatch);
+  box-shadow: inset 0 0 0 0.5px var(--separator);
+}
+
+.ptl-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.ptl-tip__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ptl-tip__sub {
+  color: var(--text-secondary);
+}
+
+/* ---------------------------------------------------------------- Vue tableau */
+.ptl-table__res:not([data-nominative]) {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.ptl-table__squad {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: normal;
+}
+.ptl-table__version {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

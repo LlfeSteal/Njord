@@ -5,7 +5,7 @@ import type { AnalyseResult, PrevisionCT } from '../../../api/types';
 import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
 import {
   anomaliesATraiter,
   CATEGORIE_LABEL,
@@ -131,7 +131,7 @@ function Forecast({ result }: { result: AnalyseResult }) {
         </>
       ) : (
         <EmptyState title="Prévisions non disponibles">
-          Elles apparaîtront dès que le calcul d’atterrissage sera disponible pour ce plan et ce réalisé.
+          Elles apparaîtront dès que le calcul d’atterrissage sera disponible pour la timeline du plan et ce réalisé.
         </EmptyState>
       )}
     </Card>
@@ -151,7 +151,7 @@ export default function OverviewPage() {
             r && (
               <>
                 {asOf ? `Données arrêtées au ${fmtDate(asOf)}` : `${r.budget.par_ct.length} CT`}{' '}
-                <ArchivedTag result={r} />
+                <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )
           }

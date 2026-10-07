@@ -28,7 +28,8 @@ import { FLAG_SEVERITY, type EcartRow, type Flag } from '../../../api/types';
 import { analyseApi } from '../../../api/client';
 import { FLAG_META, FlagGlyph, InactiveBadge } from '../../../components/badges';
 import { fmtHours, fmtHoursSigned, fmtWeek } from '../../../lib/format';
-import ContextControl from '../shared/ContextControl';
+import ContextControl, { UncoveredNote } from '../shared/ContextControl';
+import { heuresNonCouvertes, uncoveredSentence } from '../shared/pilotage';
 import { useAnalyse } from '../shared/context';
 import { AnalyseGate } from '../anomalies/AnalyseGate';
 import { isAnalyseShown, norm, shortWeek } from '../anomalies/meta';
@@ -299,7 +300,12 @@ export default function EcartsPage() {
   let content;
   if (!shown) content = <AnalyseGate analyse={analyse} />;
   else if (ecarts.length === 0)
-    content = <EmptyState title="Aucun tuple à comparer">Le plan et le réalisé ne se recoupent pas sur la période.</EmptyState>;
+    content = (
+      <EmptyState title="Aucun tuple à comparer">
+        Le plan et le réalisé ne se recoupent pas sur la période.
+        {heuresNonCouvertes(result) > 0 && ` ${uncoveredSentence(heuresNonCouvertes(result))}.`}
+      </EmptyState>
+    );
   else if (total === 0)
     content = (
       <EmptyState
@@ -352,7 +358,12 @@ export default function EcartsPage() {
     <Page toolbar={toolbar} inspector={shown ? inspector : undefined}>
       {shown && filteredSansFlag.length > 0 ? (
         <Stack gap={16}>
-          <SyntheseImputations data={syntheseData} selected={state.flags} onSelect={selectFlag} />
+          <SyntheseImputations
+            data={syntheseData}
+            selected={state.flags}
+            onSelect={selectFlag}
+            footer={heuresNonCouvertes(result) > 0 ? <UncoveredNote result={result} /> : undefined}
+          />
           {content}
         </Stack>
       ) : (

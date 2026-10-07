@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS versions (
 	source_format     TEXT NOT NULL DEFAULT '',
 	filename          TEXT NOT NULL DEFAULT '',
 	layout            TEXT NOT NULL DEFAULT '',
-	montant_total_eur REAL
+	montant_total_eur REAL,
+	date_effet        TEXT NOT NULL DEFAULT ''  -- plan : date à partir de laquelle la version remplace les précédentes (DECISIONS n° 13)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS versions_one_active ON versions(kind) WHERE statut = 'active';
 

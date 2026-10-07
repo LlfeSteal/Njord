@@ -54,6 +54,13 @@
   --budget-secured: var(--green);
   --budget-unsecured: var(--orange);
   --budget-unclassified: var(--gray);
+  /* Période non couverte par le plan de charge (DECISIONS n° 13) : hachure neutre, jamais une couleur de flag. */
+  --uncovered: color-mix(in srgb, var(--gray) 22%, transparent);
+  --uncovered-hatch: repeating-linear-gradient(
+    135deg,
+    var(--uncovered) 0 2px,
+    transparent 2px 7px
+  );
   --focus-ring: color-mix(in srgb, var(--blue) 50%, transparent);
   --field-ring: color-mix(in srgb, var(--blue) 45%, transparent);
   --accent-tint: color-mix(in srgb, var(--blue) 14%, transparent);

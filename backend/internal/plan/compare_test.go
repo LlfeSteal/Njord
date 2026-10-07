@@ -219,12 +219,13 @@ func TestCompareDefaultsAndErrors(t *testing.T) {
 		decode[map[string]map[string]string](t, w)["error"]["code"] != "precondition" {
 		t.Errorf("une version : %d %s", w.Code, w.Body.String())
 	}
-	all = append(all, compareFixture(t, st, 1, 3)...) // v1..v4, v4 active
-	oldest, active := all[0], all[3]
+	all = append(all, compareFixture(t, st, 1, 3)...) // v1..v4, même date d'effet, importées dans l'ordre
+	oldest, last := all[0], all[3]
 
-	// Défauts : plus ancienne non purgée vs active ; versions identiques → tout inchangé.
+	// Défauts (DECISIONS n° 13) : to = dernière version de la timeline, from = celle qui la précède
+	// (ici même date d'effet : la version que le dernier import remplace) ; versions identiques → tout inchangé.
 	cmp := getCompare(t, r, "")
-	if cmp.From.ID != oldest || cmp.To.ID != active {
+	if cmp.From.ID != all[2] || cmp.To.ID != last {
 		t.Fatalf("défauts %s → %s", cmp.From.ID, cmp.To.ID)
 	}
 	for _, c := range cmp.ParCT {
@@ -236,31 +237,39 @@ func TestCompareDefaultsAndErrors(t *testing.T) {
 		t.Errorf("%d CT, %d personnes", len(cmp.ParCT), len(cmp.ParPersonne))
 	}
 
-	// from seul → to = active ; to seul → from = plus ancienne ≠ to.
-	if c := getCompare(t, r, "?from="+all[1]); c.From.ID != all[1] || c.To.ID != active {
+	// from seul → to = dernière ; to seul → from = celle qui la précède, sinon la suivante.
+	if c := getCompare(t, r, "?from="+all[1]); c.From.ID != all[1] || c.To.ID != last {
 		t.Errorf("from seul %s → %s", c.From.ID, c.To.ID)
 	}
-	if c := getCompare(t, r, "?to="+all[2]); c.From.ID != oldest || c.To.ID != all[2] {
+	if c := getCompare(t, r, "?to="+all[2]); c.From.ID != all[1] || c.To.ID != all[2] {
 		t.Errorf("to seul %s → %s", c.From.ID, c.To.ID)
 	}
-	if c := getCompare(t, r, "?to="+oldest); c.From.ID == oldest || c.To.ID != oldest {
-		t.Errorf("to = plus ancienne → from %s", c.From.ID)
+	if c := getCompare(t, r, "?to="+oldest); c.From.ID != all[1] || c.To.ID != oldest {
+		t.Errorf("to = première → from %s", c.From.ID)
 	}
 
-	// L'active est la plus ancienne → from = la suivante.
-	if w := do(r, http.MethodPost, "/api/plan/versions/"+oldest+"/reactivate", ""); w.Code != http.StatusOK {
-		t.Fatalf("reactivate %d %s", w.Code, w.Body.String())
+	// L'ordre est celui des dates d'effet, pas des imports ni du statut actif.
+	setEffet := func(id, d string) {
+		t.Helper()
+		if w := do(r, http.MethodPatch, "/api/plan/versions/"+id, `{"date_effet":"`+d+`"}`); w.Code != http.StatusOK {
+			t.Fatalf("date_effet %d %s", w.Code, w.Body.String())
+		}
 	}
-	if c := getCompare(t, r, ""); c.To.ID != oldest || c.From.ID != all[1] {
-		t.Errorf("active = plus ancienne : %s → %s", c.From.ID, c.To.ID)
+	setEffet(oldest, "2026-10-01") // v1 passe en dernier dans la timeline
+	if c := getCompare(t, r, ""); c.To.ID != oldest || c.From.ID != last {
+		t.Errorf("v1 au 01/10 : %s → %s", c.From.ID, c.To.ID)
+	}
+	setEffet(last, "2026-10-01") // même date, importée après v1 : la remplace ; from = date antérieure
+	if c := getCompare(t, r, ""); c.To.ID != last || c.From.ID != all[2] {
+		t.Errorf("v4 au 01/10 : %s → %s", c.From.ID, c.To.ID)
 	}
 
 	// from = to → 409.
 	if c := status("?from=" + all[1] + "&to=" + all[1]); c != http.StatusConflict {
 		t.Errorf("from = to : %d", c)
 	}
-	if c := status("?from=" + oldest); c != http.StatusConflict { // to = active = from
-		t.Errorf("from = active : %d", c)
+	if c := status("?from=" + last); c != http.StatusConflict { // to = dernière = from
+		t.Errorf("from = dernière : %d", c)
 	}
 
 	// 404 : inconnue, version réalisé, purgée.

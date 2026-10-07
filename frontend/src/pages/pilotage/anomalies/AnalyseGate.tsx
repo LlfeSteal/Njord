@@ -23,7 +23,8 @@ export function AnalyseGate({ analyse }: { analyse: UseAnalyse }) {
           </Group>
         }
       >
-        {context.data?.message || "L'analyse croise une version de plan de charge et une version de réalisé."}
+        {context.data?.message ||
+          "L'analyse croise la timeline du plan de charge (toutes ses versions, chacune à partir de sa date d'effet) et une version de réalisé."}
       </EmptyState>
     );
   if (result.error) {

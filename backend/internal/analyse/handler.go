@@ -3,6 +3,7 @@ package analyse
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,8 @@ func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/analyse", h.analyse)
 	g.GET("/analyse/ecarts.csv", h.ecartsCSV)
 	g.GET("/analyse/realise-enrichi.csv", h.realiseCSV)
+	g.GET("/analyse/plan-timeline", h.planTimeline)
+	g.GET("/analyse/plan-timeline.csv", h.planTimelineCSV)
 	g.PUT("/analyse/anomalies/suivi", h.putSuivi)
 	g.DELETE("/analyse/anomalies/suivi", h.deleteSuivi)
 }
@@ -259,4 +262,120 @@ func realiseRecord(e *domain.RealiseEntry, mask bool) []string {
 		e.DateDepense, e.PeriodeComptable, e.CompteComptable, sens(e.NumFacture), sens(e.NumCommande), numLigne, e.LotIFRS15,
 		sens(e.NomRessource), sens(e.Fournisseur), e.CodeArticle, e.MoisComptable, itoa(e.RowNum), string(e.StatutParsing), e.MotifRejet,
 	}
+}
+
+// timeline resolves the plan version (same rules as /analyse) and builds the
+// timeline known at its date (DECISIONS n° 13).
+func (h *Handler) timeline(ctx context.Context, planID string) (domain.PlanTimeline, error) {
+	ref, err := h.repo.ResolveVersion(ctx, domain.KindPlan, planID)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	s, err := h.st.GetSettings(ctx)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	plans, _, err := h.repo.LoadPlans(ctx, ref)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	personnes, err := h.repo.Personnes(ctx)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	squads, err := h.repo.Squads(ctx)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	libelles, err := h.repo.ctLibelles(ctx)
+	if err != nil {
+		return domain.PlanTimeline{}, err
+	}
+	return PlanTimelineOf(ref, BuildTimeline(NewCalendar(s), plans), personnes, squads, libelles), nil
+}
+
+// PlanTimelineOf builds the API view of a timeline: segments with a valid
+// window only, sorted by ressource, CT, début.
+func PlanTimelineOf(ref domain.Version, tl Timeline, personnes []domain.Personne, squads []domain.Squad, ctLibelles map[string]string) domain.PlanTimeline {
+	m := newMatcher(personnes, nil)
+	squadNom := map[string]string{}
+	for _, sq := range squads {
+		squadNom[sq.ID] = sq.NomCanonique
+	}
+	out := domain.PlanTimeline{PlanVersion: &ref, Windows: tl.Windows, Segments: []domain.TimelineSegment{}}
+	if out.Windows == nil {
+		out.Windows = []domain.TimelineWindow{}
+	}
+	for _, sg := range tl.Segments {
+		if !sg.Cut {
+			continue
+		}
+		l := sg.Line
+		key := planLineKey(&l)
+		seg := domain.TimelineSegment{
+			VersionID: l.VersionID, LineID: l.ID, RowNum: l.RowNum,
+			CT: strings.TrimSpace(l.CT), Ressource: planLineLabel(&l),
+			PersonneID: l.PersonneID, SquadID: l.SquadID,
+			LigneCout: strings.TrimSpace(l.LigneCout), Pourcentage: l.Pourcentage,
+			Debut: l.DateDebut, Fin: l.DateFin,
+			Charge: round2(l.ChargeTotale), PPS: round2(l.PPS), Inactive: l.Inactive,
+		}
+		seg.CTLibelle = ctLibelles[seg.CT]
+		if strings.HasPrefix(key, "N:") {
+			seg.NomPrenom = strings.TrimSpace(l.NomPrenom)
+			if p := m.personne(key); p != nil {
+				pid := p.ID
+				seg.PersonneID = &pid
+				if seg.SquadID == nil {
+					seg.SquadID = p.SquadID
+				}
+			}
+		}
+		if seg.SquadID != nil {
+			seg.SquadNom = squadNom[*seg.SquadID]
+		}
+		out.Segments = append(out.Segments, seg)
+	}
+	sort.SliceStable(out.Segments, func(i, j int) bool {
+		a, b := out.Segments[i], out.Segments[j]
+		if a.Ressource != b.Ressource {
+			return a.Ressource < b.Ressource
+		}
+		if a.CT != b.CT {
+			return a.CT < b.CT
+		}
+		return a.Debut < b.Debut
+	})
+	return out
+}
+
+func (h *Handler) planTimeline(c *gin.Context) {
+	out, err := h.timeline(c, strings.TrimSpace(c.Query("plan_version_id")))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) planTimelineCSV(c *gin.Context) {
+	out, err := h.timeline(c, strings.TrimSpace(c.Query("plan_version_id")))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	intitule := map[string]string{}
+	for _, w := range out.Windows {
+		intitule[w.VersionID] = w.Intitule
+	}
+	header := []string{"Ressource", "CT", "Libellé CT", "Squad", "Ligne de coût", "%", "Début", "Fin", "Charge (h)", "PPS", "Version"}
+	httpx.CSV(c, "plan-timeline.csv", header, func(write func([]string) error) error {
+		for _, s := range out.Segments {
+			if err := write([]string{s.Ressource, s.CT, s.CTLibelle, s.SquadNom, s.LigneCout, itoa(s.Pourcentage),
+				s.Debut, s.Fin, httpx.FormatFloat(s.Charge), httpx.FormatFloat(s.PPS), intitule[s.VersionID]}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

@@ -158,17 +158,29 @@ const maxLineDays = 11000
 // ok=false when the dates are missing/invalid/reversed. A line without any
 // working day returns an empty map (ok=true): the §4.2 check reports it.
 func (c Calendar) Distribute(debut, fin string, charge float64) (map[string]float64, bool) {
+	return c.DistributeWindow(debut, fin, charge, debut, fin)
+}
+
+// DistributeWindow is Distribute restricted to the days of [winFrom, winTo]
+// (timeline, SPEC_analyse §4.3) : le dénominateur reste jo(ligne), seuls les
+// jours de la fenêtre sont répartis (le taux est conservé). Fenêtre invalide
+// ou disjointe → map vide (ok=true).
+func (c Calendar) DistributeWindow(debut, fin string, charge float64, winFrom, winTo string) (map[string]float64, bool) {
 	a, ok1 := ParseDate(debut)
 	b, ok2 := ParseDate(fin)
 	if !ok1 || !ok2 || b.Before(a) || b.Sub(a) > maxLineDays*24*time.Hour {
 		return nil, false
 	}
+	wa, okA := ParseDate(winFrom)
+	wb, okB := ParseDate(winTo)
 	days := map[string]int{}
 	total := 0
 	for d := a; !d.After(b); d = d.AddDate(0, 0, 1) {
 		if c.IsWorkday(d) {
-			days[WeekOf(d)]++
 			total++
+			if okA && okB && !d.Before(wa) && !d.After(wb) {
+				days[WeekOf(d)]++
+			}
 		}
 	}
 	out := make(map[string]float64, len(days))

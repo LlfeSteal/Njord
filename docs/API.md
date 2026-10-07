@@ -19,8 +19,9 @@ Préfixe `/api`, JSON **snake_case**. Types : `backend/internal/domain/domain.go
 
 | Méthode | Chemin | Entrée | Réponse |
 |---|---|---|---|
-| POST | `/{kind}/imports/preview` | multipart `file`, `intitule?` | `ImportReport` (rien n'est écrit ; `nouvelles_personnes`/`nouveaux_squads` = ce qui serait créé) |
-| POST | `/{kind}/imports` | multipart `file`, `intitule?`, `importeur?`, `archive_active` (`true` défaut) | 201 `ImportResult` |
+| POST | `/{kind}/imports/preview` | multipart `file`, `intitule?` | `ImportReport` (rien n'est écrit ; `nouvelles_personnes`/`nouveaux_squads` = ce qui serait créé ; plan : `date_effet_proposee` = `periode_debut`) |
+| POST | `/{kind}/imports` | multipart `file`, `intitule?`, `importeur?`, `archive_active` (`true` défaut), plan : `date_effet?` (`YYYY-MM-DD`, défaut `periode_debut`, invalide → 400) | 201 `ImportResult` |
+| PATCH | `/plan/versions/:id` | JSON `{date_effet, operateur?}` | `Version` — `store.SetDateEffet` (400 format invalide, 404 inconnue, 409 purgée ; audit `date_effet`) |
 | GET | `/{kind}/versions?include_purged=false` | | `Version[]` (actives, archivées, purgées) — `store.ListVersions` |
 | GET | `/{kind}/versions/:id` | | `Version` |
 | POST | `/{kind}/versions/:id/archive` | JSON `{operateur?}` | `Version` — `store.Archive` |
@@ -31,7 +32,7 @@ Préfixe `/api`, JSON **snake_case**. Types : `backend/internal/domain/domain.go
 `intitule` absent → nom du fichier sans extension. Erreur bloquante (onglet/en-tête) → 422, aucune écriture. Version/lignes créées via `store.CreateVersion(ctx, &v, archiveActive, fill)`.
 
 ### Plan : lignes
-`GET /plan/compare?from=<id>&to=<id>` → `PlanCompare` (DECISIONS n° 12) : `{from, to, totaux{pps_from, pps_to, charge_from, charge_to, nb_ct_from, nb_ct_to, nb_personnes_from, nb_personnes_to}, par_ct[{ct, groupe, pps_from, pps_to, charge_from, charge_to, statut}], par_personne[{nom_prenom, …même champs}]}` ; `statut` ∈ `ajoute|retire|modifie|inchange`. Défauts : `to` = version active, `from` = plus ancienne version de plan non purgée autre que `to`. Lignes `drop` exclues. 404 version inconnue/purgée ; 409 `precondition` si `from` = `to` ou moins de deux versions. Tri `par_ct` : |Δ PPS| desc puis CT ; `par_personne` : |Δ charge| desc puis nom.
+`GET /plan/compare?from=<id>&to=<id>` → `PlanCompare` (DECISIONS n° 12) : `{from, to, totaux{pps_from, pps_to, charge_from, charge_to, nb_ct_from, nb_ct_to, nb_personnes_from, nb_personnes_to}, par_ct[{ct, groupe, pps_from, pps_to, charge_from, charge_to, statut}], par_personne[{nom_prenom, …même champs}]}` ; `statut` ∈ `ajoute|retire|modifie|inchange`. Défauts (DECISIONS n° 13) : `to` = dernière version de la timeline (date d'effet, puis import), `from` = celle qui la précède dans la timeline (dernière de date d'effet antérieure, sinon celle qu'un réimport à même date remplace, sinon la suivante). Lignes `drop` exclues. 404 version inconnue/purgée ; 409 `precondition` si `from` = `to` ou moins de deux versions. Tri `par_ct` : |Δ PPS| desc puis CT ; `par_personne` : |Δ charge| desc puis nom.
 
 `GET /plan/versions/:id/lines` → `PlanLinesPage` ; `GET /plan/versions/:id/lines.csv` (mêmes filtres, sans pagination ; colonne `nom_prenom` après `libelle`). **Identité = NOM + Prénom uniquement** (DECISIONS n° 8) : `PlanLine.nom_prenom` = « NOM Prénom » extrait du libellé ; `""` = ligne **non nominative** (warn à l'import, comptée au budget, jamais rapprochée du réalisé). `PlanLine.ressource` = code brut du fichier, conservé pour l'export CSV, n'identifie personne ; `ressource_kind` n'est plus exposé.
 Filtres : `ct`, `nom_prenom`, `ligne_cout`, `statut` (ok|warn|drop), `inactive` (bool), `squad_id`, `date_from`/`date_to` (chevauchement avec [date_debut, date_fin]), `q` (plein-texte sur libellé/nom_prenom/CT, insensible casse/accents), `sort` (`row_num`|`ct`|`nom_prenom`|`charge_totale`|`pps`|`date_debut`), `order`, `limit`, `offset`. `totals` = Σ sur **tout** le filtre courant (pas seulement la page). Facets : `ct`, `nom_prenom`, `ligne_cout`, `squad_id` (valeur = id ; libellé via `/squads`), `statut`.
@@ -57,12 +58,16 @@ Filtres : `entite`, `activite`, `trigramme`, `tg`, `wp`, `categorie`, `type`, `l
 
 | Méthode | Chemin | Réponse |
 |---|---|---|
-| GET | `/analyse/context` | `AnalyseContext` |
-| GET | `/analyse?plan_version_id=&realise_version_id=&week_from=2026-W36&week_to=2026-W40&include_inactive=false` | `AnalyseResult` (paramètres absents → défauts du contexte). 409 `precondition` si aucun plan (actif ou choisi) ou aucun réalisé |
+| GET | `/analyse/context` | `AnalyseContext` (`default_plan_id` = version active, sinon la plus récente non purgée ; période par défaut = timeline ∩ réalisé ; `weeks[].couverture`) |
+| GET | `/analyse?plan_version_id=&realise_version_id=&week_from=2026-W36&week_to=2026-W40&include_inactive=false` | `AnalyseResult` (paramètres absents → défauts du contexte). 409 `precondition` si aucun plan (non purgé ou choisi) ou aucun réalisé |
+| GET | `/analyse/plan-timeline?plan_version_id=` | `PlanTimeline` `{plan_version, windows, segments}` (mêmes règles de version que `/analyse`) |
+| GET | `/analyse/plan-timeline.csv?plan_version_id=` | segments : Ressource, CT, Libellé CT, Squad, Ligne de coût, %, Début, Fin, Charge (h), PPS, Version |
 | GET | `/analyse/ecarts.csv` | mêmes params + filtres `ct`, `ressource`, `flag`, `squad_id` |
 | GET | `/analyse/realise-enrichi.csv` | mêmes params + `mask_sensitive` : écritures + `iso_week`, `heures`, `eur`, `classification` |
 | PUT | `/analyse/anomalies/suivi` | `AnomalieSuiviInput` `{key, fingerprint, statut: traitee\|ignoree, commentaire, operateur?}` → `AnomalieSuivi` (upsert ; audit `anomalie.traitee` / `anomalie.ignoree`) |
 | DELETE | `/analyse/anomalies/suivi?key=` | rouvre l'anomalie (supprime le suivi ; audit `anomalie.rouverte`) → 204 |
+
+**Timeline du plan** (DECISIONS n° 13) : `plan_version_id` ne désigne plus « la » version croisée mais **la timeline connue à la date de cette version** = toutes les versions de plan non purgées importées au plus tard avec elle (`importee_le ≤`). Triées par `(date_effet, importee_le)`, chacune fait référence sur `[date_effet, min(date_effet suivante − 1 j, periode_fin)]` (fenêtre vide si un import plus récent a la même date d'effet). Chaque ligne non rejetée est coupée à la fenêtre de sa version (charge et PPS × jours ouvrés coupés ÷ jours ouvrés de la ligne). Hors fenêtres = **non couvert** : les écritures réalisées de ces jours ne produisent ni `EcartRow` ni anomalie, leurs heures MO de la période vont dans `kpis.heures_non_couvertes` ; `WeekInfo.couverture` / `PrevisionPoint.couverture` ∈ `totale|partielle|aucune` (jours ouvrés de la semaine couverts) ; `meta.timeline` liste les fenêtres ; `EcartRow.plan_version_id` = version qui régit la semaine. `meta.archived_warning` = plan choisi ≠ dernière version, ou réalisé archivé. Budget (Σ PPS), prévisions, natures et règle qualité 1 portent sur les segments.
 
 **Prévisions** (`AnalyseResult.previsions`, SPEC_analyse §7.7) : horizon = tout le plan (indépendant de `week_from/to`). `as_of` = dernière date de dépense du réalisé. Par CT et global : `budget` = Σ PPS, `consomme` = Σ TOTAL EN € brut (MO comprise), `reste_a_faire` = PPS des semaines > `as_of` (prorata des heures réparties en jours ouvrés), `atterrissage_plan` = consommé + reste à faire, `atterrissage_tendance` = consommé + moyenne € des 4 dernières semaines × semaines restantes, `statut` ok/vigilance/depassement, `series` hebdomadaires cumulées (`budget_cumul`, `reel_cumul` jusqu'à `as_of`, `plan_cumul`/`tendance_cumul` à partir de `as_of`, `heures_plan`, `heures_reel`).
 

@@ -20,7 +20,7 @@ Application web d'analyse des imputations des collaborateurs : **Plan de charge*
 | `internal/plan` | Parser PDC, import, lignes, CSV, facets ; crée personnes/squads à l'import | agent Plan |
 | `internal/referentiel` | Endpoints `/personnes`, `/squads` | agent Plan |
 | `internal/realise` | Parser réalisé, import, écritures, CSV, facets | agent Réalisé |
-| `internal/analyse` | Moteur pur `Run(Input, Settings)`, repo lecture SQL, endpoints, exports | agent Analyse |
+| `internal/analyse` | Moteur pur `Run(Input, Settings)` sur la **timeline du plan** (`BuildTimeline`, `timeline.go`, DECISIONS n° 13), repo lecture SQL, endpoints, exports | agent Analyse |
 
 Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
 
@@ -40,6 +40,7 @@ Navigation en barre latérale (`src/components/AppLayout.tsx`), routes dans `src
 | `/budget` | Budget par CT | `src/pages/pilotage/budget/` |
 | `/previsions` | Atterrissage et charge à venir | `src/pages/pilotage/previsions/` |
 | `/plan`, `/realise` | Version **active** (sinon la plus récente) ; le titre est un sélecteur d'historique | `src/pages/plan/`, `src/pages/realise/` |
+| `/plan/timeline` | Timeline du plan (Gantt des segments, fenêtres des versions, non couvert) | `src/pages/plan/PlanTimeline.tsx` |
 | `/plan/:id`, `/realise/:id` | Version précise de l'historique | idem |
 | `/plan/versions`, `/realise/versions` | Gestion des versions (archivage, réactivation, purge) | idem + `src/components/VersionsPanel.tsx` |
 | `/personnes`, `/squads` | Référentiels | `src/pages/referentiels/` |

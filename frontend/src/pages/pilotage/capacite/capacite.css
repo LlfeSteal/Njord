@@ -31,6 +31,15 @@
   color: var(--text-tertiary);
 }
 
+/* Semaine non couverte par le plan de charge (DECISIONS n° 13) : hachure neutre, jamais une couleur de flag. */
+.cap-table thead th[data-uncovered] {
+  background-image: var(--uncovered-hatch);
+  color: var(--text-secondary);
+}
+.cap-tile[data-uncovered] {
+  background: var(--uncovered-hatch);
+}
+
 /* Filet avant les colonnes de total. */
 .cap-table .cap-sep {
   border-left: 0.5px solid var(--separator);
@@ -143,6 +152,14 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+.cap-legend__hatch {
+  flex: none;
+  width: 16px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--uncovered-hatch);
+  box-shadow: inset 0 0 0 0.5px var(--uncovered);
 }
 
 /* Téléphone : échelle sur sa propre ligne, défilable sans élargir la page. */

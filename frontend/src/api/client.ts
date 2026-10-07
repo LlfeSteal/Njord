@@ -13,6 +13,7 @@ import type {
   PlanCompare,
   Personne,
   PlanLinesPage,
+  PlanTimeline,
   RealiseEntriesPage,
   Settings,
   Squad,
@@ -98,11 +99,16 @@ export const versionsApi = {
     if (intitule) fd.append('intitule', intitule);
     return post<ImportReport>(`/${kind}/imports/preview`, fd);
   },
-  commit: (kind: Kind, file: File, opts: { intitule?: string; importeur?: string; archive_active: boolean }) => {
+  commit: (
+    kind: Kind,
+    file: File,
+    opts: { intitule?: string; importeur?: string; archive_active: boolean; date_effet?: string },
+  ) => {
     const fd = new FormData();
     fd.append('file', file);
     if (opts.intitule) fd.append('intitule', opts.intitule);
     if (opts.importeur) fd.append('importeur', opts.importeur);
+    if (opts.date_effet) fd.append('date_effet', opts.date_effet);
     fd.append('archive_active', String(opts.archive_active));
     return post<ImportResult>(`/${kind}/imports`, fd);
   },
@@ -129,6 +135,9 @@ export const planApi = {
   linesCsvUrl: (id: string, q: PlanLinesQuery) => csvUrl(`/plan/versions/${id}/lines.csv`, q),
   /** Dérive : `from` = référence (défaut : plus ancienne version non purgée), `to` = défaut : version active. */
   compare: (from?: string, to?: string) => get<PlanCompare>('/plan/compare', { from, to }),
+  /** Change la date d'effet d'une version (timeline, DECISIONS n° 13). */
+  setDateEffet: (id: string, date_effet: string, operateur?: string) =>
+    patch<Version>(`/plan/versions/${id}`, { date_effet, operateur }),
 };
 
 // ------------------------------------------------------------------ Réalisé
@@ -193,6 +202,9 @@ export const analyseApi = {
   ecartsCsvUrl: (q: EcartsCsvQuery) => csvUrl('/analyse/ecarts.csv', q),
   realiseEnrichiCsvUrl: (p: AnalyseParams & { mask_sensitive?: boolean }) =>
     csvUrl('/analyse/realise-enrichi.csv', p as Query),
+  /** Timeline du plan connue à la date de `plan_version_id` (défaut : dernière version). */
+  planTimeline: (plan_version_id?: string) => get<PlanTimeline>('/analyse/plan-timeline', { plan_version_id }),
+  planTimelineCsvUrl: (plan_version_id?: string) => csvUrl('/analyse/plan-timeline.csv', { plan_version_id }),
   /** Marque une anomalie traitée / ignorée (upsert). */
   putSuivi: (body: AnomalieSuiviInput) => put<AnomalieSuivi>('/analyse/anomalies/suivi', body),
   /** Rouvre une anomalie (supprime son suivi). */

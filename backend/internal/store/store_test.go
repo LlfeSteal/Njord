@@ -108,3 +108,37 @@ func TestMigrateAddedColumn(t *testing.T) {
 		t.Fatalf("colonne nom_prenom : %d %v", n, err)
 	}
 }
+
+func TestDateEffet(t *testing.T) {
+	ctx := context.Background()
+	st, err := OpenMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := domain.Version{Kind: domain.KindPlan, Intitule: "PDC", PeriodeDebut: "2026-09-01"}
+	if err := st.CreateVersion(ctx, &v, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Migration n° 2 : une version sans date d'effet reçoit periode_debut.
+	if err := st.Tx(ctx, dateEffetPlan); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.GetVersion(ctx, domain.KindPlan, v.ID)
+	if got.DateEffet != "2026-09-01" {
+		t.Fatalf("date_effet migrée = %q", got.DateEffet)
+	}
+	if _, err := st.SetDateEffet(ctx, v.ID, "01/10/2026", "u"); err == nil {
+		t.Fatal("format invalide accepté")
+	}
+	got, err = st.SetDateEffet(ctx, v.ID, "2026-10-01", "u")
+	if err != nil || got.DateEffet != "2026-10-01" {
+		t.Fatalf("SetDateEffet: %v %q", err, got.DateEffet)
+	}
+	audit, _ := st.ListAudit(ctx, "plan_version", 10)
+	if len(audit) == 0 || audit[0].Action != "date_effet" {
+		t.Fatalf("audit manquant: %+v", audit)
+	}
+	if _, err := st.SetDateEffet(ctx, "inconnu", "2026-10-01", "u"); err != ErrNotFound {
+		t.Fatalf("id inconnu: %v", err)
+	}
+}

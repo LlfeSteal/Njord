@@ -124,6 +124,11 @@
   background: none;
   border-top: 2px dashed var(--pil-swatch);
 }
+/* Non couvert par le plan de charge : hachure neutre, jamais une couleur de flag (DECISIONS n° 13). */
+.pil-swatch[data-shape='hatch'] {
+  background: var(--uncovered-hatch);
+  box-shadow: inset 0 0 0 0.5px var(--uncovered);
+}
 
 .pil-tooltip {
   min-width: 180px;
@@ -141,6 +146,10 @@
   margin-bottom: 2px;
   font-size: 13px;
   font-weight: 600;
+}
+.pil-tooltip__note {
+  margin-bottom: 2px;
+  color: var(--text-secondary);
 }
 .pil-tooltip__row {
   display: flex;
@@ -346,4 +355,14 @@
     grid-column: 2;
     grid-row: 3;
   }
+}
+
+/* ------------------------------------------------------------------ Non couvert par le plan */
+/* Mention discrète (sous-titre, synthèse) : pastille hachurée + texte secondaire. */
+.pil-uncovered {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }

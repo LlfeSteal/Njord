@@ -276,7 +276,7 @@ export default function DerivePage() {
   const hidden = allRows.length - rows.length;
 
   const subtitle = data
-    ? `${data.from.intitule} (${fmtDate(data.from.importee_le)}) → ${data.to.intitule} (${fmtDate(data.to.importee_le)})`
+    ? `${data.from.intitule} (effet ${fmtDate(data.from.date_effet || data.from.periode_debut)}) → ${data.to.intitule} (effet ${fmtDate(data.to.date_effet || data.to.periode_debut)})`
     : undefined;
 
   // Moins de deux versions : rien à choisir, l'état vide l'explique.

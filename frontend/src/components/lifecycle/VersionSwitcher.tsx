@@ -1,10 +1,11 @@
 // Sélecteur de version dans le titre de la barre d'outils : « Plan démo ▾ » ouvre l'historique
-// (versions non purgées, coche sur la version affichée), l'import et la gestion des versions.
+// (versions non purgées, coche sur la version affichée), la timeline (plan), l'import et la gestion des versions.
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Menu, type MenuEntry } from '../../ui';
-import { IconChevronDown, IconImport, IconSliders } from '../../ui/Icons';
+import { IconChevronDown, IconImport, IconSliders, IconTimeline } from '../../ui/Icons';
 import type { Kind, Version } from '../../api/types';
-import { useVersionHistory } from './useCurrentVersion';
+import { fmtDate } from '../../lib/format';
+import { dateEffet, useVersionHistory } from './useCurrentVersion';
 import './VersionSwitcher.css';
 
 const STATUT_LABEL: Record<Version['statut'], string> = { active: 'Active', archivee: 'Archivée', purgee: 'Purgée' };
@@ -13,7 +14,7 @@ const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { da
 export interface VersionSwitcherProps {
   kind: Kind;
   current: Version;
-  /** Racine du module (« /plan », « /realise ») : la version active s'y affiche. */
+  /** Racine du module (« /plan », « /realise ») : la version courante s'y affiche (useCurrentVersion). */
   basePath: '/plan' | '/realise';
   onImport: () => void;
 }
@@ -24,17 +25,25 @@ export default function VersionSwitcher({ kind, current, basePath, onImport }: V
   const history = useVersionHistory(kind);
   const list = history.data ?? [];
 
-  const go = (v: Version) => navigate({ pathname: v.statut === 'active' ? basePath : `${basePath}/${v.id}`, search });
+  // Plan : la racine affiche la dernière version de la timeline, pas forcément l'active → toujours l'id.
+  const atRoot = (v: Version) => kind === 'realise' && v.statut === 'active';
+  const go = (v: Version) => navigate({ pathname: atRoot(v) ? basePath : `${basePath}/${v.id}`, search });
 
   const items: MenuEntry[] = [
     { type: 'header', label: 'Historique' },
     ...list.map((v) => ({
       label: v.intitule,
-      hint: `${fmtShort(v.importee_le)} · ${STATUT_LABEL[v.statut]}`,
+      hint:
+        kind === 'plan'
+          ? `effet ${fmtDate(dateEffet(v))} · ${STATUT_LABEL[v.statut]}`
+          : `${fmtShort(v.importee_le)} · ${STATUT_LABEL[v.statut]}`,
       checked: v.id === current.id,
       onSelect: () => go(v),
     })),
     { type: 'separator' },
+    ...(kind === 'plan'
+      ? [{ label: 'Timeline des versions', icon: <IconTimeline size={15} />, onSelect: () => navigate('/plan/timeline') }]
+      : []),
     { label: 'Importer un fichier…', icon: <IconImport size={15} />, onSelect: onImport },
     { label: 'Gérer les versions…', icon: <IconSliders size={15} />, onSelect: () => navigate(`${basePath}/versions`) },
   ];

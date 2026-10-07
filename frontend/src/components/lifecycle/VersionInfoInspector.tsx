@@ -1,10 +1,28 @@
 // Inspecteur « Infos » d'une version (plan ou réalisé) : fichier, contenu, cycle de vie et actions.
-import type { ReactNode } from 'react';
-import { Button, Inspector, InspectorSection, KeyValue, Tooltip, type KeyValueItem } from '../../ui';
+// Plan : section « Timeline » (fenêtre en vigueur, date d'effet modifiable — DECISIONS n° 13).
+import { useEffect, useState, type ReactNode } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Button,
+  DateInput,
+  Group,
+  Inspector,
+  InspectorSection,
+  KeyValue,
+  Stack,
+  toast,
+  Tooltip,
+  type KeyValueItem,
+} from '../../ui';
 import { IconArchive, IconRestore, IconTrash } from '../../ui/Icons';
+import { planApi } from '../../api/client';
 import type { Version } from '../../api/types';
-import { fmtDateTime, fmtEur, fmtNumber, fmtPeriod } from '../../lib/format';
+import { fmtDate, fmtDateTime, fmtEur, fmtNumber, fmtPeriod } from '../../lib/format';
+import { qk } from '../../lib/queryKeys';
 import { StatusBadge } from '../badges';
+import ErrorAlert from '../ErrorAlert';
+import { loadOperateur } from './lifecycleUtils';
+import { fmtWindow, usePlanTimeline, windowOf } from './usePlanTimeline';
 import type { VersionLifecycle } from './useVersionLifecycle';
 
 const LAYOUT_LABEL: Record<string, string> = { A: 'A', B: 'B', mixte: 'mixte (A et B)' };
@@ -72,10 +90,78 @@ export default function VersionInfoInspector({ version: v, opened, onClose, life
       <InspectorSection title="Contenu">
         <KeyValue items={contenu} />
       </InspectorSection>
+      {v.kind === 'plan' && opened && <PlanTimelineSection version={v} />}
       {children}
       <InspectorSection title="Cycle de vie">
         <KeyValue items={cycle} />
       </InspectorSection>
     </Inspector>
+  );
+}
+
+/** Plan : fenêtre où la version fait référence + date d'effet modifiable (audit côté serveur). */
+function PlanTimelineSection({ version: v }: { version: Version }) {
+  const qc = useQueryClient();
+  const timeline = usePlanTimeline(undefined, v.statut !== 'purgee');
+  const [date, setDate] = useState(v.date_effet ?? '');
+  useEffect(() => setDate(v.date_effet ?? ''), [v.id, v.date_effet]);
+
+  const save = useMutation({
+    mutationFn: (d: string) => planApi.setDateEffet(v.id, d, loadOperateur() || undefined),
+    onSuccess: (res) => {
+      void qc.invalidateQueries({ queryKey: ['versions'] });
+      void qc.invalidateQueries({ queryKey: ['analyse'] });
+      void qc.invalidateQueries({ queryKey: qk.planTimelineAll() });
+      toast({
+        tone: 'success',
+        title: "Date d'effet modifiée",
+        message: `« ${res.intitule} » remplace les plans précédents à partir du ${fmtDate(res.date_effet)}.`,
+      });
+    },
+  });
+
+  const purged = v.statut === 'purgee';
+  const enVigueur = purged ? '—' : timeline.isLoading ? '…' : fmtWindow(windowOf(timeline.data, v.id)) || '—';
+  const dirty = date !== (v.date_effet ?? '');
+
+  return (
+    <InspectorSection title="Timeline">
+      <Stack gap={8}>
+        <KeyValue items={[{ label: 'En vigueur', value: enVigueur, numeric: true }]} />
+        {purged ? (
+          <KeyValue items={[{ label: "Date d'effet", value: fmtDate(v.date_effet), numeric: true }]} />
+        ) : (
+          <>
+            <DateInput
+              label="Date d'effet"
+              description="Remplace les plans précédents à partir de cette date."
+              value={date}
+              onChange={(d) => {
+                setDate(d);
+                save.reset();
+              }}
+              disabled={save.isPending}
+            />
+            {dirty && (
+              <Group gap={8} justify="end">
+                <Button size="sm" onClick={() => setDate(v.date_effet ?? '')} disabled={save.isPending}>
+                  Annuler
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={!date}
+                  loading={save.isPending}
+                  onClick={() => save.mutate(date)}
+                >
+                  Enregistrer
+                </Button>
+              </Group>
+            )}
+            <ErrorAlert error={save.error} title="Modification impossible" />
+          </>
+        )}
+      </Stack>
+    </InspectorSection>
   );
 }

@@ -82,6 +82,8 @@ These are Apple system colors, with a brighter variant in dark mode.
 | `--budget-secured` | `--green` | Budget: secured |
 | `--budget-unsecured` | `--orange` | Budget: unsecured |
 | `--budget-unclassified` | `--gray` | Budget: unclassified |
+| `--uncovered` | `--gray` at 0.22 | Period not covered by the plan de charge: hatch stroke, swatch outline |
+| `--uncovered-hatch` | 135° stripes of `--uncovered`, 2 px every 7 px | Period not covered by the plan de charge: background of headers, cells, legend swatch |
 
 ### 2.4 Derived colors
 
@@ -98,6 +100,7 @@ These are always mixed from tokens with `color-mix(in srgb, …)` and never writ
 | `var(--blue) 88%, #000` | Primary button hover |
 | `var(--red) 88%, #000` | Destructive primary button hover |
 | `var(--blue) 30%, transparent` | Planned chart series (track) |
+| `var(--gray) 22%, transparent` | Uncovered period (`--uncovered`, hatch stripes) |
 
 The literal colors allowed outside tokens are white (`#fff`), for text and glyphs on colored fills, and the modal backdrop (§5).
 
@@ -265,7 +268,7 @@ Njord is organised by the **controller's tasks**, not by data source. A page is 
 - **Toolbar** (`PageToolbar`): sticky, translucent, 0.5 px bottom hairline; title 17/600, one subtitle line 12 px secondary; **one** primary action at most, everything else in the `⋯` menu (exports, secondary actions). An optional bottom row carries search + `FilterButton` + `ActiveFilters`, or a segmented control.
 - **Inspector** (`Inspector`, `InspectorSection`, `KeyValue`): opens on row click, 360 px, `--card`, left hairline; details that do not deserve a column live here (full group path, cost line, unit, raw label, parsing reason, breakdowns, actions).
 - **Filters**: never more than one row. A search field and a `Filtres` button with a count; criteria live in its popover; active filters show as removable accent pills.
-- **Pilotage context**: one compact control in the toolbar (« Plan × Réalisé · S36 → S40 ▾ »), shared by every Pilotage page.
+- **Pilotage context**: one compact control in the toolbar (« Dernier plan × Réalisé · S36 → S40 ▾ »), shared by every Pilotage page. The plan select is « Plan connu au » (the plan **timeline** known at the date of that version, DECISIONS n° 13); its default is « Dernier plan (timeline complète) » and each version shows its date d'effet. Week options carry « · verrouillée » / « · non couverte ».
 
 ### Density rules
 
@@ -310,6 +313,14 @@ Statuses are **tags**: a glyph whose **shape** carries the meaning, colored by i
 
 A signed gap (écart) is colored with its flag token; the `+` / `−` sign carries the same information without color.
 
+### Uncovered periods (plan timeline)
+
+Days covered by no plan version produce no écart, no flag and no anomaly: they are **not analysed**, never "hors plan". Everywhere they appear they use the neutral hatch (`--uncovered-hatch`) and the words « non couvert(e) par le plan de charge »:
+
+- Heat map (Capacité): week header and cells `data-uncovered`, hatched tile, cell text « non couvert » (secondary 11 px), legend line with a hatched swatch.
+- Charts: hatched band + legend entry (see Charts).
+- Hours imputed on uncovered days (`kpis.heures_non_couvertes`): one discreet line « X h imputées sur des périodes non couvertes par le plan (non analysées) » with a hatched 10 px swatch (`.pil-uncovered`) — in the Écarts synthesis footer, and short (« X h non couvertes par le plan », full sentence in the tooltip) in Pilotage subtitles. Never a KPI card, never a flag tone.
+
 ### KPI cards
 
 Card, padding 16; label 12 px secondary; value 28 / 600 tabular; sub-line 12 px secondary. A KPI never gets a colored border: a status glyph before the label gives its tone.
@@ -321,6 +332,7 @@ Card, padding 16; label 12 px secondary; value 28 / 600 tabular; sub-line 12 px 
 - Budget: stacked `--budget-secured`, `--budget-unsecured`, `--budget-unclassified`.
 - Tooltip uses the kit tooltip look (material, radius 10). Legend: 12 px secondary with 10 px swatches radius 3.
 - Every chart has a "show as table" toggle.
+- **Période non couverte par le plan de charge = hachure neutre (`--uncovered-hatch`), jamais une couleur de flag ; légende obligatoire.** Weeks with `couverture = aucune` get a hatched band behind the marks (SVG `<pattern>` resolved from `--gray`, same 135° / 2-in-7 px geometry, Recharts `ReferenceArea` over the run of weeks) and a legend entry « Non couvert par le plan de charge » (hatched swatch) shown only when such weeks exist; the tooltip of those weeks says it too (partially covered weeks: tooltip mention only, no shading).
 
 ### Import wizard
 

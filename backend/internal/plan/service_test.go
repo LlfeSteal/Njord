@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -497,5 +498,88 @@ func TestHTTP(t *testing.T) {
 	}
 	if w := do(r, http.MethodGet, "/api/plan/versions/"+id, ""); w.Code != 200 {
 		t.Errorf("get version %d", w.Code)
+	}
+}
+
+// Date d'effet (DECISIONS n° 13) : proposée = periode_debut, saisie à l'import,
+// modifiable par PATCH.
+func TestHTTPDateEffet(t *testing.T) {
+	st := newStore(t)
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	st.Now = func() time.Time { return now }
+	r := newRouter(st)
+	data := readDemo(t)
+
+	w := upload(t, r, "/api/plan/imports/preview", data, "demo_plancharge.xlsx", nil)
+	if rep := decode[domain.ImportReport](t, w); w.Code != http.StatusOK || rep.DateEffetProposee != "2026-09-01" {
+		t.Fatalf("preview %d date_effet_proposee=%q", w.Code, rep.DateEffetProposee)
+	}
+
+	// Date invalide → 400, rien d'écrit.
+	for _, d := range []string{"2026-13-01", "01/09/2026", "2026-9-1", "x"} {
+		w := upload(t, r, "/api/plan/imports", data, "demo_plancharge.xlsx", map[string]string{"date_effet": d})
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("date_effet %q : %d %s", d, w.Code, w.Body.String())
+		}
+	}
+	if n := count(t, st, `SELECT COUNT(*) FROM versions`) + count(t, st, `SELECT COUNT(*) FROM personnes`); n != 0 {
+		t.Fatalf("%d objets écrits après date invalide", n)
+	}
+
+	// Sans date_effet → periode_debut.
+	w = upload(t, r, "/api/plan/imports", data, "demo_plancharge.xlsx", nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("import %d %s", w.Code, w.Body.String())
+	}
+	ir := decode[domain.ImportResult](t, w)
+	v1 := ir.Version
+	if v1.DateEffet != "2026-09-01" || ir.Report.DateEffetProposee != "2026-09-01" {
+		t.Fatalf("date_effet défaut %q / proposée %q", v1.DateEffet, ir.Report.DateEffetProposee)
+	}
+	if d := str(t, st, `SELECT date_effet FROM versions WHERE id = ?`, v1.ID); d != "2026-09-01" {
+		t.Errorf("date_effet stockée %q", d)
+	}
+
+	// date_effet explicite → stockée.
+	w = upload(t, r, "/api/plan/imports", data, "demo_plancharge.xlsx", map[string]string{"date_effet": "2026-10-15"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("import 2 %d %s", w.Code, w.Body.String())
+	}
+	v2 := decode[domain.ImportResult](t, w).Version
+	if v2.DateEffet != "2026-10-15" {
+		t.Fatalf("date_effet explicite %q", v2.DateEffet)
+	}
+	if d := str(t, st, `SELECT date_effet FROM versions WHERE id = ?`, v2.ID); d != "2026-10-15" {
+		t.Errorf("date_effet stockée %q", d)
+	}
+
+	// PATCH.
+	w = do(r, http.MethodPatch, "/api/plan/versions/"+v2.ID, `{"date_effet":"2026-10-20","operateur":"dave"}`)
+	if v := decode[domain.Version](t, w); w.Code != http.StatusOK || v.DateEffet != "2026-10-20" || v.ID != v2.ID {
+		t.Fatalf("patch %d %s", w.Code, w.Body.String())
+	}
+	if n := count(t, st, `SELECT COUNT(*) FROM audit_log WHERE action = 'date_effet' AND operateur = 'dave' AND objet_id = ?`, v2.ID); n != 1 {
+		t.Errorf("audit date_effet %d", n)
+	}
+	for _, body := range []string{`{"date_effet":"2026-02-30"}`, `{"date_effet":""}`, `{}`, `{"operateur":"x"}`, ``, `not json`} {
+		if w := do(r, http.MethodPatch, "/api/plan/versions/"+v2.ID, body); w.Code != http.StatusBadRequest {
+			t.Errorf("patch %q : %d %s", body, w.Code, w.Body.String())
+		}
+	}
+	if d := str(t, st, `SELECT date_effet FROM versions WHERE id = ?`, v2.ID); d != "2026-10-20" {
+		t.Errorf("date_effet modifiée par une requête invalide : %q", d)
+	}
+	if w := do(r, http.MethodPatch, "/api/plan/versions/nope", `{"date_effet":"2026-10-20"}`); w.Code != http.StatusNotFound {
+		t.Errorf("patch inconnue %d", w.Code)
+	}
+
+	// Version purgée → 409 (v1 archivée par l'import de v2, purge après le délai).
+	now = now.AddDate(0, 0, 31)
+	w = do(r, http.MethodPost, "/api/plan/versions/"+v1.ID+"/purge", `{"confirm_intitule":"demo_plancharge"}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("purge %d %s", w.Code, w.Body.String())
+	}
+	if w := do(r, http.MethodPatch, "/api/plan/versions/"+v1.ID, `{"date_effet":"2026-10-20"}`); w.Code != http.StatusConflict {
+		t.Errorf("patch purgée %d %s", w.Code, w.Body.String())
 	}
 }

@@ -58,6 +58,9 @@ type Version struct {
 	Layout string `json:"layout,omitempty"`
 	// Réalisé uniquement : Σ TOTAL EN € des lignes acceptées.
 	MontantTotalEur *float64 `json:"montant_total_eur,omitempty"`
+	// Plan uniquement : date (YYYY-MM-DD) à partir de laquelle la version
+	// remplace les précédentes dans la timeline (DECISIONS n° 13).
+	DateEffet string `json:"date_effet,omitempty"`
 }
 
 // ParseIssue describes a warn/drop line in an import report.
@@ -86,6 +89,7 @@ type ImportReport struct {
 	PctInactifs        *float64 `json:"pct_inactifs,omitempty"` // 0..100
 	NouvellesPersonnes []string `json:"nouvelles_personnes,omitempty"`
 	NouveauxSquads     []string `json:"nouveaux_squads,omitempty"`
+	DateEffetProposee  string   `json:"date_effet_proposee,omitempty"` // = periode_debut (pré-remplissage)
 	// Réalisé uniquement.
 	MontantTotalEur *float64 `json:"montant_total_eur,omitempty"`
 	// Détail (tronqué à 500 entrées) et comptage par motif.
@@ -298,7 +302,18 @@ type WeekInfo struct {
 	Fin         string `json:"fin"`
 	JoursOuvres int    `json:"jours_ouvres"`
 	Verrouillee bool   `json:"verrouillee"`
+	// Couverture par la timeline du plan (jours ouvrés de la semaine) :
+	// "totale" | "partielle" | "aucune" (DECISIONS n° 13).
+	Couverture Couverture `json:"couverture"`
 }
+
+type Couverture string
+
+const (
+	CouvertureTotale    Couverture = "totale"
+	CouverturePartielle Couverture = "partielle"
+	CouvertureAucune    Couverture = "aucune"
+)
 
 type AnalyseContext struct {
 	PlanVersions     []Version  `json:"plan_versions"`    // non purgées
@@ -320,6 +335,48 @@ type AnalyseMeta struct {
 	Weeks           []WeekInfo `json:"weeks"`
 	IncludeInactive bool       `json:"include_inactive"`
 	GeneratedAt     time.Time  `json:"generated_at"`
+	// Timeline du plan : fenêtres des versions retenues (versions importées
+	// jusqu'à plan_version), triées par date. Hors fenêtres = non couvert.
+	Timeline []TimelineWindow `json:"timeline"`
+}
+
+// TimelineWindow is the period during which a plan version is the reference
+// (DECISIONS n° 13). Debut/Fin are "" when the version is entirely replaced.
+type TimelineWindow struct {
+	VersionID string        `json:"version_id"`
+	Intitule  string        `json:"intitule"`
+	Statut    VersionStatut `json:"statut"`
+	DateEffet string        `json:"date_effet"`
+	Debut     string        `json:"debut"` // YYYY-MM-DD
+	Fin       string        `json:"fin"`   // YYYY-MM-DD
+}
+
+// TimelineSegment is a plan line cut to the window of its version.
+type TimelineSegment struct {
+	VersionID   string  `json:"version_id"`
+	LineID      int64   `json:"line_id"`
+	RowNum      int     `json:"row_num"`
+	CT          string  `json:"ct"`
+	CTLibelle   string  `json:"ct_libelle"`
+	NomPrenom   string  `json:"nom_prenom"` // "" = ligne non nominative
+	Ressource   string  `json:"ressource"`  // « NOM Prénom » ou libellé (ligne non nominative)
+	PersonneID  *string `json:"personne_id"`
+	SquadID     *string `json:"squad_id"`
+	SquadNom    string  `json:"squad_nom"`
+	LigneCout   string  `json:"ligne_cout"`
+	Pourcentage int     `json:"pourcentage"`
+	Debut       string  `json:"debut"`  // YYYY-MM-DD, borne coupée
+	Fin         string  `json:"fin"`    // YYYY-MM-DD, borne coupée
+	Charge      float64 `json:"charge"` // heures du segment (charge × jo(segment) / jo(ligne))
+	PPS         float64 `json:"pps"`    // PPS du segment (même prorata)
+	Inactive    bool    `json:"inactive"`
+}
+
+// PlanTimeline is returned by GET /analyse/plan-timeline.
+type PlanTimeline struct {
+	PlanVersion *Version          `json:"plan_version"` // version de référence (dernière retenue)
+	Windows     []TimelineWindow  `json:"windows"`
+	Segments    []TimelineSegment `json:"segments"` // tri : ressource, CT, début
 }
 
 // EcartRow is one tuple (CT × ressource × semaine) of the écarts table (§7.1).
@@ -338,7 +395,8 @@ type EcartRow struct {
 	Inactive       bool       `json:"inactive"`
 	SquadID        *string    `json:"squad_id"`
 	SquadNom       string     `json:"squad_nom"`
-	Warn           bool       `json:"warn"` // une ligne source est en statut warn
+	Warn           bool       `json:"warn"`            // une ligne source est en statut warn
+	PlanVersionID  *string    `json:"plan_version_id"` // version de plan qui régit la semaine (null si non couverte)
 }
 
 type KPIs struct {
@@ -362,6 +420,7 @@ type KPIs struct {
 	NbCTRisque            int      `json:"nb_ct_risque"`
 	TotalPrevuH           float64  `json:"total_prevu_h"`
 	TotalReelH            float64  `json:"total_reel_h"`
+	HeuresNonCouvertes    float64  `json:"heures_non_couvertes"` // heures MO de la période imputées hors couverture du plan (non analysées)
 }
 
 type BudgetCT struct {
@@ -446,14 +505,15 @@ type Correspondance struct {
 
 // PrevisionPoint is one week of a cumulative forecast series (€ cumulés depuis le début du plan).
 type PrevisionPoint struct {
-	Week          string   `json:"week"`           // "2026-W37"
-	Debut         string   `json:"debut"`          // lundi, YYYY-MM-DD
-	BudgetCumul   float64  `json:"budget_cumul"`   // dépense prévue cumulée (PPS réparti au prorata des heures)
-	ReelCumul     *float64 `json:"reel_cumul"`     // € réalisés cumulés ; null après as_of
-	PlanCumul     *float64 `json:"plan_cumul"`     // projection plan ; null avant as_of (= réel à as_of)
-	TendanceCumul *float64 `json:"tendance_cumul"` // projection au rythme récent ; null avant as_of
-	HeuresPlan    float64  `json:"heures_plan"`    // heures MO planifiées sur la semaine
-	HeuresReel    *float64 `json:"heures_reel"`    // heures MO réalisées ; null après as_of
+	Week          string     `json:"week"`           // "2026-W37"
+	Debut         string     `json:"debut"`          // lundi, YYYY-MM-DD
+	BudgetCumul   float64    `json:"budget_cumul"`   // dépense prévue cumulée (PPS réparti au prorata des heures)
+	ReelCumul     *float64   `json:"reel_cumul"`     // € réalisés cumulés ; null après as_of
+	PlanCumul     *float64   `json:"plan_cumul"`     // projection plan ; null avant as_of (= réel à as_of)
+	TendanceCumul *float64   `json:"tendance_cumul"` // projection au rythme récent ; null avant as_of
+	HeuresPlan    float64    `json:"heures_plan"`    // heures MO planifiées sur la semaine
+	HeuresReel    *float64   `json:"heures_reel"`    // heures MO réalisées ; null après as_of
+	Couverture    Couverture `json:"couverture"`     // couverture de la semaine par la timeline du plan
 }
 
 // PrevisionCT is the landing forecast of one CT (or of the whole perimeter for Global, CT = "").

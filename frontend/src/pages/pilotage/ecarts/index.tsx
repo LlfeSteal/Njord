@@ -35,6 +35,8 @@ import { AnalyseGate } from '../anomalies/AnalyseGate';
 import { isAnalyseShown, norm, shortWeek } from '../anomalies/meta';
 import { EcartRowInspector, RessourceInspector } from './EcartInspector';
 import SyntheseImputations from './SyntheseImputations';
+import ExportActionsModal from './ExportActionsModal';
+import { aRegulariser, actionsMarkdown } from './actions';
 import { useSquads } from '../../referentiels/hooks';
 import {
   DEFAULT_SORT,
@@ -85,6 +87,7 @@ export default function EcartsPage() {
   const [listSort, setListSort] = useState<Sort<ListKey>>({ ...DEFAULT_SORT });
   const [groupSort, setGroupSort] = useState<Sort<GroupKey>>({ ...DEFAULT_SORT });
   const [selected, setSelected] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   // ---------------------------------------------------------------- Options des filtres
   const ecarts = useMemo(() => result?.ecarts ?? [], [result]);
@@ -193,7 +196,22 @@ export default function EcartsPage() {
     if (state.q.trim())
       toast({ tone: 'info', title: 'Export lancé', message: "La recherche n'est pas appliquée à l'export ; les filtres le sont." });
   };
+  // Actions à envoyer (DECISIONS n° 15) : les tuples affichés (filtres + recherche), hors conformes.
+  const nbActions = useMemo(() => aRegulariser(filtered).length, [filtered]);
+  const actions =
+    exportOpen && result
+      ? actionsMarkdown(filtered, {
+          periode: `${weekLabel(result.meta.week_from)} → ${weekLabel(result.meta.week_to)}`,
+          plan: result.meta.plan_version ? `${result.meta.plan_version.intitule} (timeline)` : 'Dernier plan',
+          realise: result.meta.realise_version?.intitule ?? 'Réalisé',
+          filtres: active.map((a) => (typeof a.label === 'string' ? a.label : a.key)),
+          recherche: state.q.trim() || undefined,
+          weekLabel,
+        })
+      : null;
+  const canExport = shown && nbActions > 0;
   const menu: MenuEntry[] = [
+    { label: 'Exporter les actions (Markdown)', icon: <IconDownload size={15} />, onSelect: () => setExportOpen(true), disabled: !canExport },
     { label: 'Exporter la conformité (CSV)', icon: <IconDownload size={15} />, onSelect: exportCsv, disabled: !shown },
   ];
 
@@ -274,7 +292,18 @@ export default function EcartsPage() {
     <PageToolbar
       title="Écarts d'imputation"
       subtitle={subtitle}
-      actions={<ContextControl analyse={analyse} />}
+      actions={
+        <Group gap={8} wrap={false}>
+          <ContextControl analyse={analyse} />
+          {shown && (
+            <Tooltip label="Aucun écart à régulariser" disabled={canExport}>
+              <Button icon={<IconDownload size={15} />} onClick={() => setExportOpen(true)} disabled={!canExport}>
+                Exporter
+              </Button>
+            </Tooltip>
+          )}
+        </Group>
+      }
       menu={menu}
       bottom={shown ? bottom : undefined}
     />
@@ -354,8 +383,18 @@ export default function EcartsPage() {
       </Stack>
     );
 
+  const exportModal = actions && result && (
+    <ExportActionsModal
+      opened={exportOpen}
+      onClose={() => setExportOpen(false)}
+      data={actions}
+      filename={`ecarts-actions-${shortWeek(result.meta.week_from)}-${shortWeek(result.meta.week_to)}`}
+    />
+  );
+
   return (
     <Page toolbar={toolbar} inspector={shown ? inspector : undefined}>
+      {exportModal}
       {shown && filteredSansFlag.length > 0 ? (
         <Stack gap={16}>
           <SyntheseImputations

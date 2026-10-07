@@ -157,3 +157,17 @@
     transition: none;
   }
 }
+
+/* Export des actions : Markdown brut, défilant dans la fenêtre. */
+.ecarts-export {
+  margin: 0;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--fill);
+  font: 12px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

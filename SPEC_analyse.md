@@ -283,6 +283,7 @@ Le contrôleur marque une anomalie **traitée** ou **ignorée** avec un commenta
 - **synthèse des imputations** (page Écarts) : anneau des heures sur-imputées, sous-imputées, hors plan, imputées sur un autre CT (erreur de CT) et conformes, et nombre de personnes du plan n'ayant rien imputé sur la période (DECISIONS n° 9) ;
 - drill-down : clic sur une ligne CT → filtres pré-remplis vers le tableau d'écarts ;
 - bouton "Exporter CSV conformité" et "Exporter CSV réalisé enrichi".
+- bouton « Exporter » (page Écarts) : actions à envoyer à chaque ressource, en Markdown, sur les tuples affichés — par semaine en écart, correction `prévu − réel` par CT (DECISIONS n° 15).
 
 ## 9. Cas particuliers
 

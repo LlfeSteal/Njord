@@ -1,0 +1,22 @@
+CT;Libellé;PPS PDC;Provisions;Charge max;Consommé;Reste à faire (approx);Atterrissage plan;Statut sans provisions;Statut attendu
+Y99F90001;Alpha Core Team;122543,31;0,00;122543,31;38308,40;83528,82;121837,22;vigilance;vigilance
+Y99F900010;Recette & amélioration continue;34374,00;0,00;34374,00;11100,93;17187,00;28287,93;ok;ok
+Y99F900011;Réserve de capacité Site Loire;195416,19;60030,00;255446,19;109678,98;127183,80;236862,78;depassement;vigilance
+Y99F900012;Provisions pour aléas;99340,86;100000,00;199340,86;16966,48;73216,62;90183,10;ok;ok
+Y99F900013;Prestations externes;0,00;30000,00;30000,00;11427,55;0,00;11427,55;depassement;ok
+Y99F900014;Achats non stockables;0,00;5000,00;5000,00;367,96;0,00;367,96;depassement;ok
+Y99F900015;Fonds de transformation;0,00;40000,00;40000,00;0,00;0,00;0,00;absent;ok
+Y99F90002;Platform Cloud;8249,76;0,00;8249,76;7734,19;0,00;7734,19;ok;ok
+Y99F900021;Missions PI Planning;0,00;25000,00;25000,00;6399,86;0,00;6399,86;depassement;ok
+Y99F900022;Missions Sprint Planning;0,00;19000,00;19000,00;18428,92;0,00;18428,92;depassement;vigilance
+Y99F90003;Data Stack - management de la donnée;111028,02;0,00;111028,02;18796,85;83872,56;102669,41;ok;ok
+Y99F90004;Squad UI Experience;54139,05;20000,00;74139,05;32755,10;32999,04;65754,14;depassement;vigilance
+Y99F90005;Engineering Experience;42795,63;0,00;42795,63;13520,44;28874,16;42394,60;vigilance;vigilance
+Y99F90006;Squad Development Experience;166971,70;15000,00;181971,70;23895,66;136035,10;159930,76;vigilance;ok
+Y99F90007;Intégration système & MBSE;92466,06;0,00;92466,06;11492,41;73904,10;85396,51;ok;ok
+Y99F90008;Comité d'Architecture;71154,18;0,00;71154,18;22898,85;50873,52;73772,37;depassement;depassement
+Y99F90009;Cellule Transverse Qualité;70810,44;4000,00;74810,44;33612,09;45029,94;78642,03;depassement;depassement
+Y99F90601;Squad Académie & Montée en compétence;28358,55;12000,00;40358,55;8139,60;27499,20;35638,80;depassement;ok
+Y99F90602;Support exploitation 24/7;80349,22;0,00;80349,22;9694,40;78630,52;88324,92;depassement;depassement
+Y99F90701;Pilote IA générative;3437,40;15000,00;18437,40;0,00;3437,40;3437,40;vigilance;ok
+TOTAL;;1181434,37;345030,00;1526464,37;395218,67;862271,78;1257490,45;depassement;vigilance

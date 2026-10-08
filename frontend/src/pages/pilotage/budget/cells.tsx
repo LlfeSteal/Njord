@@ -25,16 +25,17 @@ export function RowGlyph({ row, size }: { row: Pick<CtRow, 'statut' | 'risque'> 
  * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
  * Le signe porte l'information sans la couleur.
  */
-export function Reste({ value, over, warn }: { value: number | null; over: boolean; warn: boolean }) {
+/** Reste à l'échéance ; `title` explique le calcul (budget de l'exercice − projection retenue). */
+export function Reste({ value, over, warn, title }: { value: number | null; over: boolean; warn: boolean; title?: string }) {
   if (value == null) return <>—</>;
   if (over)
     return (
-      <span className="pil-signed" data-tone="danger">
+      <span className="pil-signed" data-tone="danger" title={title}>
         {fmtEurSigned(value)}
       </span>
     );
   return (
-    <span className="pil-signed" data-tone={warn && value > 0 ? 'warning' : undefined}>
+    <span className="pil-signed" data-tone={warn && value > 0 ? 'warning' : undefined} title={title}>
       {fmtEur(value)}
     </span>
   );

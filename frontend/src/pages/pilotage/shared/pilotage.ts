@@ -106,9 +106,13 @@ export const SOUS_CONSO_LABEL = 'Sous-consommation';
  * Ton d'une ligne CT : dépassement ou risque de sécurisation (rouge), vigilance ou sous-consommation (orange).
  * La sous-consommation est un indicateur séparé du statut (DECISIONS n° 17) : elle ne l'emporte jamais sur lui.
  */
+// Une ligne ne montre qu'un risque budgétaire : le plus proche dans le temps. La sous-consommation (à la fin
+// d'exercice) passe donc avant le dépassement / la vigilance (fin du plan) ; la bulle cite tous les risques.
 export function rowTone(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false): 'danger' | 'warning' | undefined {
-  if (statut === 'depassement' || risque) return 'danger';
-  if (statut === 'vigilance' || sousConso) return 'warning';
+  if (risque) return 'danger';
+  if (sousConso) return 'warning';
+  if (statut === 'depassement') return 'danger';
+  if (statut === 'vigilance') return 'warning';
   return undefined;
 }
 
@@ -121,9 +125,10 @@ export function rowGlyph(
   risque = false,
   sousConso = false,
 ): { kind: GlyphKind; tone: StatusTone } | null {
-  if (statut === 'depassement' || risque) return { kind: 'danger', tone: 'danger' };
-  if (statut === 'vigilance') return { kind: 'warning', tone: 'warning' };
+  if (risque) return { kind: 'danger', tone: 'danger' };
   if (sousConso) return SOUS_CONSO_GLYPH;
+  if (statut === 'depassement') return { kind: 'danger', tone: 'danger' };
+  if (statut === 'vigilance') return { kind: 'warning', tone: 'warning' };
   return null;
 }
 
@@ -133,10 +138,10 @@ export const SOUS_CONSO_GLYPH: { kind: GlyphKind; tone: StatusTone } = { kind: '
 /** Raison affichée en bulle du glyphe d'une ligne CT. */
 export function rowReason(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false): string {
   const parts: string[] = [];
-  if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max)');
-  if (statut === 'vigilance') parts.push('Atterrissage proche du budget');
+  if (sousConso) parts.push('Budget de l’exercice qui risque de ne pas être consommé (fin d’exercice)');
+  if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max, fin du plan)');
+  if (statut === 'vigilance') parts.push('Atterrissage proche du budget (fin du plan)');
   if (risque) parts.push('Part non sécurisée au-delà du seuil');
-  if (sousConso) parts.push('Budget de l’exercice qui risque de ne pas être consommé');
   return parts.join(' · ');
 }
 
@@ -256,6 +261,12 @@ export function extendToEcheance(series: PrevisionPoint[], e: Echeance | null | 
 }
 
 /** "2026-12-31" → « 31/12 ». */
+/** « mars 2027 » depuis une date YYYY-MM-DD. */
+export function fmtMonthYear(d: string): string {
+  const t = new Date(`${d.slice(0, 10)}T00:00:00`);
+  return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+}
+
 export function fmtDayMonth(d: string | null | undefined): string {
   const m = d ? /^\d{4}-(\d{2})-(\d{2})/.exec(d) : null;
   return m ? `${m[2]}/${m[1]}` : '—';
@@ -325,11 +336,13 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
  * Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). Budget max = PDC + provisions ;
  * avec la fin d'exercice, la phrase dit d'abord ce qui reste du budget à l'échéance (risque de perte).
  */
-export function forecastSentence(p: PrevisionCT, scope: string): string {
+export function forecastSentence(p: PrevisionCT): string {
   // Une seule phrase courte : reliquat à l'échéance d'abord, puis atterrissage face au budget max.
   const atter = `atterrissage ${fmtEurShort(p.atterrissage_plan)} pour un budget max de ${fmtEurShort(p.budget)}`;
   const e = echeanceOf(p);
-  if (e && e.nonConsomme > 0.5) return `Au ${fmtDayMonth(e.date)}, ${fmtEurShort(e.nonConsomme)} risquent d’être perdus ; ${atter}.`;
-  if (p.ecart_plan > 0.5) return `Atterrissage ${fmtEurShort(p.atterrissage_plan)}, soit ${fmtEurShort(p.ecart_plan)} au-dessus du budget max (${scope}).`;
-  return `${atter.charAt(0).toUpperCase()}${atter.slice(1)} (${scope}).`;
+  // Échéance d'abord, avec le budget de l'exercice : le montant se lit sur le crochet du graphique.
+  if (e && e.nonConsomme > 0.5)
+    return `Au ${fmtDayMonth(e.date)}, ${fmtEurShort(e.nonConsomme)} du budget ${e.date.slice(0, 4)} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
+  if (p.ecart_plan > 0.5) return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} à la fin du plan, soit ${fmtEurShort(p.ecart_plan)} au-dessus du budget max.`;
+  return `${atter.charAt(0).toUpperCase()}${atter.slice(1)} à la fin du plan.`;
 }

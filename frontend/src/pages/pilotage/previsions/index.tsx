@@ -141,7 +141,7 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
   return (
     <>
       <ScopeMetrics p={scope} />
-      <ChartCard title="Trajectoire cumulée" sub={forecastSentence(scope, ct ? `le CT ${ct}` : 'le périmètre')}>
+      <ChartCard title="Trajectoire cumulée" sub={forecastSentence(scope)}>
         <ForecastChart
           series={scope.series}
           asOfWeek={fc.as_of_week}

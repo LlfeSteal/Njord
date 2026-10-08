@@ -42,12 +42,20 @@ import {
   SOUS_CONSO_LABEL,
   STATUT_LABEL,
   useSort,
+  sourceLabel,
   type Echeance,
 } from '../shared/pilotage';
 import { Consumption, CtLabel, Reste, RowGlyph } from './cells';
 import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type CtRow } from './model';
 import '../shared/pilotage.css';
+
+/** Infobulle de « Reste à l'échéance » : budget de l'exercice − projection retenue, à la date de fin d'exercice. */
+function resteTitle(e: Echeance | null | undefined): string | undefined {
+  if (!e) return undefined;
+  const low = e.source === 'tendance' ? e.projTendance : e.source === 'plan' ? e.projPlan : Math.min(e.projPlan, e.projTendance);
+  return `Au ${fmtDayMonth(e.date)} : budget de l’exercice ${fmtEur(e.budget)} − ${sourceLabel(e.source)} ${fmtEur(low)}`;
+}
 
 type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'reste';
 type StatutFilter = 'all' | PrevisionStatut;
@@ -140,9 +148,9 @@ function BudgetTable({
     () => [...rows].sort((a, b) => (sort.dir === 'asc' ? 1 : -1) * cmp(a[sort.key], b[sort.key]) || cmp(a.ct, b.ct)),
     [rows, sort],
   );
-  const th = (k: SortKey, label: string, right = true) => (
+  const th = (k: SortKey, label: string, right = true, title?: string) => (
     <SortHeader active={sort.key === k} dir={sort.dir} onSort={() => toggle(k)} align={right ? 'right' : undefined}>
-      {label}
+      <span title={title}>{label}</span>
     </SortHeader>
   );
   const tBudget = sumOf(rows, 'budget');
@@ -156,8 +164,8 @@ function BudgetTable({
           {th('budget', 'Charge max')}
           {th('consomme', 'Consommé')}
           {th('pct', 'Consommation')}
-          {th('atterrissage', 'Atterrissage')}
-          {th('reste', 'Reste à l’échéance')}
+          {th('atterrissage', 'Atterrissage', true, 'Atterrissage plan à la fin du plan (consommé + plan restant)')}
+          {th('reste', 'Reste à l’échéance', true, 'Budget de l’exercice non consommé à la fin d’exercice, selon la pire projection (plan ou tendance)')}
         </tr>
       </thead>
       <tbody>
@@ -192,7 +200,7 @@ function BudgetTable({
             </td>
             <td data-align="right">{fmtEur(r.atterrissage)}</td>
             <td data-align="right">
-              <Reste value={r.reste} over={r.resteOver} warn={r.sousConso} />
+              <Reste value={r.reste} over={r.resteOver} warn={r.sousConso} title={resteTitle(r.echeance)} />
             </td>
           </tr>
         ))}

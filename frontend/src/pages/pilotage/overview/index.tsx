@@ -8,15 +8,17 @@ import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
 import EcheanceMetric from '../shared/EcheanceMetric';
 import {
-  anomaliesATraiter,
   anomalieGlyph,
+  anomaliesATraiter,
   CATEGORIE_LABEL,
-  echeanceOf,
   ecartTextTone,
+  echeanceOf,
+  fmtDayMonth,
+  fmtEurShort,
   fmtEurSigned,
+  fmtMonthYear,
   forecastOf,
   forecastSentence,
-  fmtEurShort,
   graviteGlyph,
 } from '../shared/pilotage';
 import '../shared/pilotage.css';
@@ -57,10 +59,14 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
         />
       </Metric>
       <Metric
-        label="Atterrissage prévu"
+        label={g.fin_plan ? `Atterrissage fin du plan (${fmtMonthYear(g.fin_plan)})` : 'Atterrissage prévu'}
         value={fmtEur(g.atterrissage_plan)}
         tone={over ? 'danger' : undefined}
-        sub={`Tendance ${fmtEur(g.atterrissage_tendance)}`}
+        sub={
+          e
+            ? `Au ${fmtDayMonth(e.date)} : ${fmtEurShort(e.projPlan)} (plan) · ${fmtEurShort(e.projTendance)} (tendance)`
+            : `Tendance ${fmtEur(g.atterrissage_tendance)}`
+        }
       />
       {e ? (
         <EcheanceMetric e={e} />
@@ -139,7 +145,7 @@ function Forecast({ result }: { result: AnalyseResult }) {
       </div>
       {fc ? (
         <>
-          <p className="pil-card-head__sub">{forecastSentence(fc.global, 'le périmètre')}</p>
+          <p className="pil-card-head__sub">{forecastSentence(fc.global)}</p>
           <ForecastChart
             series={fc.global.series}
             asOfWeek={fc.as_of_week}

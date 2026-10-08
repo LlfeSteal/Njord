@@ -218,8 +218,8 @@ const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
 // ------------------------------------------------------------------ Trajectoire cumulée
 // Version épurée (2026-10-08) : 4 courbes au plus (réalisé, projection plan, tendance, plan de charge prévu),
-// une seule ligne de budget (budget max = charge max, DECISIONS n° 16) et, à la fin d'exercice (n° 17),
-// un crochet « X k€ non consommés ». Les repères sont étiquetés dans le tracé ; la légende ne nomme que les courbes.
+// une ligne de budget en escalier (budget de l'exercice jusqu'à la fin d'exercice, puis budget max = charge max,
+// DECISIONS n° 16-17) et, à la fin d'exercice, un crochet « X k€ non consommés » appuyé sur cette ligne. Les repères sont étiquetés dans le tracé ; la légende ne nomme que les courbes.
 
 const FORECAST_SERIES: ChartSeries[] = [
   { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
@@ -238,6 +238,15 @@ interface SegmentShapeProps {
 }
 
 const AXIS = { axisLine: false, tickLine: false } as const;
+
+/** Arrondit au-dessus sur un pas « rond » (1, 2, 2,5, 5 × 10ⁿ) pour 4 intervalles : graduations lisibles. */
+function niceCeil(v: number): number {
+  if (!(v > 0)) return 1;
+  const raw = v / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? 10 * mag;
+  return Math.ceil(v / step) * step;
+}
 
 /** Sous cette hauteur (inspecteur), le graphique est compact : ni légende, ni hachure, ni libellé long. */
 const COMPACT_HEIGHT = 240;
@@ -290,6 +299,24 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
           : null
       : null;
   const eDate = echeance ? fmtDayMonth(echeance.date) : '';
+  // Budget en escalier : budget de l'exercice jusqu'à la fin d'exercice, budget max ensuite. Le crochet s'appuie
+  // ainsi sur la ligne tracée ; une seule ligne si l'échéance est hors horizon ou si les deux budgets sont égaux.
+  const first = series[0]?.week;
+  const last = series[n - 1]?.week;
+  const step =
+    echeance && eWeek && first && last && eWeek !== last && echeance.budget > 0 && Math.abs(echeance.budget - budget) > 0.5
+      ? { year: echeance.date.slice(0, 4), exercice: echeance.budget }
+      : null;
+  const budgetLine = { stroke: c['--text-secondary'], strokeDasharray: '2 3', strokeWidth: 1.5, ifOverflow: 'extendDomain' as const };
+  // Échelle Y explicite : les segments de référence n'étendent pas le domaine (recharts), budgets et crochet compris.
+  const yMax = Math.max(budget, step?.exercice ?? 0, gap?.high ?? 0);
+  const yDomain: [number, (dataMax: number) => number] = [0, (dataMax: number) => niceCeil(Math.max(dataMax, yMax))];
+  const budgetLabel = (value: string, position: 'insideBottomLeft' | 'insideBottomRight') => ({
+    value,
+    position,
+    fill: c['--text-secondary'],
+    fontSize: 11,
+  });
 
   /** Libellé « Fin d'exercice » : à droite du trait (à gauche près du bord droit), abaissé s'il touche « Aujourd'hui ». */
   const echeanceLabel = (p: LabelViewBox) => {
@@ -362,7 +389,7 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           {uncoveredAreas(runs, patternId)}
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
-          <YAxis {...AXIS} width={56} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
+          <YAxis {...AXIS} width={56} domain={yDomain} tickCount={5} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
           <RTooltip
             cursor={{ stroke: c['--separator'] }}
             wrapperStyle={{ outline: 'none' }}
@@ -371,20 +398,29 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
               <ChartTooltip<ForecastPoint> series={FORECAST_SERIES} format={(v) => fmtEur(v)} title={(d) => fmtWeek(d.week)} note={tooltipNote} />
             }
           />
-          {budget > 0 && (
-            <ReferenceLine
-              y={budget}
-              ifOverflow="extendDomain"
-              stroke={c['--text-secondary']}
-              strokeDasharray="2 3"
-              strokeWidth={1.5}
-              label={{
-                value: `${compact ? 'Budget' : 'Budget max'} ${fmtEurShort(budget)}`,
-                position: 'insideBottomLeft',
-                fill: c['--text-secondary'],
-                fontSize: 11,
-              }}
-            />
+          {step ? (
+            <>
+              <ReferenceLine
+                {...budgetLine}
+                segment={[
+                  { x: first, y: step.exercice },
+                  { x: eWeek!, y: step.exercice },
+                ]}
+                label={budgetLabel(`${compact ? '' : `Budget ${step.year} `}${fmtEurShort(step.exercice)}`, 'insideBottomLeft')}
+              />
+              <ReferenceLine
+                {...budgetLine}
+                segment={[
+                  { x: eWeek!, y: budget },
+                  { x: last, y: budget },
+                ]}
+                label={budgetLabel(`${compact ? '' : 'Budget max '}${fmtEurShort(budget)}`, 'insideBottomRight')}
+              />
+            </>
+          ) : (
+            budget > 0 && (
+              <ReferenceLine {...budgetLine} y={budget} label={budgetLabel(`${compact ? 'Budget' : 'Budget max'} ${fmtEurShort(budget)}`, 'insideBottomLeft')} />
+            )
           )}
           {hasToday && (
             <ReferenceLine

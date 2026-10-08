@@ -49,7 +49,7 @@ export default function VersionInfoInspector({ version: v, opened, onClose, life
     { label: 'Lignes', value: fmtNumber(v.nb_lignes), numeric: true },
     { label: 'À vérifier (warn)', value: fmtNumber(v.nb_warn), numeric: true },
     { label: 'Rejetées (drop)', value: fmtNumber(v.nb_drop), numeric: true },
-    ...(v.kind === 'realise' ? [{ label: 'Montant total', value: fmtEur(v.montant_total_eur), numeric: true }] : []),
+    ...(v.kind !== 'plan' ? [{ label: 'Montant total', value: fmtEur(v.montant_total_eur), numeric: true }] : []),
   ];
   const cycle: KeyValueItem[] = [
     { label: 'Statut', value: <StatusBadge statut={v.statut} /> },

@@ -1,10 +1,10 @@
 // Contrôle compact du contexte d'analyse pour la barre d'outils des pages Pilotage :
-// « Plan démo × Réalisé démo · S36 → S40 ▾ » ouvrant un popover (versions plan / réalisé, semaines, inactifs).
+// « Plan démo × Réalisé démo · S36 → S40 ▾ » ouvrant un popover (versions plan / réalisé / provisions, semaines, inactifs).
 // CONTRAT FIGÉ (props) — implémentation : agent Pilotage A. Utilisé en lecture par Pilotage B.
-// Exporte aussi AnalyseGate (états chargement / vide / erreur communs), ArchivedTag et UncoveredNote.
+// Exporte aussi AnalyseGate (états chargement / vide / erreur communs), ArchivedTag, UncoveredNote et NoProvisionNote.
 // Le plan choisi désigne la timeline connue à la date de cette version (DECISIONS n° 13).
 import { useMemo, type ReactNode } from 'react';
-import { Button, EmptyState, Group, Popover, Select, SkeletonRows, Spinner, Stack, Switch, Tag, type Option } from '../../../ui';
+import { Button, EmptyState, Group, Link, Popover, Select, SkeletonRows, Spinner, Stack, Switch, Tag, type Option } from '../../../ui';
 import { IconChevronDown } from '../../../ui/Icons';
 import { ApiError } from '../../../api/client';
 import type { AnalyseResult, Version } from '../../../api/types';
@@ -41,6 +41,8 @@ function versionOptions(
 /** Plan : la date d'effet situe la version dans la timeline. */
 const describePlan = (v: Version) => `Date d’effet ${fmtDate(v.date_effet ?? v.periode_debut)}`;
 const describeRealise = (v: Version) => `${fmtDate(v.periode_debut)} → ${fmtDate(v.periode_fin)}`;
+/** Provisions : photo des fonds restants, datée par l'import. */
+const describeProvision = (v: Version) => `Importée le ${fmtDate(v.importee_le)}`;
 
 export default function ContextControl({ analyse }: ContextControlProps) {
   const { selection, setSelection, context, params, result } = analyse;
@@ -53,6 +55,18 @@ export default function ContextControl({ analyse }: ContextControlProps) {
   const realOpts = useMemo(
     () => versionOptions(ctx?.realise_versions ?? [], ctx?.default_realise_id ?? null, 'Version active', describeRealise),
     [ctx],
+  );
+  // Provisions facultatives : sans version active, le défaut revient à « aucune » (budget = plan seul).
+  const provisionList = useMemo(() => (ctx?.provision_versions ?? []).filter((v) => v.statut !== 'purgee'), [ctx]);
+  const provOpts = useMemo(
+    () =>
+      versionOptions(
+        provisionList,
+        ctx?.default_provision_id ?? null,
+        ctx?.default_provision_id ? 'Version active' : 'Aucune version active (plan seul)',
+        describeProvision,
+      ),
+    [ctx, provisionList],
   );
   const weekOpts = useMemo<Option[]>(
     () =>
@@ -68,10 +82,12 @@ export default function ContextControl({ analyse }: ContextControlProps) {
   const planName = selection.plan && planVersion ? planVersion : 'Dernier plan';
   const planTitle = selection.plan && planVersion ? `Plan connu au ${planVersion}` : `Dernier plan${planVersion ? ` (${planVersion})` : ''}`;
   const realName = ctx?.realise_versions.find((v) => v.id === params?.realise_version_id)?.intitule ?? 'Réalisé';
+  const provName = provisionList.find((v) => v.id === params?.provision_version_id)?.intitule;
+  const provTitle = provName ? ` · provisions ${provName}` : '';
   const from = params?.week_from ?? null;
   const to = params?.week_to ?? null;
   const weeks = from || to ? `${weekShort(from)} → ${weekShort(to)}` : 'Toutes les semaines';
-  const isDefault = !selection.plan && !selection.realise && !selection.from && !selection.to && !selection.inactifs;
+  const isDefault = !selection.plan && !selection.realise && !selection.provision && !selection.from && !selection.to && !selection.inactifs;
 
   return (
     <span className="pil-ctx">
@@ -85,8 +101,8 @@ export default function ContextControl({ analyse }: ContextControlProps) {
             type="button"
             className="ui-popup pil-ctx__button"
             disabled={!ctx}
-            aria-label={`Contexte d’analyse : ${planTitle} × ${realName}, ${weeks}`}
-            title={`${planTitle} × ${realName} · ${weeks}${selection.inactifs ? ' · inactifs inclus' : ''}`}
+            aria-label={`Contexte d’analyse : ${planTitle} × ${realName}${provTitle}, ${weeks}`}
+            title={`${planTitle} × ${realName}${provTitle} · ${weeks}${selection.inactifs ? ' · inactifs inclus' : ''}`}
           >
             <span className="pil-ctx__label">
               <span className="pil-ctx__part">{planName}</span>
@@ -114,6 +130,15 @@ export default function ContextControl({ analyse }: ContextControlProps) {
             onChange={(v) => setSelection({ realise: !v || v === ACTIVE ? undefined : v })}
             menuWidth={296}
           />
+          {provisionList.length > 0 && (
+            <Select
+              label="Provisions"
+              data={provOpts}
+              value={selection.provision && provisionList.some((v) => v.id === selection.provision) ? selection.provision : ACTIVE}
+              onChange={(v) => setSelection({ provision: !v || v === ACTIVE ? undefined : v })}
+              menuWidth={296}
+            />
+          )}
           <div className="pil-ctx__weeks-row">
             <Select
               label="Du"
@@ -142,7 +167,7 @@ export default function ContextControl({ analyse }: ContextControlProps) {
               variant="plain"
               size="sm"
               disabled={isDefault}
-              onClick={() => setSelection({ plan: undefined, realise: undefined, from: undefined, to: undefined, inactifs: false })}
+              onClick={() => setSelection({ plan: undefined, realise: undefined, provision: undefined, from: undefined, to: undefined, inactifs: false })}
             >
               Revenir aux valeurs par défaut
             </Button>
@@ -230,5 +255,21 @@ export function UncoveredNote({ result, short = false }: { result: AnalyseResult
       <span className="pil-swatch" data-shape="hatch" aria-hidden />
       {short ? `${fmtHours(h)} non couvertes par le plan` : sentence}
     </span>
+  );
+}
+
+/**
+ * Mention discrète quand l'analyse n'a retenu aucune version de provisions (`meta.provision_version` nul) :
+ * le budget se limite alors au plan de charge (DECISIONS n° 16). Rien sinon.
+ */
+export function NoProvisionNote({ result }: { result: AnalyseResult | undefined }) {
+  if (!result || result.meta.provision_version) return null;
+  return (
+    <p className="pil-note">
+      Aucune provision importée : budget = plan de charge seul.{' '}
+      <Link to="/provisions" size="sm">
+        Importer des provisions
+      </Link>
+    </p>
   );
 }

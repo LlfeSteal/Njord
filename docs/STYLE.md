@@ -79,6 +79,7 @@ These are Apple system colors, with a brighter variant in dark mode.
 | `--statut-purgee` | `--text-tertiary` | Version status: purged (struck through) |
 | `--series-planned` | `--blue` at 0.3 | Chart series: planned (the track) |
 | `--series-actual` | `--blue` | Chart series: actual (the solid layer) |
+| `--series-provision` | `--teal` at 0.16 (dark: 0.26) | Remaining provisions (DECISIONS n° 16): band between the plan total and the budget max, provision part of a budget track, legend swatch |
 | `--budget-secured` | `--green` | Budget: secured |
 | `--budget-unsecured` | `--orange` | Budget: unsecured |
 | `--budget-unclassified` | `--gray` | Budget: unclassified |
@@ -101,6 +102,7 @@ These are always mixed from tokens with `color-mix(in srgb, …)` and never writ
 | `var(--red) 88%, #000` | Destructive primary button hover |
 | `var(--blue) 30%, transparent` | Planned chart series (track) |
 | `var(--gray) 22%, transparent` | Uncovered period (`--uncovered`, hatch stripes) |
+| `var(--teal) 16%, transparent` (dark: 26 %) | Remaining provisions (`--series-provision`) |
 
 The literal colors allowed outside tokens are white (`#fff`), for text and glyphs on colored fills, and the modal backdrop (§5).
 
@@ -332,6 +334,7 @@ Card, padding 16; label 12 px secondary; value 28 / 600 tabular; sub-line 12 px 
 - Budget: stacked `--budget-secured`, `--budget-unsecured`, `--budget-unclassified`.
 - Tooltip uses the kit tooltip look (material, radius 10). Legend: 12 px secondary with 10 px swatches radius 3.
 - Every chart has a "show as table" toggle.
+- **Budget max et provisions (DECISIONS n° 16).** The cumulative chart never plots provisions at their dates: the `budget_cumul` area stays the **plan de charge cumulé** (legend « Plan de charge cumulé »). The budget (charge max = Σ PPS + remaining provisions) is a horizontal reference line « Budget max X k€ » (`--text-secondary`, dotted 2/3, 1.5 px; legend « Budget max (PDC + provisions) », dotted swatch) and, between the plan total (`pps`) and the budget max, a flat band in `--series-provision` (Recharts `ReferenceArea`, fill applied as a CSS `style` so the token resolves per theme) labelled « Provisions restantes » inside its top-right corner only when the band is at least 30 px tall (legend entry otherwise carries it). Without provisions: the former single dashed « Budget X » line in `--text-tertiary`, no band, no extra legend entries. Budget-by-nature bars: grey track = PPS, then a 2 px surface gap and the provision part in `--series-provision`, réalisé fills on top; legend shown only when provisions exist. In CT tables the budget column is headed « Charge max ».
 - **Période non couverte par le plan de charge = hachure neutre (`--uncovered-hatch`), jamais une couleur de flag ; légende obligatoire.** Weeks with `couverture = aucune` get a hatched band behind the marks (SVG `<pattern>` resolved from `--gray`, same 135° / 2-in-7 px geometry, Recharts `ReferenceArea` over the run of weeks) and a legend entry « Non couvert par le plan de charge » (hatched swatch) shown only when such weeks exist; the tooltip of those weeks says it too (partially covered weeks: tooltip mention only, no shading).
 
 ### Import wizard

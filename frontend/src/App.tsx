@@ -15,6 +15,7 @@ const DerivePage = lazy(() => import('./pages/pilotage/derive'));
 // Données
 const PlanModule = lazy(() => import('./pages/plan'));
 const RealiseModule = lazy(() => import('./pages/realise'));
+const ProvisionsModule = lazy(() => import('./pages/provisions'));
 const PersonnesPage = lazy(() => import('./pages/referentiels/personnes'));
 const SquadsPage = lazy(() => import('./pages/referentiels/squads'));
 // Réglages
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/derive" element={<Lazy><DerivePage /></Lazy>} />
         <Route path="/plan/*" element={<Lazy><PlanModule /></Lazy>} />
         <Route path="/realise/*" element={<Lazy><RealiseModule /></Lazy>} />
+        <Route path="/provisions/*" element={<Lazy><ProvisionsModule /></Lazy>} />
         <Route path="/personnes/*" element={<Lazy><PersonnesPage /></Lazy>} />
         <Route path="/squads/*" element={<Lazy><SquadsPage /></Lazy>} />
         <Route path="/reglages/*" element={<Lazy><ParametresModule /></Lazy>} />

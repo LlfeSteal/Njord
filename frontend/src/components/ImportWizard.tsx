@@ -1,8 +1,8 @@
-// Assistant d'import en 2 temps (preview → confirmation), commun plan / réalisé.
+// Assistant d'import en 2 temps (preview → confirmation), commun plan / réalisé / provisions.
 // CONTRAT FIGÉ (props) — implémentation : agent « FE partagé ».
 // Étapes : dépôt .xlsx (FileDrop) + intitulé optionnel + importeur optionnel → versionsApi.preview
 // → affichage du bilan (ImportReport : totaux ok/warn/drop, période, layout & % inactifs &
-//   nouvelles personnes/squads pour le plan, montant total pour le réalisé, motifs, issues)
+//   nouvelles personnes/squads pour le plan, montant total pour le réalisé et les provisions, motifs, issues)
 // → plan : « Date d'effet » pré-remplie avec report.date_effet_proposee (timeline, DECISIONS n° 13)
 // → si report.active_version : case « Archiver la version active « X » ? » (cochée par défaut)
 // → versionsApi.commit → notification, invalidation ['versions'] et ['analyse'], onImported.
@@ -40,7 +40,11 @@ export interface ImportWizardProps {
 }
 
 const MAX_SIZE = 50 * 1024 * 1024;
-const KIND_LABEL: Record<Kind, string> = { plan: 'plan de charge', realise: 'réalisé', provision: 'provisions' };
+const KIND_TITLE: Record<Kind, string> = {
+  plan: 'Importer un fichier — plan de charge',
+  realise: 'Importer un fichier — réalisé',
+  provision: 'Importer des provisions',
+};
 
 const BLOCKING_TITLES: Record<string, string> = {
   sheet_not_found: 'Onglet introuvable',
@@ -384,7 +388,7 @@ export default function ImportWizard({ kind, opened, onClose, onImported }: Impo
         if (!commit.isPending) onClose();
       }}
       size="lg"
-      title={`Importer un fichier — ${KIND_LABEL[kind]}`}
+      title={KIND_TITLE[kind]}
       dismissable={!busy}
       footer={footer}
     >

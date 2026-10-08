@@ -18,7 +18,7 @@ import { fmtDate, fmtEur, fmtHours } from '../../../lib/format';
 import { CtLabel, RowGlyph, Signed } from '../budget/cells';
 import { ForecastChart, LoadChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, UncoveredNote } from '../shared/ContextControl';
 import { cmp, fmtEurSigned, forecastOf, forecastSentence, rowTone, useSort } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
@@ -33,7 +33,7 @@ function ScopeMetrics({ p }: { p: PrevisionCT }) {
         label="Atterrissage plan"
         value={fmtEur(p.atterrissage_plan)}
         tone={over ? 'danger' : undefined}
-        sub={`${fmtEurSigned(p.ecart_plan)} sur ${fmtEur(p.budget)} de budget`}
+        sub={`${fmtEurSigned(p.ecart_plan)} sur ${fmtEur(p.budget)} de ${p.provisions > 0 ? 'budget max' : 'budget'}`}
       />
       <Metric
         label="Atterrissage tendance"
@@ -75,7 +75,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
         <tr>
           <th data-glyph aria-label="Statut" />
           {th('ct', 'CT', false)}
-          {th('budget', 'Budget')}
+          {th('budget', 'Charge max')}
           {th('atterrissage_plan', 'Atterrissage plan')}
           {th('atterrissage_tendance', 'Tendance')}
           {th('ecart_plan', 'Écart')}
@@ -132,7 +132,7 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
     <>
       <ScopeMetrics p={scope} />
       <ChartCard title="Trajectoire cumulée" sub={forecastSentence(scope, ct ? `le CT ${ct}` : 'le périmètre')}>
-        <ForecastChart series={scope.series} asOfWeek={fc.as_of_week} budget={scope.budget} height={320} />
+        <ForecastChart series={scope.series} asOfWeek={fc.as_of_week} budget={scope.budget} pps={scope.pps} height={320} />
       </ChartCard>
       <ChartCard
         title="Charge à venir"
@@ -142,6 +142,7 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
       </ChartCard>
       {fc.par_ct.length > 0 && <CtTable list={fc.par_ct} selected={ct} onPick={(c) => setCt(c === ct ? null : c)} />}
       <MethodNote fc={fc} />
+      <NoProvisionNote result={result} />
     </>
   );
 }
@@ -149,8 +150,9 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
 function MethodNote({ fc }: { fc: Previsions }) {
   return (
     <p className="pil-note">
-      Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à date + rythme moyen des 4 dernières
-      semaines. Données arrêtées au {fmtDate(fc.as_of)}.
+      Budget (charge max) = plan de charge (Σ PPS) + provisions restantes ; les provisions sont une marge disponible, hors reste à faire et
+      atterrissage. Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à date
+      + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
     </p>
   );
 }

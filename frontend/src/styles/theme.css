@@ -53,6 +53,8 @@
   --statut-purgee: var(--text-tertiary);
   --series-planned: color-mix(in srgb, var(--blue) 30%, transparent);
   --series-actual: var(--blue);
+  /* Provisions restantes (DECISIONS n° 16) : bande pâle entre le total du plan et le budget max. */
+  --series-provision: color-mix(in srgb, var(--teal) 16%, transparent);
   --budget-secured: var(--green);
   --budget-unsecured: var(--orange);
   --budget-unclassified: var(--gray);
@@ -97,6 +99,8 @@
   --teal: #40c8e0;
   --red: #ff453a;
   --gray: #98989d;
+  /* Bande plus dense sur fond sombre (16 % y disparaît). */
+  --series-provision: color-mix(in srgb, var(--teal) 26%, transparent);
 }
 
 /* ------------------------------------------------------------------ Base */

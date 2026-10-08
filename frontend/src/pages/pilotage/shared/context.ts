@@ -12,6 +12,8 @@ export interface AnalyseSelection {
   /** Version de plan choisie ; absente = active (défaut du contexte). */
   plan?: string;
   realise?: string;
+  /** Version de provisions (facultative, DECISIONS n° 16) ; absente = active (défaut du contexte, peut être nulle). */
+  provision?: string;
   /** Semaines ISO "2026-W36" ; absentes = défauts du contexte. */
   from?: string;
   to?: string;
@@ -29,6 +31,7 @@ function read(): AnalyseSelection {
     return {
       plan: v.plan || undefined,
       realise: v.realise || undefined,
+      provision: v.provision || undefined,
       from: v.from || undefined,
       to: v.to || undefined,
       inactifs: !!v.inactifs,
@@ -70,9 +73,13 @@ export function resolveParams(ctx: AnalyseContext | undefined, s: AnalyseSelecti
   let from = s.from ?? ctx?.default_week_from ?? undefined;
   let to = s.to ?? ctx?.default_week_to ?? undefined;
   if (from && to && from > to) [from, to] = [to, from];
+  // Provisions choisies mais disparues (purgées) → retour au défaut plutôt qu'un 404.
+  const provisions = ctx?.provision_versions ?? [];
+  const provision = s.provision && provisions.some((v) => v.id === s.provision && v.statut !== 'purgee') ? s.provision : undefined;
   return {
     plan_version_id: s.plan ?? ctx?.default_plan_id ?? undefined,
     realise_version_id: s.realise ?? ctx?.default_realise_id ?? undefined,
+    provision_version_id: provision ?? ctx?.default_provision_id ?? undefined,
     week_from: from || undefined,
     week_to: to || undefined,
     include_inactive: s.inactifs,
@@ -85,7 +92,7 @@ export interface UseAnalyse {
   context: UseQueryResult<AnalyseContext>;
   /** Paramètres effectifs (null tant que le contexte n'est pas chargé). */
   params: AnalyseParams | null;
-  /** true quand un plan et un réalisé sont disponibles. */
+  /** true quand un plan et un réalisé sont disponibles (les provisions sont facultatives). */
   ready: boolean;
   result: UseQueryResult<AnalyseResult>;
 }

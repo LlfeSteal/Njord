@@ -82,7 +82,7 @@ export default function ImportReportView({ report }: { report: ImportReport }) {
               <Info label="Ressources inactives">{fmtPct(report.pct_inactifs)}</Info>
             </>
           )}
-          {report.kind === 'realise' && <Info label="Montant total">{fmtEur(report.montant_total_eur)}</Info>}
+          {report.kind !== 'plan' && <Info label="Montant total">{fmtEur(report.montant_total_eur)}</Info>}
         </Grid>
       </Card>
 

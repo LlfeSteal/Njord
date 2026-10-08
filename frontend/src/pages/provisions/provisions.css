@@ -1,0 +1,34 @@
+/* Détail des provisions : cellules sur une ligne, ligne basse de la barre, pied de table. */
+.provisions-table__ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provisions-table__libelle {
+  max-width: 320px;
+}
+.provisions-table__ligne {
+  max-width: 220px;
+}
+
+.provisions-bottom {
+  min-width: 0;
+}
+.provisions-bottom__pills {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.provisions-bottom__warn {
+  flex: none;
+}
+
+.provisions-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.provisions-foot > :first-child {
+  flex: 1 1 auto;
+}

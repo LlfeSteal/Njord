@@ -110,7 +110,7 @@ export function rowTone(statut: PrevisionStatut | null | undefined, risque = fal
 /** Raison affichée en bulle du glyphe d'une ligne CT. */
 export function rowReason(statut: PrevisionStatut | null | undefined, risque = false): string {
   const parts: string[] = [];
-  if (statut === 'depassement') parts.push('Atterrissage au-delà du budget');
+  if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max)');
   if (statut === 'vigilance') parts.push('Atterrissage proche du budget');
   if (risque) parts.push('Part non sécurisée au-delà du seuil');
   return parts.join(' · ');
@@ -154,7 +154,9 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
   return { total: open.length, categories, top };
 }
 
-/** Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). */
+/** Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). Budget max = PDC + provisions. */
 export function forecastSentence(p: PrevisionCT, scope: string): string {
-  return `Au rythme du plan, ${scope} atterrit à ${fmtEurShort(p.atterrissage_plan)} pour ${fmtEurShort(p.budget)} de budget.`;
+  const prov = p.provisions ?? 0;
+  const budget = prov > 0 ? `un budget max de ${fmtEurShort(p.budget)} (dont ${fmtEurShort(prov)} de provisions)` : `un budget de ${fmtEurShort(p.budget)}`;
+  return `Au rythme du plan, ${scope} atterrit à ${fmtEurShort(p.atterrissage_plan)} pour ${budget}.`;
 }

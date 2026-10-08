@@ -13,11 +13,12 @@ import {
   fmtEurSigned,
   forecastOf,
   forecastSentence,
+  fmtEurShort,
   graviteGlyph,
 } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
-/** Avancement attendu à date (budget cumulé à l'arrêté ÷ budget total), en %. */
+/** Avancement attendu à date (plan cumulé à l'arrêté ÷ budget total = charge max), en %. */
 function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
   if (!p.budget) return undefined;
   const pt = p.series.find((s) => s.week === asOfWeek);
@@ -38,9 +39,12 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
   const pct = g.pct_consomme ?? (g.budget ? (g.consomme / g.budget) * 100 : 0);
   const over = g.statut === 'depassement';
   const tone = ecartTextTone(g) ?? (g.statut === 'ok' ? 'success' : undefined);
+  // Budget = charge max = plan de charge + provisions restantes (DECISIONS n° 16).
+  const prov = g.provisions ?? 0;
+  const budgetText = prov > 0 ? `sur ${fmtEur(g.budget)} de budget max (dont ${fmtEurShort(prov)} de provisions)` : `sur ${fmtEur(g.budget)} de budget`;
   return (
     <div className="pil-metrics">
-      <Metric label="Consommé" value={fmtEur(g.consomme)} sub={`sur ${fmtEur(g.budget)} de budget · ${fmtPct(pct)}`}>
+      <Metric label="Consommé" value={fmtEur(g.consomme)} sub={`${budgetText} · ${fmtPct(pct)}`}>
         <ProgressBar
           value={pct}
           marker={expectedPct(g, fc.as_of_week)}
@@ -127,7 +131,7 @@ function Forecast({ result }: { result: AnalyseResult }) {
       {fc ? (
         <>
           <p className="pil-card-head__sub">{forecastSentence(fc.global, 'le périmètre')}</p>
-          <ForecastChart series={fc.global.series} asOfWeek={fc.as_of_week} budget={fc.global.budget} height={260} />
+          <ForecastChart series={fc.global.series} asOfWeek={fc.as_of_week} budget={fc.global.budget} pps={fc.global.pps} height={260} />
         </>
       ) : (
         <EmptyState title="Prévisions non disponibles">

@@ -1,4 +1,4 @@
-// Graphiques partagés des pages Pilotage : trajectoire cumulée (budget, réalisé, plan, tendance),
+// Graphiques partagés des pages Pilotage : trajectoire cumulée (plan, budget max, provisions, réalisé, tendance),
 // charge hebdomadaire, légende et bulle au look du kit. Couleurs résolues depuis les tokens.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
 import { useId, type CSSProperties, type ReactNode } from 'react';
@@ -28,8 +28,8 @@ export interface ChartSeries {
   key: string;
   label: string;
   token: string;
-  /** Pastille : trait plein, trait pointillé, carré (barres / aires) ou hachure (non couvert). */
-  shape?: 'line' | 'dash' | 'box' | 'hatch';
+  /** Pastille : trait plein, tirets, pointillé (ligne de référence), carré (barres / aires / bandes) ou hachure (non couvert). */
+  shape?: 'line' | 'dash' | 'dot' | 'box' | 'hatch';
   /** Opacité de la pastille (piste = 0,3). */
   opacity?: number;
 }
@@ -45,10 +45,10 @@ function Swatch({ s }: { s: ChartSeries }) {
   );
 }
 
-/** Légende sous un graphique : 12 px secondaire, pastilles alignées à gauche. */
-export function ChartLegend({ series }: { series: ChartSeries[] }) {
+/** Légende sous un graphique : 12 px secondaire, pastilles alignées à gauche (`flush` : sans retrait d'axe Y). */
+export function ChartLegend({ series, flush = false }: { series: ChartSeries[]; flush?: boolean }) {
   return (
-    <div className="pil-legend">
+    <div className="pil-legend" data-flush={flush || undefined}>
       {series.map((s) => (
         <span key={s.key} className="pil-legend__item">
           <Swatch s={s} />
@@ -218,31 +218,50 @@ function uncoveredAreas(runs: UncoveredRun[], patternId: string) {
 const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
 // ------------------------------------------------------------------ Trajectoire cumulée
+// Budget = charge max = Σ PPS du plan + provisions restantes (DECISIONS n° 16). La courbe cumulée reste
+// celle du plan seul ; les provisions ne sont pas placées à leurs dates : elles forment une bande
+// « Provisions restantes » entre le total du plan et la ligne « Budget max ».
 
 const FORECAST_SERIES: ChartSeries[] = [
   { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
   { key: 'plan_cumul', label: 'Atterrissage plan', token: '--blue', shape: 'line', opacity: 0.5 },
   { key: 'tendance_cumul', label: 'Tendance', token: '--orange', shape: 'dash' },
-  { key: 'budget_cumul', label: 'Budget prévu', token: '--text-tertiary', shape: 'dash' },
+  { key: 'budget_cumul', label: 'Plan de charge cumulé', token: '--text-tertiary', shape: 'dash' },
 ];
+
+/** Entrées de légende propres au budget max (affichées seulement avec des provisions). */
+const BUDGET_MAX_SERIES: ChartSeries = { key: 'budget_max', label: 'Budget max (PDC + provisions)', token: '--text-secondary', shape: 'dot' };
+const PROVISION_SERIES: ChartSeries = { key: 'provisions', label: 'Provisions restantes', token: '--series-provision', shape: 'box' };
 
 const FORECAST_TOKENS = ['--blue', '--orange', '--text-tertiary', '--text-secondary', '--separator', '--fill'] as const;
 
 const AXIS = { axisLine: false, tickLine: false } as const;
 
+/** Hauteur minimale (px) de la bande pour y écrire son libellé sans chevaucher la fin de la courbe du plan. */
+const BAND_LABEL_MIN_HEIGHT = 30;
+
+interface LabelViewBox {
+  viewBox?: { x?: number; y?: number; width?: number; height?: number };
+}
+
 export interface ForecastChartProps {
   series: PrevisionPoint[];
   /** Semaine de l'arrêté des données (repère « Aujourd'hui »). */
   asOfWeek: string;
-  /** Budget total : ligne horizontale. */
+  /** Budget = charge max (Σ PPS + provisions) : ligne horizontale. */
   budget: number;
+  /** Σ PPS du plan : bas de la bande « Provisions restantes » (bande absente si pps ≥ budget ou non fourni). */
+  pps?: number;
   height?: number;
   /** Légende HTML sous le graphique (défaut true). */
   legend?: boolean;
 }
 
-/** Courbes cumulées en € : budget (aire pâle), réalisé (plein), plan, tendance (pointillé). */
-export function ForecastChart({ series, asOfWeek, budget, height = 260, legend = true }: ForecastChartProps) {
+/**
+ * Courbes cumulées en € : plan de charge cumulé (aire pâle), réalisé (plein), atterrissage plan, tendance (pointillé),
+ * budget max (ligne pointillée) et provisions restantes (bande entre le total du plan et le budget max).
+ */
+export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, legend = true }: ForecastChartProps) {
   const c = useTokenColors(FORECAST_TOKENS);
   const hatch = useTokenColors(HATCH_TOKENS);
   const patternId = usePatternId();
@@ -250,6 +269,13 @@ export function ForecastChart({ series, asOfWeek, budget, height = 260, legend =
   const hasToday = series.some((p) => p.week === asOfWeek);
   const runs = uncoveredRuns(series, 'point');
   const hasUncovered = series.some((p) => p.couverture === 'aucune');
+  // Bande des provisions : seulement si elle a une épaisseur (évite une bande d'arrondi).
+  const band = pps != null && budget - pps > 0.5 ? { y1: Math.max(0, pps), y2: budget } : null;
+  const legendSeries = [
+    ...FORECAST_SERIES,
+    ...(band ? [BUDGET_MAX_SERIES, PROVISION_SERIES] : []),
+    ...(hasUncovered ? [UNCOVERED_SERIES] : []),
+  ];
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
@@ -257,6 +283,30 @@ export function ForecastChart({ series, asOfWeek, budget, height = 260, legend =
           {hatchDefs(patternId, hatch['--gray'])}
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           {uncoveredAreas(runs, patternId)}
+          {band && (
+            <ReferenceArea
+              y1={band.y1}
+              y2={band.y2}
+              ifOverflow="extendDomain"
+              // Token appliqué en style CSS (color-mix + thème) plutôt qu'en attribut SVG.
+              shape={(p: RectProps) => <rect x={p.x} y={p.y} width={p.width} height={p.height} style={{ fill: 'var(--series-provision)' }} />}
+              label={(p: LabelViewBox) => {
+                const vb = p.viewBox ?? {};
+                if ((vb.height ?? 0) < BAND_LABEL_MIN_HEIGHT || (vb.width ?? 0) < 160) return <g />;
+                return (
+                  <text
+                    x={(vb.x ?? 0) + (vb.width ?? 0) - 6}
+                    y={(vb.y ?? 0) + 15}
+                    textAnchor="end"
+                    fill={c['--text-secondary']}
+                    fontSize={11}
+                  >
+                    {PROVISION_SERIES.label}
+                  </text>
+                );
+              }}
+            />
+          )}
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
           <YAxis {...AXIS} width={56} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
           <RTooltip
@@ -287,9 +337,15 @@ export function ForecastChart({ series, asOfWeek, budget, height = 260, legend =
             <ReferenceLine
               y={budget}
               ifOverflow="extendDomain"
-              stroke={c['--text-tertiary']}
-              strokeDasharray="2 4"
-              label={{ value: `Budget ${fmtEurShort(budget)}`, position: 'insideBottomLeft', fill: c['--text-secondary'], fontSize: 11 }}
+              stroke={band ? c['--text-secondary'] : c['--text-tertiary']}
+              strokeDasharray={band ? '2 3' : '2 4'}
+              strokeWidth={band ? 1.5 : 1}
+              label={{
+                value: `${band ? 'Budget max' : 'Budget'} ${fmtEurShort(budget)}`,
+                position: 'insideBottomLeft',
+                fill: c['--text-secondary'],
+                fontSize: 11,
+              }}
             />
           )}
           {hasToday && (
@@ -305,7 +361,7 @@ export function ForecastChart({ series, asOfWeek, budget, height = 260, legend =
           <Line dataKey="reel_cumul" type="monotone" stroke={c['--blue']} strokeWidth={2} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
-      {legend && <ChartLegend series={hasUncovered ? [...FORECAST_SERIES, UNCOVERED_SERIES] : FORECAST_SERIES} />}
+      {legend && <ChartLegend series={legendSeries} />}
     </div>
   );
 }

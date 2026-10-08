@@ -28,8 +28,8 @@ import type { AnalyseResult, PrevisionStatut, Previsions } from '../../../api/ty
 import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse, type UseAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag } from '../shared/ContextControl';
-import { cmp, forecastOf, rowReason, rowTone, STATUT_LABEL, useSort } from '../shared/pilotage';
+import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote } from '../shared/ContextControl';
+import { cmp, fmtEurShort, forecastOf, rowReason, rowTone, STATUT_LABEL, useSort } from '../shared/pilotage';
 import { Consumption, CtLabel, RowGlyph, Signed } from './cells';
 import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type CtRow } from './model';
@@ -62,14 +62,25 @@ function download(href: string) {
 
 function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] }) {
   const fc = forecastOf(result);
+  // Budget = Σ charge max = plan de charge (Σ PPS) + provisions restantes (DECISIONS n° 16).
   const total = fc?.global.budget ?? sumOf(rows, 'budget') ?? 0;
+  const pps = fc?.global.pps ?? sumOf(rows, 'pps') ?? 0;
+  const provisions = fc?.global.provisions ?? sumOf(rows, 'provisions') ?? 0;
   const consomme = fc?.global.consomme ?? null;
   const pct = consomme != null && total ? (consomme / total) * 100 : null;
   const g = result.budget.global;
   const alert = result.alertes.alerte_globale;
   return (
     <div className="pil-metrics">
-      <Metric label="Budget total" value={fmtEur(total)} sub={`${rows.length} CT · Σ PPS du plan`} />
+      <Metric
+        label="Budget total"
+        value={fmtEur(total)}
+        sub={
+          provisions > 0
+            ? `PDC ${fmtEurShort(pps)} + provisions ${fmtEurShort(provisions)}`
+            : `${rows.length} CT · plan de charge seul`
+        }
+      />
       <Metric
         label="Consommé"
         value={fmtEur(consomme)}
@@ -120,7 +131,7 @@ function BudgetTable({
         <tr>
           <th data-glyph aria-label="Statut" />
           {th('ct', 'CT', false)}
-          {th('budget', 'Budget')}
+          {th('budget', 'Charge max')}
           {th('consomme', 'Consommé')}
           {th('pct', 'Consommation')}
           {th('atterrissage', 'Atterrissage')}
@@ -251,7 +262,9 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       <InspectorSection title="Budget">
         <KeyValue
           items={[
-            { label: 'Budget', value: fmtEur(row.budget), numeric: true },
+            { label: 'Plan de charge (PPS)', value: fmtEur(row.pps), numeric: true },
+            { label: 'Provisions', value: fmtEur(row.provisions), numeric: true },
+            { label: 'Charge max', value: fmtEur(row.budget), numeric: true },
             { label: 'Consommé', value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—', numeric: true },
             { label: 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
             { label: 'Atterrissage plan', value: p ? fmtEur(p.atterrissage_plan) : '—', numeric: true },
@@ -263,7 +276,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       </InspectorSection>
       {p && fc && p.series.length > 0 && (
         <InspectorSection title="Trajectoire">
-          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} height={160} />
+          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} pps={p.pps} height={160} />
         </InspectorSection>
       )}
       <Classification row={row} />
@@ -376,6 +389,7 @@ export default function BudgetPage() {
         {(result) => (
           <>
             <BudgetMetrics result={result} rows={rows} />
+            <NoProvisionNote result={result} />
             {result.budget.par_nature?.length > 0 && <NatureBars rows={result.budget.par_nature} />}
             <BudgetTable rows={filtered} selected={ctParam} onOpen={(ct) => setCt(ct === ctParam ? null : ct)} />
           </>

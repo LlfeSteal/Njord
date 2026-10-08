@@ -1,11 +1,17 @@
 // Ligne CT du pilotage budgétaire : fusion de la synthèse budget (classification, MO, risque)
 // et des prévisions (consommé, atterrissage, statut), par code CT. Partagé avec /previsions.
+// Budget d'un CT = charge max = Σ PPS du plan + provisions restantes (DECISIONS n° 16).
 import type { AnalyseResult, BudgetCT, PrevisionCT, PrevisionStatut } from '../../../api/types';
 import { forecastOf } from '../shared/pilotage';
 
 export interface CtRow {
   ct: string;
   libelle: string;
+  /** Σ PPS du plan de charge (segments de la timeline). */
+  pps: number;
+  /** Provisions restantes du CT. */
+  provisions: number;
+  /** Charge max = pps + provisions : référence du % consommé et de l'écart. */
   budget: number;
   consomme: number | null;
   /** % du budget consommé (0..100+). */
@@ -26,7 +32,9 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
     byCt.set(b.ct, {
       ct: b.ct,
       libelle: b.ct_libelle,
-      budget: b.pps_plan,
+      pps: b.pps_plan,
+      provisions: b.provisions ?? 0,
+      budget: b.charge_max ?? b.pps_plan + (b.provisions ?? 0),
       consomme: null,
       pct: null,
       atterrissage: null,
@@ -41,6 +49,8 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
     const row = byCt.get(p.ct) ?? {
       ct: p.ct,
       libelle: p.ct_libelle,
+      pps: p.pps ?? 0,
+      provisions: p.provisions ?? 0,
       budget: p.budget,
       consomme: null,
       pct: null,
@@ -53,6 +63,8 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
     byCt.set(p.ct, {
       ...row,
       libelle: row.libelle || p.ct_libelle,
+      pps: p.pps ?? row.pps,
+      provisions: p.provisions ?? row.provisions,
       budget: p.budget,
       consomme: p.consomme,
       pct: p.pct_consomme ?? (p.budget ? (p.consomme / p.budget) * 100 : null),
@@ -67,7 +79,7 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
 }
 
 /** Somme d'un champ numérique, null si aucune valeur. */
-export function sumOf(rows: CtRow[], k: 'budget' | 'consomme' | 'atterrissage' | 'tendance' | 'ecart'): number | null {
+export function sumOf(rows: CtRow[], k: 'pps' | 'provisions' | 'budget' | 'consomme' | 'atterrissage' | 'tendance' | 'ecart'): number | null {
   let n = 0;
   let any = false;
   for (const r of rows) {

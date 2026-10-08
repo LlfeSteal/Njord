@@ -14,8 +14,8 @@ const fmtShort = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { da
 export interface VersionSwitcherProps {
   kind: Kind;
   current: Version;
-  /** Racine du module (« /plan », « /realise ») : la version courante s'y affiche (useCurrentVersion). */
-  basePath: '/plan' | '/realise';
+  /** Racine du module (« /plan », « /realise », « /provisions ») : la version courante s'y affiche (useCurrentVersion). */
+  basePath: '/plan' | '/realise' | '/provisions';
   onImport: () => void;
 }
 
@@ -26,7 +26,8 @@ export default function VersionSwitcher({ kind, current, basePath, onImport }: V
   const list = history.data ?? [];
 
   // Plan : la racine affiche la dernière version de la timeline, pas forcément l'active → toujours l'id.
-  const atRoot = (v: Version) => kind === 'realise' && v.statut === 'active';
+  // Réalisé, provisions : la racine affiche l'active.
+  const atRoot = (v: Version) => kind !== 'plan' && v.statut === 'active';
   const go = (v: Version) => navigate({ pathname: atRoot(v) ? basePath : `${basePath}/${v.id}`, search });
 
   const items: MenuEntry[] = [

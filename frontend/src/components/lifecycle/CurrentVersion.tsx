@@ -1,6 +1,6 @@
-// Point d'entrée d'un module de données (/plan, /realise) : affiche la version courante
+// Point d'entrée d'un module de données (/plan, /realise, /provisions) : affiche la version courante
 // (useCurrentVersion : dernière version de la timeline pour le plan, active sinon la plus
-// récente pour le réalisé) ; sans aucune version, propose l'import.
+// récente pour le réalisé et les provisions) ; sans aucune version, propose l'import.
 import { useState, type ReactNode } from 'react';
 import { Button, Card, EmptyState, LoadingBlock, Page, PageToolbar } from '../../ui';
 import { IconImport } from '../../ui/Icons';

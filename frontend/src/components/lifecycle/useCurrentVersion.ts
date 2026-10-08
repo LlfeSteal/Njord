@@ -1,4 +1,4 @@
-// Version « courante » d'un kind. Réalisé : l'active, sinon la plus récente non purgée.
+// Version « courante » d'un kind. Réalisé, provisions : l'active, sinon la plus récente non purgée.
 // Plan : la dernière version de la timeline (date d'effet la plus récente, puis dernier import,
 // DECISIONS n° 13) — un plan rétroactif importé en dernier n'est pas le plan courant.
 // Même requête (et même clé) que le cycle de vie et le sélecteur de version.

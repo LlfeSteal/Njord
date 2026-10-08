@@ -1,4 +1,4 @@
-// Page « liste des versions » d'un kind (plan | realise) avec cycle de vie complet.
+// Page « liste des versions » d'un kind (plan | realise | provision) avec cycle de vie complet.
 // Auto-suffisante : charge versionsApi.list, action « Importer » (ImportWizard), menu ⋯ « afficher les
 // versions purgées », tri actives en tête / archivées grisées, actions en survol : consulter (onOpen),
 // archiver / réactiver, purger (PurgeModal). Clic sur une ligne = onOpen.

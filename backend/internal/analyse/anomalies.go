@@ -535,7 +535,45 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 				fpE(p.AtterrissageTendance)),
 		})
 	}
+	for _, p := range res.Previsions.ParCT {
+		if p.SousConsommation {
+			out = append(out, sousConsoAnomalie(p))
+		}
+	}
 	return out
+}
+
+// sousConsoAnomalie: budget de l'exercice qui ne sera pas consommé à l'échéance
+// (DECISIONS n° 17), en plus d'une éventuelle anomalie de dépassement / vigilance.
+func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
+	echeance := p.Echeance
+	if t, ok := ParseDate(p.Echeance); ok {
+		echeance = t.Format("02/01/2006")
+	}
+	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(p.NonConsomme) + " non consommés au " + echeance
+	if pc := pct(p.NonConsomme, p.BudgetEcheance); pc != nil {
+		titre += " (" + strconv.FormatFloat(math.Round(*pc), 'f', 0, 64) + "\u00a0%)"
+	}
+	budget := fmtEur(p.BudgetEcheance)
+	if p.ProvisionsEcheance != 0 {
+		budget += " (PDC " + fmtEur(p.PPSEcheance) + " + provisions " + fmtEur(p.ProvisionsEcheance) + ")"
+	}
+	detail := "Budget de l'exercice " + budget + " ; projection plan " + fmtEur(p.ProjectionPlanEcheance) +
+		", tendance " + fmtEur(p.ProjectionTendanceEcheance) + " ; il faudrait " +
+		fmtEur(p.RythmeNecessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
+	return domain.Anomalie{
+		Key:       anomalieKey("budget_sous_conso", p.CT),
+		Categorie: domain.AnomalieBudget,
+		Gravite:   2,
+		Titre:     titre,
+		Detail:    detail,
+		CT:        p.CT,
+		CTLibelle: p.CTLibelle,
+		Montant:   ptrF(p.NonConsomme),
+		Lien:      query("/previsions", "ct", p.CT),
+		Fingerprint: fingerprint(fpE(p.BudgetEcheance), fpE(p.ProjectionPlanEcheance),
+			fpE(p.ProjectionTendanceEcheance)),
+	}
 }
 
 // ---------------------------------------------------------------------------

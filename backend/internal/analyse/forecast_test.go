@@ -3,7 +3,9 @@ package analyse
 import (
 	"math"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"njord/internal/domain"
 	"njord/internal/plan"
@@ -150,6 +152,15 @@ func TestPrevisionsDemo(t *testing.T) {
 	t.Logf("as_of %s · budget %.2f · consommé %.2f · reste %.2f · atterrissage plan %.2f · tendance %.2f (rythme %.2f × %d) · statut %s · par statut %v · %d semaines (%s → %s)",
 		pv.AsOf, gl.Budget, gl.Consomme, gl.ResteAFaire, gl.AtterrissagePlan, gl.AtterrissageTendance, gl.RythmeHebdo,
 		gl.SemainesRestantes, gl.Statut, nb, len(gl.Series), gl.Series[0].Week, last.Week)
+	// Fin d'exercice (DECISIONS n° 17) : 31/12 de l'année de as_of, 13 semaines W41..W53.
+	if gl.Echeance != "2026-12-31" || gl.SemainesEcheance != 13 {
+		t.Errorf("échéance globale %q, %d semaines", gl.Echeance, gl.SemainesEcheance)
+	}
+	for _, p := range append(pv.ParCT, gl) {
+		checkEcheance(t, p, store.DefaultSettings())
+	}
+	t.Logf("échéance %s · budget exercice %.2f · projection plan %.2f · tendance %.2f · non consommé %.2f (%s) · sous-conso %v",
+		gl.Echeance, gl.BudgetEcheance, gl.ProjectionPlanEcheance, gl.ProjectionTendanceEcheance, gl.NonConsomme, gl.NonConsommeSource, gl.SousConsommation)
 	for _, p := range pv.ParCT {
 		t.Logf("  %s %-12s budget %10.2f conso %10.2f reste %10.2f plan %10.2f tend %10.2f fin %s", p.CT, p.Statut, p.Budget, p.Consomme, p.ResteAFaire, p.AtterrissagePlan, p.AtterrissageTendance, p.FinPlan)
 	}
@@ -385,6 +396,10 @@ func TestPrevisionsProvisions(t *testing.T) {
 	}
 	for _, c := range append(pv.ParCT, pv.Global) {
 		checkInvariants(t, c, pv.AsOf)
+		checkEcheance(t, c, s)
+		if c.ProvisionsEcheance != c.Provisions { // provisions datées du 30/12 : dans l'exercice
+			t.Errorf("%s : provisions de l'exercice %v ≠ %v", c.CT, c.ProvisionsEcheance, c.Provisions)
+		}
 		if !near(c.Budget, c.PPS+c.Provisions, 0.02) {
 			t.Errorf("%s : budget %v ≠ pps %v + provisions %v", c.CT, c.Budget, c.PPS, c.Provisions)
 		}
@@ -419,6 +434,185 @@ func TestPrevisionsProvisions(t *testing.T) {
 	for _, a := range res.Anomalies {
 		if a.Categorie == domain.AnomalieBudget && (a.CT == "D" || a.CT == "X" || a.CT == "P") {
 			t.Errorf("anomalie budget inattendue : %+v", a)
+		}
+	}
+}
+
+// checkEcheance verifies the end-of-fiscal-year figures (DECISIONS n° 17).
+func checkEcheance(t *testing.T, p domain.PrevisionCT, s domain.Settings) {
+	t.Helper()
+	if p.Echeance == "" || !near(p.BudgetEcheance, p.PPSEcheance+p.ProvisionsEcheance, 0.02) {
+		t.Errorf("%s : échéance %q, budget_echeance %v ≠ pps %v + provisions %v", p.CT, p.Echeance, p.BudgetEcheance, p.PPSEcheance, p.ProvisionsEcheance)
+	}
+	if !near(p.ProjectionTendanceEcheance, p.Consomme+p.RythmeHebdo*float64(p.SemainesEcheance), 0.02+0.005*float64(p.SemainesEcheance)) {
+		t.Errorf("%s : projection tendance %v incohérente", p.CT, p.ProjectionTendanceEcheance)
+	}
+	worst := math.Min(p.ProjectionPlanEcheance, p.ProjectionTendanceEcheance)
+	if !near(p.NonConsomme, math.Max(0, p.BudgetEcheance-worst), 0.03) {
+		t.Errorf("%s : non consommé %v ≠ %v − %v", p.CT, p.NonConsomme, p.BudgetEcheance, worst)
+	}
+	if (p.NonConsomme == 0) != (p.NonConsommeSource == "") {
+		t.Errorf("%s : source %q pour non consommé %v", p.CT, p.NonConsommeSource, p.NonConsomme)
+	}
+	if p.SousConsommation != (p.NonConsomme > s.SeuilSousConsoPct/100*p.BudgetEcheance+fcTolerance && p.NonConsomme > s.SeuilSousConsoEur+fcTolerance) {
+		t.Errorf("%s : sous-consommation %v incohérente (%v / %v)", p.CT, p.SousConsommation, p.NonConsomme, p.BudgetEcheance)
+	}
+}
+
+func TestPrevisionsEcheance(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	in := baseInput()
+	onePlan(&in,
+		// S : 10 000 € sur W37..W46 (1 000 €/sem.), 2 000 € en 2027 (exercice suivant), 500 € hors série.
+		fcLine("S", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS"),
+		fcLine("S", 0, 2000, "2027-01-11", "2027-01-22", "FRAIS"),
+		fcLine("S", 0, 500, "", "", "FRAIS"),
+		// T : 10 000 € sur W41..W50, consommation récente faible → tendance la plus basse.
+		fcLine("T", 0, 10000, "2026-10-05", "2026-12-11", "FRAIS"),
+	)
+	in.Entries = []domain.RealiseEntry{
+		fcEntry("S", 500, "2026-09-08"), fcEntry("S", 500, "2026-09-15"),
+		fcEntry("S", 500, "2026-09-22"), fcEntry("S", 500, "2026-09-29"),
+		fcEntry("T", 400, "2026-10-02"), // as_of W40
+	}
+	in.ProvisionVersion = &domain.Version{ID: "prov1", Kind: domain.KindProvision, Statut: domain.StatutActive}
+	p1 := provLine("S", "CAPACITE SUR SITE", "Proj > S", 3000)
+	p1.DateDebut = "2026-11-01"
+	p2 := provLine("S", "CAPACITE SUR SITE", "Proj > S", 4000)
+	p2.DateDebut = "2027-01-15" // exercice suivant : hors budget de l'exercice, dans le budget
+	p3 := provLine("S", "PROVISIONS POUR ALEAS", "Proj > S", 1000)
+	p3.DateDebut = "" // sans date : dans l'exercice
+	in.Provisions = []domain.ProvisionLine{p1, p2, p3}
+	res := Run(in, s)
+	pv := res.Previsions
+	if pv.AsOf != "2026-10-02" {
+		t.Fatalf("as_of = %q", pv.AsOf)
+	}
+
+	// S : échéance 31/12/2026 (W53) → 13 semaines W41..W53.
+	sc := findCT(t, pv, "S")
+	if sc.Budget != 20500 || sc.PPS != 12500 || sc.Provisions != 8000 || sc.AtterrissagePlan != 10000 || sc.Statut != domain.PrevisionOK {
+		t.Errorf("S (chiffres n° 16 modifiés) = %+v", sc)
+	}
+	if sc.Echeance != "2026-12-31" || sc.PPSEcheance != 10500 || sc.ProvisionsEcheance != 4000 || sc.BudgetEcheance != 14500 ||
+		sc.SemainesEcheance != 13 || sc.ProjectionPlanEcheance != 8000 || sc.ProjectionTendanceEcheance != 8500 ||
+		sc.NonConsomme != 6500 || sc.NonConsommeSource != "plan" || sc.RythmeNecessaire != 961.54 || !sc.SousConsommation {
+		t.Errorf("S échéance = %+v", sc)
+	}
+	// T : tendance 400 + 100 × 13 = 1 700 < plan 10 400 → non consommé 8 300 (tendance).
+	tc := findCT(t, pv, "T")
+	if tc.Statut != domain.PrevisionDepassement || tc.BudgetEcheance != 10000 || tc.ProjectionPlanEcheance != 10400 ||
+		tc.ProjectionTendanceEcheance != 1700 || tc.NonConsomme != 8300 || tc.NonConsommeSource != "tendance" ||
+		tc.RythmeNecessaire != 738.46 || !tc.SousConsommation {
+		t.Errorf("T échéance = %+v", tc)
+	}
+	// Global = enveloppe commune : 24 500 − min(18 400, 10 200) = 14 300 (≠ Σ CT = 14 800).
+	gl := pv.Global
+	if gl.Echeance != "2026-12-31" || gl.BudgetEcheance != 24500 || gl.ProvisionsEcheance != 4000 || gl.SemainesEcheance != 13 ||
+		gl.ProjectionPlanEcheance != 18400 || gl.ProjectionTendanceEcheance != 10200 || gl.NonConsomme != 14300 ||
+		gl.NonConsommeSource != "tendance" || !gl.SousConsommation {
+		t.Errorf("global échéance = %+v", gl)
+	}
+	for _, p := range append(pv.ParCT, gl) {
+		checkEcheance(t, p, s)
+		checkInvariants(t, p, pv.AsOf)
+	}
+
+	// Anomalies : sous-consommation en plus du dépassement de T.
+	byKey := map[string]domain.Anomalie{}
+	for _, a := range res.Anomalies {
+		byKey[a.Key] = a
+	}
+	checkAnomalies(t, res.Anomalies)
+	if _, ok := byKey["budget|T"]; !ok {
+		t.Error("anomalie de dépassement de T absente")
+	}
+	a, ok := byKey["budget_sous_conso|S"]
+	nb := func(s string) string { return strings.ReplaceAll(s, " ", " ") }
+	if !ok || a.Categorie != domain.AnomalieBudget || a.Gravite != 2 || a.Montant == nil || *a.Montant != 6500 ||
+		a.Lien != "/previsions?ct=S" || a.CT != "S" ||
+		nb(a.Titre) != "Sous-consommation · S : 6 500 € non consommés au 31/12/2026 (45 %)" ||
+		nb(a.Detail) != "Budget de l'exercice 14 500 € (PDC 10 500 € + provisions 4 000 €) ; projection plan 8 000 €, tendance 8 500 € ; il faudrait 962 €/sem contre 500 €/sem" {
+		t.Errorf("anomalie S = %+v", a)
+	}
+	if a, ok := byKey["budget_sous_conso|T"]; !ok || strings.Contains(a.Detail, "provisions") ||
+		nb(a.Titre) != "Sous-consommation · T : 8 300 € non consommés au 31/12/2026 (83 %)" {
+		t.Errorf("anomalie T = %+v", a)
+	}
+	// L'empreinte suit budget de l'exercice et projections.
+	in.Entries = append(in.Entries, fcEntry("S", 100, "2026-09-30"))
+	for _, a2 := range Run(in, s).Anomalies {
+		if a2.Key == "budget_sous_conso|S" && a2.Fingerprint == byKey["budget_sous_conso|S"].Fingerprint {
+			t.Error("empreinte inchangée malgré des projections modifiées")
+		}
+	}
+}
+
+func TestPrevisionsEcheancePassee(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	s.FinExercice = "2026-09-20" // W38 < as_of W40
+	in := baseInput()
+	onePlan(&in, fcLine("S", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS"))
+	in.Entries = []domain.RealiseEntry{fcEntry("S", 500, "2026-09-08"), fcEntry("S", 1500, "2026-10-02")}
+	in.ProvisionVersion = &domain.Version{ID: "prov1", Kind: domain.KindProvision, Statut: domain.StatutActive}
+	in.Provisions = []domain.ProvisionLine{provLine("S", "CAPACITE SUR SITE", "Proj > S", 3000)} // datée 30/12 : après l'échéance
+	pv := Run(in, s).Previsions
+	p := findCT(t, pv, "S")
+	// Budget de l'exercice = W37..W38 = 2 000 € ; projections = consommé 2 000 €.
+	if p.Echeance != "2026-09-20" || p.SemainesEcheance != 0 || p.PPSEcheance != 2000 || p.ProvisionsEcheance != 0 ||
+		p.ProjectionPlanEcheance != 2000 || p.ProjectionTendanceEcheance != 2000 || p.RythmeNecessaire != 0 ||
+		p.NonConsomme != 0 || p.NonConsommeSource != "" || p.SousConsommation || p.Budget != 13000 {
+		t.Errorf("échéance passée = %+v", p)
+	}
+	checkEcheance(t, pv.Global, s)
+}
+
+func TestPrevisionsEcheanceDefaut(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	// Sans réalisé : année de Input.Now, semaines comptées depuis la 1re semaine de l'axe.
+	in := baseInput()
+	in.Now = time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	onePlan(&in, fcLine("S", 0, 4000, "2027-01-04", "2027-01-29", "FRAIS")) // W01..W04 2027
+	pv := Run(in, s).Previsions
+	p := findCT(t, pv, "S")
+	// 31/12/2027 = W52 : 52 semaines W01..W52 ; plan = 4 000 €, tendance 0 → non consommé 4 000 € (< 5 000 €).
+	if p.Echeance != "2027-12-31" || pv.Global.Echeance != "2027-12-31" || p.SemainesEcheance != 52 ||
+		p.ProjectionPlanEcheance != 4000 || p.ProjectionTendanceEcheance != 0 || p.NonConsomme != 4000 ||
+		p.NonConsommeSource != "tendance" || p.SousConsommation || p.RythmeNecessaire != 76.92 {
+		t.Errorf("sans réalisé = %+v", p)
+	}
+	// Avec réalisé : année de as_of (Now ignoré).
+	in.Entries = []domain.RealiseEntry{fcEntry("S", 1000, "2027-01-08")}
+	in.Now = time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	if e := Run(in, s).Previsions.Global.Echeance; e != "2027-12-31" {
+		t.Errorf("échéance avec réalisé = %q", e)
+	}
+}
+
+func TestFcEcheanceSeuils(t *testing.T) {
+	s := store.DefaultSettings() // 10 % et 5 000 €
+	cases := []struct {
+		name            string
+		budget, plan, t float64
+		nc              float64
+		source          string
+		sous            bool
+	}{
+		{"pct seul", 20000, 16000, 30000, 4000, "plan", false},      // 20 % mais 4 000 €
+		{"eur seul", 100000, 92000, 95000, 8000, "plan", false},     // 8 000 € mais 8 %
+		{"les deux", 50000, 60000, 42000, 8000, "tendance", true},   // 16 % et 8 000 €
+		{"égalité", 50000, 40000, 40000, 10000, "plan", true},       // plan retenu à égalité
+		{"au-delà", 10000, 12000, 11000, 0, "", false},              // projections au-delà du budget
+		{"tolérance", 50000, 45000.4, 46000, 4999.6, "plan", false}, // ≤ 5 000 € + tolérance
+	}
+	for _, c := range cases {
+		var p domain.PrevisionCT
+		fcEcheance(&p, fcCalc{ppsEch: c.budget, prevuEch: c.plan, rythme: c.t, se: 1, echeance: "2026-12-31"}, s)
+		if p.NonConsomme != c.nc || p.NonConsommeSource != c.source || p.SousConsommation != c.sous {
+			t.Errorf("%s : non consommé %v (%q), sous-conso %v", c.name, p.NonConsomme, p.NonConsommeSource, p.SousConsommation)
 		}
 	}
 }

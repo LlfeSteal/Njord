@@ -1,6 +1,7 @@
 package analyse
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -21,7 +22,18 @@ import (
 //
 // Les provisions ne sont qu'un budget disponible : ni reste à faire, ni
 // atterrissage, ni série (budget_cumul = dépense prévue cumulée du plan seul) ;
-// leurs dates sont ignorées.
+// leurs dates ne servent qu'au budget de l'exercice.
+//
+// Fin d'exercice (DECISIONS n° 17) : le budget non consommé à l'échéance E est
+// perdu. Semaine WE de E incluse :
+//   - budget de l'exercice = PPS prévu des semaines ≤ WE (+ PPS hors série,
+//     compté entier) + provisions datées ≤ E ou sans date lisible ;
+//   - projections à E : plan (consommé + prévu des semaines ]as_of, WE]) et
+//     tendance (consommé + rythme × semaines ]as_of, WE]) ;
+//   - non consommé = budget de l'exercice − la plus basse des deux, plancher 0 ;
+//   - sous-consommation si non consommé > seuil % du budget de l'exercice et
+//     > seuil € (indicateur séparé du statut).
+// Global = enveloppe commune : mêmes formules sur les sommes des CT.
 
 // fcTolerance absorbe les arrondis dans la comparaison atterrissage / budget.
 const fcTolerance = 0.5
@@ -29,6 +41,8 @@ const fcTolerance = 0.5
 // fcBucket accumulates the raw (unrounded) figures of one CT.
 type fcBucket struct {
 	pps, provisions float64
+	ppsHorsSerie    float64 // PPS dans le budget mais hors série hebdo (spreadPPS nil)
+	provEcheance    float64 // provisions datées ≤ échéance ou sans date lisible
 	consomme        float64
 	undated         float64 // € d'écritures sans date de dépense valide (comptés au consommé)
 	prevu           map[string]float64
@@ -48,7 +62,11 @@ type fcCalc struct {
 	consomme, reste, atterPlan, atterTend, rythme float64
 	sr                                            int
 	fin                                           string
-	budgetCum, reelCum, planCum, tendCum, hp, hr  []float64
+	// Fin d'exercice (bruts, non arrondis).
+	ppsEch, provEch, prevuEch                    float64 // prevuEch = prévu des semaines ]as_of, WE]
+	se                                           int     // semaines ]as_of, WE]
+	echeance                                     string
+	budgetCum, reelCum, planCum, tendCum, hp, hr []float64
 }
 
 // previsions computes the landing forecast (SPEC_analyse §7.7).
@@ -89,7 +107,11 @@ func (r *run) previsions() domain.Previsions {
 				b.fin = d
 			}
 		}
-		for w, v := range r.spreadPPS(l) {
+		spread := r.spreadPPS(l)
+		if spread == nil {
+			b.ppsHorsSerie += l.PPS
+		}
+		for w, v := range spread {
 			b.prevu[w] += v
 			extend(w)
 		}
@@ -100,11 +122,6 @@ func (r *run) previsions() domain.Previsions {
 				}
 			}
 		}
-	}
-
-	// Provisions : budget disponible du CT, sans date ni série.
-	for i := range r.provs {
-		get(strings.TrimSpace(r.provs[i].CT)).provisions += r.provs[i].Montant
 	}
 
 	// Réalisé : consommé brut, heures MO, as_of.
@@ -126,6 +143,19 @@ func (r *run) previsions() domain.Previsions {
 		extend(w)
 	}
 	asOfWeek := WeekOfDate(asOf)
+	echeance := r.echeance(asOf)
+	echWeek := WeekOfDate(echeance)
+
+	// Provisions : budget disponible du CT, sans série ; celles datées après
+	// l'échéance relèvent de l'exercice suivant (hors budget de l'exercice).
+	for i := range r.provs {
+		pv := &r.provs[i]
+		b := get(strings.TrimSpace(pv.CT))
+		b.provisions += pv.Montant
+		if _, ok := ParseDate(pv.DateDebut); !ok || pv.DateDebut[:10] <= echeance {
+			b.provEcheance += pv.Montant
+		}
+	}
 
 	var axis []string
 	var cov []domain.Couverture
@@ -157,9 +187,25 @@ func (r *run) previsions() domain.Previsions {
 	n := len(axis)
 	g := fcCalc{budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n)}
+	g.echeance = echeance
+	se := fcRemaining(axis, asOfWeek, echeance)
+	g.se = se
 	out := domain.Previsions{AsOf: asOf, AsOfWeek: asOfWeek, ParCT: []domain.PrevisionCT{}}
 	for _, ct := range cts {
 		c := r.fcCompute(buckets[ct], axis, asIdx, asOfWeek, last4)
+		c.echeance, c.se = echeance, se
+		c.ppsEch, c.provEch = buckets[ct].ppsHorsSerie, buckets[ct].provEcheance
+		for w, v := range buckets[ct].prevu {
+			if w <= echWeek {
+				c.ppsEch += v
+				if asOfWeek == "" || w > asOfWeek {
+					c.prevuEch += v
+				}
+			}
+		}
+		g.ppsEch += c.ppsEch
+		g.provEch += c.provEch
+		g.prevuEch += c.prevuEch
 		g.pps += c.pps
 		g.provisions += c.provisions
 		g.budget += c.budget
@@ -182,10 +228,10 @@ func (r *run) previsions() domain.Previsions {
 		if ct == "" {
 			continue // lignes sans CT / écritures sans TG : comptées dans le global seulement
 		}
-		out.ParCT = append(out.ParCT, fcBuild(ct, r.ctLibelle[ct], c, axis, cov, asIdx))
+		out.ParCT = append(out.ParCT, r.fcBuild(ct, r.ctLibelle[ct], c, axis, cov, asIdx))
 	}
 	g.sr = fcRemaining(axis, asOfWeek, g.fin)
-	out.Global = fcBuild("", "Périmètre", g, axis, cov, asIdx)
+	out.Global = r.fcBuild("", "Périmètre", g, axis, cov, asIdx)
 
 	rank := map[domain.PrevisionStatut]int{domain.PrevisionDepassement: 0, domain.PrevisionVigilance: 1, domain.PrevisionOK: 2}
 	sort.SliceStable(out.ParCT, func(i, j int) bool {
@@ -199,6 +245,21 @@ func (r *run) previsions() domain.Previsions {
 		return a.CT < b.CT
 	})
 	return out
+}
+
+// echeance returns the end of the fiscal year (YYYY-MM-DD): settings.fin_exercice,
+// à défaut le 31/12 de l'année de as_of (sans réalisé : de l'année de Input.Now).
+func (r *run) echeance(asOf string) string {
+	if t, ok := ParseDate(r.s.FinExercice); ok {
+		return t.Format(time.DateOnly)
+	}
+	year := r.in.Now.Year()
+	if t, ok := ParseDate(asOf); ok {
+		year = t.Year()
+	} else if r.in.Now.IsZero() {
+		year = time.Now().Year()
+	}
+	return time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
 }
 
 // spreadPPS returns the planned spend of a line per ISO week:
@@ -306,6 +367,7 @@ func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, 
 
 // fcRemaining counts the weeks after asOfWeek up to the week of fin (0 if fin
 // is past or unknown). Without réalisé, every week of the axis up to fin counts.
+// Sert aussi aux semaines restantes jusqu'à l'échéance (fin = fin d'exercice).
 func fcRemaining(axis []string, asOfWeek, fin string) int {
 	finWeek := WeekOfDate(fin)
 	if finWeek == "" {
@@ -344,8 +406,39 @@ func fcPtr(v float64) *float64 {
 	return &v
 }
 
+// fcEcheance fills the end-of-fiscal-year figures (DECISIONS n° 17) from the raw
+// pieces : non consommé face à la pire des deux projections, seuils % et €.
+func fcEcheance(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
+	budget := c.ppsEch + c.provEch
+	projPlan := c.consomme + c.prevuEch
+	projTend := c.consomme + c.rythme*float64(c.se)
+	worst, source := projPlan, "plan"
+	if round2(projTend) < round2(projPlan) {
+		worst, source = projTend, "tendance"
+	}
+	nc := math.Max(0, budget-worst)
+	if round2(nc) == 0 {
+		nc, source = 0, ""
+	}
+	necessaire := 0.0
+	if c.se > 0 {
+		necessaire = math.Max(0, (budget-c.consomme)/float64(c.se))
+	}
+	p.Echeance = c.echeance
+	p.BudgetEcheance = round2(budget)
+	p.PPSEcheance = round2(c.ppsEch)
+	p.ProvisionsEcheance = round2(c.provEch)
+	p.ProjectionPlanEcheance = round2(projPlan)
+	p.ProjectionTendanceEcheance = round2(projTend)
+	p.NonConsomme = round2(nc)
+	p.NonConsommeSource = source
+	p.RythmeNecessaire = round2(necessaire)
+	p.SemainesEcheance = c.se
+	p.SousConsommation = nc > s.SeuilSousConsoPct/100*budget+fcTolerance && nc > s.SeuilSousConsoEur+fcTolerance
+}
+
 // fcBuild rounds the figures and builds the weekly points.
-func fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couverture, asIdx int) domain.PrevisionCT {
+func (r *run) fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couverture, asIdx int) domain.PrevisionCT {
 	p := domain.PrevisionCT{
 		CT:                   ct,
 		CTLibelle:            libelle,
@@ -365,6 +458,7 @@ func fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couvertur
 		Statut:               fcStatut(c),
 		Series:               make([]domain.PrevisionPoint, 0, len(axis)),
 	}
+	fcEcheance(&p, c, r.s)
 	for i, w := range axis {
 		pt := domain.PrevisionPoint{Week: w, BudgetCumul: round2(c.budgetCum[i]), HeuresPlan: round2(c.hp[i]), Couverture: cov[i]}
 		if m, err := WeekMonday(w); err == nil {

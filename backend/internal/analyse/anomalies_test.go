@@ -42,7 +42,10 @@ func checkAnomalies(t *testing.T, as []domain.Anomalie) {
 			t.Errorf("clé en double : %s", a.Key)
 		}
 		keys[a.Key] = true
-		if strings.Contains(a.Key, "/") || !strings.HasPrefix(a.Key, string(a.Categorie)+"|") {
+		// Préfixe = catégorie, éventuellement suffixée (budget_sous_conso|CT).
+		head, _, _ := strings.Cut(a.Key, "|")
+		if strings.Contains(a.Key, "/") || !strings.Contains(a.Key, "|") ||
+			(head != string(a.Categorie) && !strings.HasPrefix(head, string(a.Categorie)+"_")) {
 			t.Errorf("clé invalide : %s", a.Key)
 		}
 		if len(a.Fingerprint) != 12 || a.Titre == "" || a.Lien == "" || a.Gravite < 1 || a.Gravite > 3 {
@@ -104,6 +107,22 @@ func TestAnomaliesDemo(t *testing.T) {
 	}
 	if byCat[domain.AnomalieEcart] == 0 {
 		t.Error("aucune anomalie écart")
+	}
+	// Fin d'exercice (DECISIONS n° 17) exposée par /analyse ; une anomalie par CT en sous-consommation.
+	if g := res.Previsions.Global; g.Echeance != "2026-12-31" || g.BudgetEcheance <= 0 || g.SemainesEcheance != 13 {
+		t.Errorf("fin d'exercice globale : %+v", g)
+	}
+	keys := map[string]bool{}
+	for _, a := range res.Anomalies {
+		keys[a.Key] = true
+	}
+	for _, p := range res.Previsions.ParCT {
+		if k := anomalieKey("budget_sous_conso", p.CT); keys[k] != p.SousConsommation {
+			t.Errorf("%s : anomalie %v, sous-consommation %v", k, keys[k], p.SousConsommation)
+		}
+	}
+	if !strings.Contains(w.Body.String(), `"non_consomme_source"`) || !strings.Contains(w.Body.String(), `"projection_tendance_echeance"`) {
+		t.Error("champs de fin d'exercice absents du JSON")
 	}
 	// Analyse budgétaire (DECISIONS n° 10) : 5 natures dont Σ = budget et consommé des prévisions.
 	if pn := res.Budget.ParNature; len(pn) != 5 || pn[0].Nature != "provision" || pn[0].PPS < 85000 {

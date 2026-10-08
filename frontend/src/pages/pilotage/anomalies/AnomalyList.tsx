@@ -3,13 +3,20 @@ import { useEffect, useId, useRef, type KeyboardEvent } from 'react';
 import { StatusGlyph } from '../../../ui';
 import type { Anomalie, AnomalieCategorie } from '../../../api/types';
 import { FlagGlyph } from '../../../components/badges';
+import { isSousConsoAnomalie, SOUS_CONSO_GLYPH, SOUS_CONSO_LABEL } from '../shared/pilotage';
 import { CATEGORIE_LABEL, GRAVITE_GLYPH, GRAVITE_LABEL, subline } from './meta';
 
-/** Glyphe d'une anomalie : flag pour un écart, sinon gravité. */
+/**
+ * Glyphe d'une anomalie : flag pour un écart, cercle « ! » pour une sous-consommation (risque de perte du budget,
+ * comme sur les lignes CT de Budget et Prévisions), sinon gravité.
+ */
 export function AnomalyGlyph({ a, size }: { a: Anomalie; size?: number }) {
   if (a.categorie === 'ecart' && a.flag) return <FlagGlyph flag={a.flag} size={size} />;
+  const gravite = `Gravité ${GRAVITE_LABEL[a.gravite].toLowerCase()}`;
+  if (isSousConsoAnomalie(a))
+    return <StatusGlyph kind={SOUS_CONSO_GLYPH.kind} tone={SOUS_CONSO_GLYPH.tone} size={size} label={`${SOUS_CONSO_LABEL} · ${gravite.toLowerCase()}`} />;
   const g = GRAVITE_GLYPH[a.gravite];
-  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={`Gravité ${GRAVITE_LABEL[a.gravite].toLowerCase()}`} />;
+  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={gravite} />;
 }
 
 export interface AnomalyGroup {

@@ -29,13 +29,27 @@ import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse, type UseAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote } from '../shared/ContextControl';
-import { cmp, fmtEurShort, forecastOf, rowReason, rowTone, STATUT_LABEL, useSort } from '../shared/pilotage';
-import { Consumption, CtLabel, RowGlyph, Signed } from './cells';
+import EcheanceMetric from '../shared/EcheanceMetric';
+import {
+  cmp,
+  echeanceOf,
+  fmtDayMonth,
+  fmtEurShort,
+  forecastOf,
+  rowGlyph,
+  rowReason,
+  rowTone,
+  SOUS_CONSO_LABEL,
+  STATUT_LABEL,
+  useSort,
+  type Echeance,
+} from '../shared/pilotage';
+import { Consumption, CtLabel, Reste, RowGlyph } from './cells';
 import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type CtRow } from './model';
 import '../shared/pilotage.css';
 
-type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'ecart';
+type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'reste';
 type StatutFilter = 'all' | PrevisionStatut;
 
 const STATUT_OPTIONS: { value: StatutFilter; label: string }[] = [
@@ -70,6 +84,9 @@ function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] 
   const pct = consomme != null && total ? (consomme / total) * 100 : null;
   const g = result.budget.global;
   const alert = result.alertes.alerte_globale;
+  const e = echeanceOf(fc?.global);
+  // Part sécurisée (ancienne carte) : portée par la sous-ligne du consommé, glyphe d'alerte compris.
+  const secured = `dont ${fmtPct(g.pct_securite)} sécurisé${alert ? ` (non sécurisé ${fmtPct(g.pct_non_securise)} : au-delà du seuil)` : ''}`;
   return (
     <div className="pil-metrics">
       <Metric
@@ -84,20 +101,22 @@ function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] 
       <Metric
         label="Consommé"
         value={fmtEur(consomme)}
-        sub={pct != null ? `${fmtPct(pct)} du budget` : 'Prévisions non disponibles'}
+        glyph={e && alert ? { kind: 'warning', tone: 'warning' } : undefined}
+        sub={[pct != null ? `${fmtPct(pct)} du budget` : 'Prévisions non disponibles', e ? secured : null].filter(Boolean).join(' · ')}
       >
         {pct != null && <ProgressBar value={pct} tone={pct > 100 ? 'danger' : 'accent'} label={`Budget consommé : ${fmtPct(pct)}`} />}
       </Metric>
-      <Metric
-        label="Part sécurisée"
-        value={fmtPct(g.pct_securite)}
-        glyph={alert ? { kind: 'warning', tone: 'warning' } : undefined}
-        sub={
-          alert
-            ? `Non sécurisé ${fmtPct(g.pct_non_securise)} : au-delà du seuil`
-            : `Non sécurisé ${fmtPct(g.pct_non_securise)}`
-        }
-      />
+      {e ? (
+        <EcheanceMetric e={e} variant="budget" />
+      ) : (
+        // Backend sans fin d'exercice : ancienne carte.
+        <Metric
+          label="Part sécurisée"
+          value={fmtPct(g.pct_securite)}
+          glyph={alert ? { kind: 'warning', tone: 'warning' } : undefined}
+          sub={alert ? `Non sécurisé ${fmtPct(g.pct_non_securise)} : au-delà du seuil` : `Non sécurisé ${fmtPct(g.pct_non_securise)}`}
+        />
+      )}
     </div>
   );
 }
@@ -108,12 +127,15 @@ function BudgetTable({
   rows,
   selected,
   onOpen,
+  global,
 }: {
   rows: CtRow[];
   selected: string | null;
   onOpen: (ct: string) => void;
+  /** Fin d'exercice du périmètre (enveloppe commune) : total de la colonne quand aucun CT n'est masqué. */
+  global: { e: Echeance; complete: boolean } | null;
 }) {
-  const { sort, toggle } = useSort<SortKey>({ key: 'ecart', dir: 'desc' });
+  const { sort, toggle } = useSort<SortKey>({ key: 'reste', dir: 'desc' });
   const sorted = useMemo(
     () => [...rows].sort((a, b) => (sort.dir === 'asc' ? 1 : -1) * cmp(a[sort.key], b[sort.key]) || cmp(a.ct, b.ct)),
     [rows, sort],
@@ -135,7 +157,7 @@ function BudgetTable({
           {th('consomme', 'Consommé')}
           {th('pct', 'Consommation')}
           {th('atterrissage', 'Atterrissage')}
-          {th('ecart', 'Écart')}
+          {th('reste', 'Reste à l’échéance')}
         </tr>
       </thead>
       <tbody>
@@ -150,7 +172,7 @@ function BudgetTable({
           <tr
             key={r.ct}
             data-clickable
-            data-tone={rowTone(r.statut, r.risque)}
+            data-tone={rowTone(r.statut, r.risque, r.sousConso)}
             data-selected={r.ct === selected || undefined}
             tabIndex={0}
             onClick={() => onOpen(r.ct)}
@@ -170,7 +192,7 @@ function BudgetTable({
             </td>
             <td data-align="right">{fmtEur(r.atterrissage)}</td>
             <td data-align="right">
-              <Signed value={r.ecart} />
+              <Reste value={r.reste} over={r.resteOver} warn={r.sousConso} />
             </td>
           </tr>
         ))}
@@ -186,8 +208,16 @@ function BudgetTable({
               <Consumption pct={tConso != null && tBudget ? (tConso / tBudget) * 100 : null} />
             </td>
             <td data-align="right">{fmtEur(sumOf(rows, 'atterrissage'))}</td>
-            <td data-align="right">
-              <Signed value={sumOf(rows, 'ecart')} />
+            <td data-align="right" title="Enveloppe commune du périmètre : les CT se compensent (DECISIONS n° 17)">
+              {global?.complete ? (
+                <Reste
+                  value={global.e.nonConsomme > 0.5 ? global.e.nonConsomme : global.e.depassement}
+                  over={global.e.nonConsomme <= 0.5 && global.e.depassement > 0.5}
+                  warn={global.e.sousConso}
+                />
+              ) : (
+                '—'
+              )}
             </td>
           </tr>
         </tfoot>
@@ -237,9 +267,60 @@ function Classification({ row }: { row: CtRow }) {
   );
 }
 
+/** Fin d'exercice d'un CT (DECISIONS n° 17) : budget de l'exercice, projections, budget perdu, rythme. */
+function EcheanceSection({ e }: { e: Echeance }) {
+  const unspent = e.nonConsomme > 0.5;
+  return (
+    <InspectorSection title={`Fin d’exercice · ${fmtDayMonth(e.date)}`}>
+      <KeyValue
+        items={[
+          {
+            label: 'Budget de l’exercice',
+            value: `${fmtEur(e.budget)}`,
+            numeric: true,
+          },
+          { label: 'dont PDC · provisions', value: `${fmtEurShort(e.pps)} · ${fmtEurShort(e.provisions)}`, numeric: true },
+          { label: e.source === 'plan' && unspent ? 'Projection plan (retenue)' : 'Projection plan', value: fmtEur(e.projPlan), numeric: true },
+          {
+            label: e.source === 'tendance' && unspent ? 'Projection tendance (retenue)' : 'Projection tendance',
+            value: fmtEur(e.projTendance),
+            numeric: true,
+          },
+          e.depassement > 0.5
+            ? {
+                label: 'Dépassement prévu',
+                value: (
+                  <span className="pil-signed" data-tone="danger">
+                    +{fmtEur(e.depassement)}
+                  </span>
+                ),
+                numeric: true,
+              }
+            : {
+                label: 'Non consommé',
+                value: (
+                  <span className="pil-signed" data-tone={e.sousConso ? 'warning' : undefined}>
+                    {fmtEur(e.nonConsomme)}
+                    {e.budget > 0 && unspent ? ` · ${fmtPct(Math.round((e.nonConsomme / e.budget) * 100))}` : ''}
+                  </span>
+                ),
+                numeric: true,
+              },
+          {
+            label: 'Rythme nécessaire',
+            value: e.semaines > 0 ? `${fmtEur(e.rythmeNecessaire)} / sem.` : 'Échéance atteinte',
+            numeric: true,
+          },
+          { label: 'Rythme actuel', value: `${fmtEur(e.rythmeActuel)} / sem.`, numeric: true },
+        ]}
+      />
+    </InspectorSection>
+  );
+}
+
 function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; onClose: () => void }) {
   const p = row.p;
-  const tone = rowTone(row.statut, row.risque);
+  const glyph = rowGlyph(row.statut, row.risque, row.sousConso);
   const q = encodeURIComponent(row.ct);
   return (
     <Inspector
@@ -247,7 +328,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       onClose={onClose}
       title={row.ct}
       subtitle={row.libelle}
-      accessory={tone ? <StatusGlyph kind={tone} tone={tone} label={rowReason(row.statut, row.risque)} /> : undefined}
+      accessory={glyph ? <StatusGlyph kind={glyph.kind} tone={glyph.tone} label={rowReason(row.statut, row.risque, row.sousConso)} /> : undefined}
       footer={
         <Group gap={8} justify="end">
           <Button size="sm" to={`/ecarts?ct=${q}`}>
@@ -274,9 +355,10 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
           ]}
         />
       </InspectorSection>
+      {row.echeance && <EcheanceSection e={row.echeance} />}
       {p && fc && p.series.length > 0 && (
         <InspectorSection title="Trajectoire">
-          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} pps={p.pps} height={160} />
+          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} pps={p.pps} echeance={row.echeance} height={160} />
         </InspectorSection>
       )}
       <Classification row={row} />
@@ -317,6 +399,7 @@ export default function BudgetPage() {
   const [q, setQ] = useState('');
   const [statut, setStatut] = useState<StatutFilter>('all');
   const [risqueOnly, setRisqueOnly] = useState(false);
+  const [sousConsoOnly, setSousConsoOnly] = useState(false);
 
   const r = a.result.data;
   const rows = useMemo(() => (r ? mergeCtRows(r) : []), [r]);
@@ -327,9 +410,11 @@ export default function BudgetPage() {
       (x) =>
         (!nq || norm(x.ct).includes(nq) || norm(x.libelle).includes(nq)) &&
         (statut === 'all' || x.statut === statut) &&
-        (!risqueOnly || x.risque),
+        (!risqueOnly || x.risque) &&
+        (!sousConsoOnly || x.sousConso),
     );
-  }, [rows, q, statut, risqueOnly]);
+  }, [rows, q, statut, risqueOnly, sousConsoOnly]);
+  const globalE = echeanceOf(fc?.global);
   const selected = ctParam ? rows.find((x) => x.ct === ctParam) : undefined;
 
   const setCt = (ct: string | null) =>
@@ -346,10 +431,12 @@ export default function BudgetPage() {
   const active: ActiveFilter[] = [
     ...(statut !== 'all' ? [{ key: 'statut', label: `Prévision : ${STATUT_LABEL[statut]}`, onRemove: () => setStatut('all') }] : []),
     ...(risqueOnly ? [{ key: 'risque', label: 'CT à risque', onRemove: () => setRisqueOnly(false) }] : []),
+    ...(sousConsoOnly ? [{ key: 'sous_conso', label: SOUS_CONSO_LABEL, onRemove: () => setSousConsoOnly(false) }] : []),
   ];
   const resetFilters = () => {
     setStatut('all');
     setRisqueOnly(false);
+    setSousConsoOnly(false);
   };
 
   return (
@@ -377,6 +464,7 @@ export default function BudgetPage() {
                   onChange={(v) => setStatut((v as StatutFilter | null) ?? 'all')}
                 />
                 <Switch label="CT à risque seulement" checked={risqueOnly} onChange={setRisqueOnly} />
+                <Switch label="Sous-consommation seulement" checked={sousConsoOnly} onChange={setSousConsoOnly} />
               </FilterButton>
               <ActiveFilters items={active} onClearAll={active.length > 1 ? resetFilters : undefined} />
             </Group>
@@ -391,7 +479,12 @@ export default function BudgetPage() {
             <BudgetMetrics result={result} rows={rows} />
             <NoProvisionNote result={result} />
             {result.budget.par_nature?.length > 0 && <NatureBars rows={result.budget.par_nature} />}
-            <BudgetTable rows={filtered} selected={ctParam} onOpen={(ct) => setCt(ct === ctParam ? null : ct)} />
+            <BudgetTable
+              rows={filtered}
+              selected={ctParam}
+              onOpen={(ct) => setCt(ct === ctParam ? null : ct)}
+              global={globalE ? { e: globalE, complete: filtered.length === rows.length } : null}
+            />
           </>
         )}
       </AnalyseGate>

@@ -15,15 +15,15 @@ import {
 } from '../../../ui';
 import type { AnalyseResult, PrevisionCT, Previsions } from '../../../api/types';
 import { fmtDate, fmtEur, fmtHours } from '../../../lib/format';
-import { CtLabel, RowGlyph, Signed } from '../budget/cells';
+import { CtLabel, Reste, RowGlyph, Signed } from '../budget/cells';
 import { ForecastChart, LoadChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, UncoveredNote } from '../shared/ContextControl';
-import { cmp, fmtEurSigned, forecastOf, forecastSentence, rowTone, useSort } from '../shared/pilotage';
+import { cmp, echeanceOf, fmtEurSigned, forecastOf, forecastSentence, rowTone, useSort } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
 const ALL = '__all__';
-type SortKey = 'ct' | 'budget' | 'atterrissage_plan' | 'atterrissage_tendance' | 'ecart_plan';
+type SortKey = 'ct' | 'budget' | 'atterrissage_plan' | 'atterrissage_tendance' | 'ecart_plan' | 'non_consomme';
 
 function ScopeMetrics({ p }: { p: PrevisionCT }) {
   const over = p.statut === 'depassement';
@@ -61,7 +61,13 @@ function ChartCard({ title, sub, children }: { title: string; sub: string; child
 function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: string | null; onPick: (ct: string) => void }) {
   const { sort, toggle } = useSort<SortKey>({ key: 'ecart_plan', dir: 'desc' });
   const rows = useMemo(
-    () => [...list].sort((a, b) => (sort.dir === 'asc' ? 1 : -1) * cmp(a[sort.key], b[sort.key]) || cmp(a.ct, b.ct)),
+    // Lecture défensive : `non_consomme` absent d'un backend antérieur.
+    () =>
+      [...list].sort(
+        (a, b) =>
+          (sort.dir === 'asc' ? 1 : -1) *
+            (sort.key === 'non_consomme' ? cmp(a.non_consomme ?? 0, b.non_consomme ?? 0) : cmp(a[sort.key], b[sort.key])) || cmp(a.ct, b.ct),
+      ),
     [list, sort],
   );
   const th = (k: SortKey, label: string, right = true) => (
@@ -70,7 +76,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
     </SortHeader>
   );
   return (
-    <Table hover minWidth={720} caption="Prévisions par CT">
+    <Table hover minWidth={820} caption="Prévisions par CT">
       <thead>
         <tr>
           <th data-glyph aria-label="Statut" />
@@ -79,6 +85,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
           {th('atterrissage_plan', 'Atterrissage plan')}
           {th('atterrissage_tendance', 'Tendance')}
           {th('ecart_plan', 'Écart')}
+          {th('non_consomme', 'Non consommé')}
         </tr>
       </thead>
       <tbody>
@@ -86,7 +93,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
           <tr
             key={p.ct}
             data-clickable
-            data-tone={rowTone(p.statut)}
+            data-tone={rowTone(p.statut, false, p.sous_consommation ?? false)}
             data-selected={p.ct === selected || undefined}
             tabIndex={0}
             onClick={() => onPick(p.ct)}
@@ -94,7 +101,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
             aria-label={`Prévisions du CT ${p.ct}`}
           >
             <td data-glyph>
-              <RowGlyph row={{ statut: p.statut, risque: false }} />
+              <RowGlyph row={{ statut: p.statut, risque: false, sousConso: p.sous_consommation ?? false }} />
             </td>
             <td>
               <CtLabel ct={p.ct} libelle={p.ct_libelle} />
@@ -104,6 +111,9 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
             <td data-align="right">{fmtEur(p.atterrissage_tendance)}</td>
             <td data-align="right">
               <Signed value={p.ecart_plan} />
+            </td>
+            <td data-align="right">
+              {p.echeance ? <Reste value={p.non_consomme ?? 0} over={false} warn={p.sous_consommation ?? false} /> : '—'}
             </td>
           </tr>
         ))}
@@ -132,7 +142,14 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
     <>
       <ScopeMetrics p={scope} />
       <ChartCard title="Trajectoire cumulée" sub={forecastSentence(scope, ct ? `le CT ${ct}` : 'le périmètre')}>
-        <ForecastChart series={scope.series} asOfWeek={fc.as_of_week} budget={scope.budget} pps={scope.pps} height={320} />
+        <ForecastChart
+          series={scope.series}
+          asOfWeek={fc.as_of_week}
+          budget={scope.budget}
+          pps={scope.pps}
+          echeance={echeanceOf(scope)}
+          height={320}
+        />
       </ChartCard>
       <ChartCard
         title="Charge à venir"
@@ -148,12 +165,23 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
 }
 
 function MethodNote({ fc }: { fc: Previsions }) {
+  const e = echeanceOf(fc.global);
   return (
-    <p className="pil-note">
-      Budget (charge max) = plan de charge (Σ PPS) + provisions restantes ; les provisions sont une marge disponible, hors reste à faire et
-      atterrissage. Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à date
-      + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
-    </p>
+    <>
+      <p className="pil-note">
+        Budget (charge max) = plan de charge (Σ PPS) + provisions restantes ; les provisions sont une marge disponible, hors reste à faire et
+        atterrissage. Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à
+        date + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
+      </p>
+      {e && (
+        <p className="pil-note">
+          Fin d’exercice au {fmtDate(e.date)} : le budget non consommé à cette date est perdu. Budget de l’exercice = PPS prévu jusqu’à la
+          semaine de l’échéance + provisions datées avant l’échéance ou sans date. Non consommé = budget de l’exercice − la plus basse des
+          projections plan et tendance à l’échéance (la pire) ; rythme nécessaire = reste à consommer ÷ semaines restantes. Sous-consommation
+          signalée au-delà des seuils réglables (Réglages › Fin d’exercice : % du budget de l’exercice et montant en €).
+        </p>
+      )}
+    </>
   );
 }
 

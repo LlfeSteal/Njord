@@ -17,7 +17,7 @@ Njord transposes **Apple's Human Interface Guidelines** (macOS / iOS) to the web
 - **Self-contained**: no web fonts, no CSS framework and no icon font. The app must look the same offline.
 - **Colors carry meaning, and only one meaning each**:
   - **Green** only ever means *conforming* / *on track* / *active*.
-  - **Orange** means *needs attention*: out of plan, warnings, unsecured budget.
+  - **Orange** means *needs attention*: out of plan, warnings, unsecured budget, budget that risks being lost at the end of the year (under-consumption).
   - **Red** means *over the plan*, *error*, *dropped* or *destructive*.
   - **Purple** means *under the plan* (sous-imputation), and nothing else.
   - **Gray** means *absent*, *archived*, *unclassified* or *purged*.
@@ -80,6 +80,7 @@ These are Apple system colors, with a brighter variant in dark mode.
 | `--series-planned` | `--blue` at 0.3 | Chart series: planned (the track) |
 | `--series-actual` | `--blue` | Chart series: actual (the solid layer) |
 | `--series-provision` | `--teal` at 0.16 (dark: 0.26) | Remaining provisions (DECISIONS n° 16): band between the plan total and the budget max, provision part of a budget track, legend swatch |
+| `--risk-unspent` | `#d9480f` (dark: `#e8590c`) | Budget not consumed at the end of the year, hence lost (DECISIONS n° 17): the gap marker « X k€ non consommés » on the cumulative chart and its legend swatch. A vermilion between `--warning` and `--danger` ("serious"), chosen to stay distinct from the orange « Tendance » series it sits next to (OKLab ΔE ×100 vs `--orange`: 18 normal vision, 17 deuteranopia light; 16 / 14 dark) and to keep ≥ 3:1 against the card. Values, numbers and table cells keep `--warning` (key figure, « Reste à l'échéance »); the label next to the marker is ink (`--text`), never the marker color |
 | `--budget-secured` | `--green` | Budget: secured |
 | `--budget-unsecured` | `--orange` | Budget: unsecured |
 | `--budget-unclassified` | `--gray` | Budget: unclassified |
@@ -312,6 +313,9 @@ Statuses are **tags**: a glyph whose **shape** carries the meaning, colored by i
 | Flag sur-imputation | Octagon with `!` | `--flag-sur-imputation` |
 | Flag sous-imputation | Circle with `!` | `--flag-sous-imputation` |
 | Flag absence | Stroked circle with a slash | `--flag-absence` |
+| CT in dépassement / at risk (budget) | Octagon with `!` | `--danger` |
+| CT in vigilance (budget) | Rounded triangle with `!` | `--warning` |
+| CT in sous-consommation (budget lost at the end of the year) | Circle with `!` (`attention`) | `--warning` — the "under" circle, like sous-imputation; never wins over dépassement / vigilance (the reason lists every risk) |
 
 A signed gap (écart) is colored with its flag token; the `+` / `−` sign carries the same information without color.
 
@@ -335,6 +339,7 @@ Card, padding 16; label 12 px secondary; value 28 / 600 tabular; sub-line 12 px 
 - Tooltip uses the kit tooltip look (material, radius 10). Legend: 12 px secondary with 10 px swatches radius 3.
 - Every chart has a "show as table" toggle.
 - **Budget max et provisions (DECISIONS n° 16).** The cumulative chart never plots provisions at their dates: the `budget_cumul` area stays the **plan de charge cumulé** (legend « Plan de charge cumulé »). The budget (charge max = Σ PPS + remaining provisions) is a horizontal reference line « Budget max X k€ » (`--text-secondary`, dotted 2/3, 1.5 px; legend « Budget max (PDC + provisions) », dotted swatch) and, between the plan total (`pps`) and the budget max, a flat band in `--series-provision` (Recharts `ReferenceArea`, fill applied as a CSS `style` so the token resolves per theme) labelled « Provisions restantes » inside its top-right corner only when the band is at least 30 px tall (legend entry otherwise carries it). Without provisions: the former single dashed « Budget X » line in `--text-tertiary`, no band, no extra legend entries. Budget-by-nature bars: grey track = PPS, then a 2 px surface gap and the provision part in `--series-provision`, réalisé fills on top; legend shown only when provisions exist. In CT tables the budget column is headed « Charge max ».
+- **Fin d'exercice et sous-consommation (DECISIONS n° 17).** When the forecast carries an `echeance`, the cumulative chart adds a vertical reference line at the deadline week (week whose `debut` ≤ date < `debut` + 7 days; `--text-secondary`, dashed 3/3, 1 px) labelled « Fin d'exercice jj/mm » (11 px secondary with a card halo; right of the line, left of it in the last quarter, pushed inside the plot when it would touch « Aujourd'hui »). At that week a **gap marker** joins the worst projection (lower of plan / tendance) to the exercise budget: a 3 px vertical stroke with 10 px caps in `--risk-unspent` (Recharts `ReferenceLine` `segment` + custom `shape`), labelled « X k€ non consommés » (11 / 600 `--text`, card halo) and, from 240 px tall charts, « sur Y k€ de budget de l'exercice » (secondary). If both projections exceed the exercise budget the same marker is drawn in `--danger` and reads « +X k€ de dépassement ». The exercise budget gets a hollow ring (r 4, 2 px `--text-secondary`, legend « Budget de l'exercice », ring swatch) only when it differs from the budget max. With the marker present, the « Provisions restantes » band loses its in-plot label (legend only) so the plot carries one risk label. When the plan stops before the deadline, the chart appends weeks up to it (PDC flat, plan and tendance drawn linearly to the backend projections; tooltip « Après la fin du plan : projections seules »). Legend entry « Non consommé à la fin d'exercice » (or « Dépassement à la fin d'exercice »). The reading sentence starts with what is left at the deadline (« Au 31/12, X k€ du budget de l'exercice (Y) risquent d'être perdus (projection plan) ; … »). Key figure « Non consommé au jj/mm » (overview) / « Non consommé prévu » (Budget): value in `--warning` with the circle glyph above the thresholds, neutral below, « Dépassement prévu » in red instead when both projections overrun. CT tables: « Reste à l'échéance » (Budget: non consommé, or « + » overrun in red) / « Non consommé » (Prévisions); rows in sous-consommation are tinted `warning`.
 - **Période non couverte par le plan de charge = hachure neutre (`--uncovered-hatch`), jamais une couleur de flag ; légende obligatoire.** Weeks with `couverture = aucune` get a hatched band behind the marks (SVG `<pattern>` resolved from `--gray`, same 135° / 2-in-7 px geometry, Recharts `ReferenceArea` over the run of weeks) and a legend entry « Non couvert par le plan de charge » (hatched swatch) shown only when such weeks exist; the tooltip of those weeks says it too (partially covered weeks: tooltip mention only, no shading).
 
 ### Import wizard

@@ -2,7 +2,7 @@
 // et des prévisions (consommé, atterrissage, statut), par code CT. Partagé avec /previsions.
 // Budget d'un CT = charge max = Σ PPS du plan + provisions restantes (DECISIONS n° 16).
 import type { AnalyseResult, BudgetCT, PrevisionCT, PrevisionStatut } from '../../../api/types';
-import { forecastOf } from '../shared/pilotage';
+import { echeanceOf, forecastOf, type Echeance } from '../shared/pilotage';
 
 export interface CtRow {
   ct: string;
@@ -21,6 +21,17 @@ export interface CtRow {
   ecart: number | null;
   statut: PrevisionStatut | null;
   risque: boolean;
+  /** Fin d'exercice (DECISIONS n° 17), null sans prévision ou avec un backend antérieur. */
+  echeance: Echeance | null;
+  /** Non consommé au-delà des seuils (indicateur séparé du statut). */
+  sousConso: boolean;
+  /**
+   * « Reste à l'échéance » : non consommé (> 0) ou dépassement à l'échéance ; repli sur l'écart d'atterrissage
+   * (tout l'horizon) s'il n'y a pas de fin d'exercice. Montant du risque, toujours ≥ 0 : sert au tri.
+   */
+  reste: number | null;
+  /** Le reste est un dépassement (affiché « + » en rouge). */
+  resteOver: boolean;
   b?: BudgetCT;
   p?: PrevisionCT;
 }
@@ -42,6 +53,10 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       ecart: null,
       statut: null,
       risque: b.risque,
+      echeance: null,
+      sousConso: false,
+      reste: null,
+      resteOver: false,
       b,
     });
   }
@@ -59,7 +74,13 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       ecart: null,
       statut: null,
       risque: false,
+      echeance: null,
+      sousConso: false,
+      reste: null,
+      resteOver: false,
     };
+    const e = echeanceOf(p);
+    const r = resteOf(e, p.ecart_plan);
     byCt.set(p.ct, {
       ...row,
       libelle: row.libelle || p.ct_libelle,
@@ -72,10 +93,28 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       tendance: p.atterrissage_tendance,
       ecart: p.ecart_plan,
       statut: p.statut,
+      echeance: e,
+      sousConso: e?.sousConso ?? false,
+      reste: r.value,
+      resteOver: r.over,
       p,
     });
   }
   return [...byCt.values()];
+}
+
+/**
+ * Reste à l'échéance : non consommé s'il y en a, sinon dépassement à l'échéance ; sans fin d'exercice
+ * (backend antérieur), écart d'atterrissage sur tout l'horizon s'il est positif.
+ */
+export function resteOf(e: Echeance | null, ecartPlan: number | null): { value: number | null; over: boolean } {
+  if (e) {
+    if (e.nonConsomme > 0.5) return { value: e.nonConsomme, over: false };
+    if (e.depassement > 0.5) return { value: e.depassement, over: true };
+    return { value: 0, over: false };
+  }
+  if (ecartPlan != null && ecartPlan > 0) return { value: ecartPlan, over: true };
+  return { value: ecartPlan == null ? null : 0, over: false };
 }
 
 /** Somme d'un champ numérique, null si aucune valeur. */

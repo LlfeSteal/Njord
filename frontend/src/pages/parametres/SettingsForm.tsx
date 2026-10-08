@@ -8,6 +8,7 @@ import ErrorAlert from '../../components/ErrorAlert';
 import {
   Banner,
   Button,
+  DateInput,
   GroupedList,
   ListRow,
   LoadingBlock,
@@ -45,6 +46,8 @@ interface NumField {
 interface Section {
   title: string;
   description?: string;
+  /** Ligne « Fin d'exercice » (date) avant les champs numériques. */
+  finExercice?: boolean;
   fields: NumField[];
 }
 
@@ -100,7 +103,30 @@ const SECTIONS: Section[] = [
         label: 'Écart par TG',
         unit: '€',
         min: 0,
-        description: 'Contrôle qualité : |Σ € réalisé − Σ PPS plan| par TG',
+        description: 'Contrôle qualité : |Σ € réalisé − charge max (PPS + provisions)| par TG',
+      },
+    ],
+  },
+  {
+    title: "Fin d'exercice",
+    description:
+      "Le budget non consommé à la fin de l'exercice est perdu. Sous-consommation si le non consommé prévu dépasse les deux seuils.",
+    finExercice: true,
+    fields: [
+      {
+        key: 'seuil_sous_conso_pct',
+        label: 'Seuil sous-consommation (%)',
+        unit: '%',
+        min: 0,
+        max: 100,
+        description: "Non consommé > seuil % du budget de l'exercice",
+      },
+      {
+        key: 'seuil_sous_conso_eur',
+        label: 'Seuil sous-consommation (€)',
+        unit: '€',
+        min: 0,
+        description: 'et non consommé > seuil en €',
       },
     ],
   },
@@ -225,6 +251,16 @@ function TypeListInput({
 
 const FORM_ID = 'reglages-form';
 
+/** Valeurs par défaut des réglages de fin d'exercice (DECISIONS n° 17), si le backend ne les renvoie pas encore. */
+const FIN_EXERCICE_DEFAULTS: Pick<Settings, 'fin_exercice' | 'seuil_sous_conso_pct' | 'seuil_sous_conso_eur'> = {
+  fin_exercice: '',
+  seuil_sous_conso_pct: 10,
+  seuil_sous_conso_eur: 5000,
+};
+
+/** '' ou une date ISO valide. */
+const finExerciceError = (v: string) => (v && !/^\d{4}-\d{2}-\d{2}$/.test(v) ? 'Date invalide (AAAA-MM-JJ)' : undefined);
+
 /** Éditeurs de liste ouverts en fenêtre depuis leur ligne. */
 type ListEditor = 'weeks' | 'holidays' | 'mo_types' | 'securise' | 'non_securise';
 
@@ -263,7 +299,7 @@ export default function SettingsForm() {
   const [weekError, setWeekError] = useState<string | null>(null);
   const [editor, setEditor] = useState<ListEditor | null>(null);
 
-  const saved = settingsQ.data;
+  const saved = settingsQ.data ? { ...FIN_EXERCICE_DEFAULTS, ...settingsQ.data } : undefined;
   const current = draft ?? saved;
   const dirty = !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
@@ -304,9 +340,10 @@ export default function SettingsForm() {
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setDraft({ ...current, [key]: value });
 
-  const errors = SECTIONS.flatMap((s) => s.fields)
-    .map((f) => fieldError(f, current[f.key]))
-    .filter(Boolean);
+  const errors = [
+    ...SECTIONS.flatMap((s) => s.fields).map((f) => fieldError(f, current[f.key])),
+    finExerciceError(current.fin_exercice ?? ''),
+  ].filter(Boolean);
   const invalid = errors.length > 0;
 
   const overlap = current.securise.filter((t) => current.non_securise.includes(t));
@@ -339,6 +376,26 @@ export default function SettingsForm() {
         >
           {SECTIONS.map((s) => (
             <GroupedList key={s.title} title={s.title} footer={s.description}>
+              {s.finExercice && (
+                <ListRow
+                  label="Fin d’exercice"
+                  htmlFor="reglage-fin_exercice"
+                  description={rowDescription(
+                    current.fin_exercice ? 'Budget non consommé à cette date perdu' : 'Vide : 31/12 de l’année des données (automatique)',
+                    finExerciceError(current.fin_exercice ?? ''),
+                  )}
+                  control={
+                    <DateInput
+                      id="reglage-fin_exercice"
+                      aria-label="Fin d’exercice"
+                      value={current.fin_exercice ?? ''}
+                      onChange={(v) => set('fin_exercice', v)}
+                      clearable
+                      width={160}
+                    />
+                  }
+                />
+              )}
               {s.fields.map((f) => {
                 const v = current[f.key];
                 const id = `reglage-${f.key}`;

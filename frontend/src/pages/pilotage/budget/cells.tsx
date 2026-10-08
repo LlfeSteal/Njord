@@ -1,7 +1,8 @@
 // Cellules partagées des tableaux par CT (Budget, Prévisions) : une ligne, sans retour.
 import { ProgressBar, StatusGlyph } from '../../../ui';
 import { fmtPct } from '../../../lib/format';
-import { fmtEurSigned, rowReason, rowTone } from '../shared/pilotage';
+import { fmtEur } from '../../../lib/format';
+import { fmtEurSigned, rowGlyph, rowReason } from '../shared/pilotage';
 import type { CtRow } from './model';
 
 export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
@@ -13,10 +14,30 @@ export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
   );
 }
 
-export function RowGlyph({ row }: { row: Pick<CtRow, 'statut' | 'risque'> }) {
-  const tone = rowTone(row.statut, row.risque);
-  if (!tone) return null;
-  return <StatusGlyph kind={tone} tone={tone} label={rowReason(row.statut, row.risque)} />;
+/** Glyphe d'une ligne CT : octogone (dépassement, risque), triangle (vigilance), cercle « ! » (sous-consommation). */
+export function RowGlyph({ row, size }: { row: Pick<CtRow, 'statut' | 'risque'> & { sousConso?: boolean }; size?: number }) {
+  const g = rowGlyph(row.statut, row.risque, row.sousConso);
+  if (!g) return null;
+  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={rowReason(row.statut, row.risque, row.sousConso)} />;
+}
+
+/**
+ * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
+ * Le signe porte l'information sans la couleur.
+ */
+export function Reste({ value, over, warn }: { value: number | null; over: boolean; warn: boolean }) {
+  if (value == null) return <>—</>;
+  if (over)
+    return (
+      <span className="pil-signed" data-tone="danger">
+        {fmtEurSigned(value)}
+      </span>
+    );
+  return (
+    <span className="pil-signed" data-tone={warn && value > 0 ? 'warning' : undefined}>
+      {fmtEur(value)}
+    </span>
+  );
 }
 
 export function Signed({ value }: { value: number | null }) {

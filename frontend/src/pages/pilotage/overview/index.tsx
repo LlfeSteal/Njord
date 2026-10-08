@@ -6,9 +6,12 @@ import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
+import EcheanceMetric from '../shared/EcheanceMetric';
 import {
   anomaliesATraiter,
+  anomalieGlyph,
   CATEGORIE_LABEL,
+  echeanceOf,
   ecartTextTone,
   fmtEurSigned,
   forecastOf,
@@ -32,13 +35,14 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
       <div className="pil-metrics">
         <Metric label="Consommé" value="—" sub="Prévisions non disponibles" />
         <Metric label="Atterrissage prévu" value="—" />
-        <Metric label="Écart au budget" value="—" />
+        <Metric label="Non consommé à l’échéance" value="—" />
       </div>
     );
   const g = fc.global;
   const pct = g.pct_consomme ?? (g.budget ? (g.consomme / g.budget) * 100 : 0);
   const over = g.statut === 'depassement';
   const tone = ecartTextTone(g) ?? (g.statut === 'ok' ? 'success' : undefined);
+  const e = echeanceOf(g);
   // Budget = charge max = plan de charge + provisions restantes (DECISIONS n° 16).
   const prov = g.provisions ?? 0;
   const budgetText = prov > 0 ? `sur ${fmtEur(g.budget)} de budget max (dont ${fmtEurShort(prov)} de provisions)` : `sur ${fmtEur(g.budget)} de budget`;
@@ -58,12 +62,17 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
         tone={over ? 'danger' : undefined}
         sub={`Tendance ${fmtEur(g.atterrissage_tendance)}`}
       />
-      <Metric
-        label="Écart au budget"
-        value={fmtEurSigned(g.ecart_plan)}
-        tone={tone}
-        sub={g.budget ? `${fmtPct((g.ecart_plan / g.budget) * 100)} du budget` : undefined}
-      />
+      {e ? (
+        <EcheanceMetric e={e} />
+      ) : (
+        // Backend sans fin d'exercice : ancien chiffre (écart de l'atterrissage au budget sur tout l'horizon).
+        <Metric
+          label="Écart au budget"
+          value={fmtEurSigned(g.ecart_plan)}
+          tone={tone}
+          sub={g.budget ? `${fmtPct((g.ecart_plan / g.budget) * 100)} du budget` : undefined}
+        />
+      )}
     </div>
   );
 }
@@ -99,7 +108,7 @@ function ToDo({ result }: { result: AnalyseResult }) {
             );
           })}
           {top.map((a) => {
-            const gl = graviteGlyph(a.gravite);
+            const gl = anomalieGlyph(a);
             return (
               <ListRow
                 key={a.key}
@@ -131,7 +140,14 @@ function Forecast({ result }: { result: AnalyseResult }) {
       {fc ? (
         <>
           <p className="pil-card-head__sub">{forecastSentence(fc.global, 'le périmètre')}</p>
-          <ForecastChart series={fc.global.series} asOfWeek={fc.as_of_week} budget={fc.global.budget} pps={fc.global.pps} height={260} />
+          <ForecastChart
+            series={fc.global.series}
+            asOfWeek={fc.as_of_week}
+            budget={fc.global.budget}
+            pps={fc.global.pps}
+            echeance={echeanceOf(fc.global)}
+            height={260}
+          />
         </>
       ) : (
         <EmptyState title="Prévisions non disponibles">

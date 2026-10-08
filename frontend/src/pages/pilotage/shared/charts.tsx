@@ -1,6 +1,7 @@
 // Graphiques partagés des pages Pilotage : trajectoire cumulée (plan, budget max, provisions, réalisé, tendance),
 // charge hebdomadaire, légende et bulle au look du kit. Couleurs résolues depuis les tokens.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
+// Fin d'exercice (DECISIONS n° 17) : repère vertical à l'échéance et écart « X k€ non consommés » (--risk-unspent).
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
   Area,
@@ -10,6 +11,7 @@ import {
   ComposedChart,
   Line,
   ReferenceArea,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip as RTooltip,
@@ -18,7 +20,7 @@ import {
 } from 'recharts';
 import type { Couverture, PrevisionPoint } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
-import { fmtEurShort, useTokenColors, weekShort } from './pilotage';
+import { extendToEcheance, fmtDayMonth, fmtEurShort, useTokenColors, weekOfDate, weekShort, type Echeance, type ForecastPoint } from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -28,8 +30,8 @@ export interface ChartSeries {
   key: string;
   label: string;
   token: string;
-  /** Pastille : trait plein, tirets, pointillé (ligne de référence), carré (barres / aires / bandes) ou hachure (non couvert). */
-  shape?: 'line' | 'dash' | 'dot' | 'box' | 'hatch';
+  /** Pastille : trait plein, tirets, pointillé (ligne de référence), carré (barres / aires / bandes), hachure (non couvert) ou anneau (repère ponctuel). */
+  shape?: 'line' | 'dash' | 'dot' | 'box' | 'hatch' | 'ring';
   /** Opacité de la pastille (piste = 0,3). */
   opacity?: number;
 }
@@ -233,7 +235,30 @@ const FORECAST_SERIES: ChartSeries[] = [
 const BUDGET_MAX_SERIES: ChartSeries = { key: 'budget_max', label: 'Budget max (PDC + provisions)', token: '--text-secondary', shape: 'dot' };
 const PROVISION_SERIES: ChartSeries = { key: 'provisions', label: 'Provisions restantes', token: '--series-provision', shape: 'box' };
 
-const FORECAST_TOKENS = ['--blue', '--orange', '--text-tertiary', '--text-secondary', '--separator', '--fill'] as const;
+/** Repères de fin d'exercice (DECISIONS n° 17), en légende seulement quand ils sont tracés. */
+const UNSPENT_SERIES: ChartSeries = { key: 'non_consomme', label: 'Non consommé à la fin d’exercice', token: '--risk-unspent', shape: 'line' };
+const OVERRUN_SERIES: ChartSeries = { key: 'depassement', label: 'Dépassement à la fin d’exercice', token: '--danger', shape: 'line' };
+const EXERCISE_BUDGET_SERIES: ChartSeries = { key: 'budget_exercice', label: 'Budget de l’exercice', token: '--text-secondary', shape: 'ring' };
+
+const FORECAST_TOKENS = [
+  '--blue',
+  '--orange',
+  '--text',
+  '--text-tertiary',
+  '--text-secondary',
+  '--separator',
+  '--fill',
+  '--card',
+  '--risk-unspent',
+  '--danger',
+] as const;
+
+interface SegmentShapeProps {
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+}
 
 const AXIS = { axisLine: false, tickLine: false } as const;
 
@@ -255,13 +280,21 @@ export interface ForecastChartProps {
   height?: number;
   /** Légende HTML sous le graphique (défaut true). */
   legend?: boolean;
+  /**
+   * Fin d'exercice (`echeanceOf(prevision)`) : repère vertical « Fin d'exercice jj/mm » et, à l'échéance, écart entre
+   * la pire projection et le budget de l'exercice (« X k€ non consommés », ou dépassement en rouge).
+   * Sans effet si l'échéance tombe hors de l'horizon de la série.
+   */
+  echeance?: Echeance | null;
 }
 
 /**
  * Courbes cumulées en € : plan de charge cumulé (aire pâle), réalisé (plein), atterrissage plan, tendance (pointillé),
  * budget max (ligne pointillée) et provisions restantes (bande entre le total du plan et le budget max).
  */
-export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, legend = true }: ForecastChartProps) {
+export function ForecastChart({ series: points, asOfWeek, budget, pps, height = 260, legend = true, echeance }: ForecastChartProps) {
+  // Plan arrêté avant la fin d'exercice : semaines prolongées jusqu'à l'échéance (projections seules).
+  const series = extendToEcheance(points, echeance);
   const c = useTokenColors(FORECAST_TOKENS);
   const hatch = useTokenColors(HATCH_TOKENS);
   const patternId = usePatternId();
@@ -271,11 +304,94 @@ export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, leg
   const hasUncovered = series.some((p) => p.couverture === 'aucune');
   // Bande des provisions : seulement si elle a une épaisseur (évite une bande d'arrondi).
   const band = pps != null && budget - pps > 0.5 ? { y1: Math.max(0, pps), y2: budget } : null;
+
+  // Fin d'exercice : semaine de l'échéance, position relative (placement des libellés) et écart à tracer.
+  const n = series.length;
+  const eWeek = echeance ? weekOfDate(series, echeance.date) : null;
+  const eIdx = eWeek ? series.findIndex((p) => p.week === eWeek) : -1;
+  const asIdx = series.findIndex((p) => p.week === asOfWeek);
+  const eFrac = n > 1 && eIdx >= 0 ? eIdx / (n - 1) : 0;
+  const gap =
+    echeance && eWeek
+      ? echeance.nonConsomme > 0.5
+        ? { kind: 'unspent' as const, low: echeance.worst, high: echeance.budget, amount: echeance.nonConsomme }
+        : echeance.depassement > 0.5
+          ? { kind: 'over' as const, low: echeance.budget, high: echeance.budget + echeance.depassement, amount: echeance.depassement }
+          : null
+      : null;
+  // Budget de l'exercice repéré à part seulement s'il diffère du budget max (plan au-delà de l'échéance, provisions datées après).
+  const showExerciseBudget = !!echeance && !!eWeek && echeance.budget > 0 && Math.abs(echeance.budget - budget) > 0.5;
+  const eLabel = echeance ? `Fin d’exercice ${fmtDayMonth(echeance.date)}` : '';
+
   const legendSeries = [
     ...FORECAST_SERIES,
     ...(band ? [BUDGET_MAX_SERIES, PROVISION_SERIES] : []),
+    ...(showExerciseBudget ? [EXERCISE_BUDGET_SERIES] : []),
+    ...(gap ? [gap.kind === 'unspent' ? UNSPENT_SERIES : OVERRUN_SERIES] : []),
     ...(hasUncovered ? [UNCOVERED_SERIES] : []),
   ];
+
+  /** Libellé du repère « Fin d'exercice » : à droite du trait, à gauche près du bord droit, abaissé s'il touche « Aujourd'hui ». */
+  const echeanceLabel = (p: LabelViewBox) => {
+    const vb = p.viewBox ?? {};
+    const x = vb.x ?? 0;
+    const y = vb.y ?? 0;
+    const anchorEnd = eFrac > 0.75;
+    const sameSide = asIdx >= 0 && ((anchorEnd && asIdx < eIdx) || (!anchorEnd && asIdx > eIdx));
+    const dist = n > 1 && asIdx >= 0 ? Math.abs(eIdx - asIdx) / (n - 1) : 1;
+    const close = hasToday && dist < (sameSide ? 0.25 : 0.12);
+    return (
+      <text
+        x={anchorEnd ? x - 4 : x + 4}
+        y={close ? y + 12 : y - 6}
+        textAnchor={anchorEnd ? 'end' : 'start'}
+        fill={c['--text-secondary']}
+        stroke={c['--card']}
+        strokeWidth={3}
+        paintOrder="stroke"
+        fontSize={11}
+      >
+        {eLabel}
+      </text>
+    );
+  };
+
+  /** Écart à l'échéance : trait épais entre la pire projection et le budget de l'exercice, taquets aux bouts, libellé. */
+  const gapShape = (p: SegmentShapeProps) => {
+    if (!gap) return <g />;
+    const x = p.x1 ?? 0;
+    const top = Math.min(p.y1 ?? 0, p.y2 ?? 0);
+    const bot = Math.max(p.y1 ?? 0, p.y2 ?? 0);
+    const color = gap.kind === 'unspent' ? c['--risk-unspent'] : c['--danger'];
+    const left = eFrac > 0.3;
+    const tx = left ? x - 9 : x + 9;
+    const mid = (top + bot) / 2;
+    const text = gap.kind === 'unspent' ? `${fmtEurShort(gap.amount)} non consommés` : `+${fmtEurShort(gap.amount)} de dépassement`;
+    const halo = { stroke: c['--card'], strokeWidth: 3, paintOrder: 'stroke' } as const;
+    return (
+      <g>
+        <line x1={x} x2={x} y1={top} y2={bot} stroke={color} strokeWidth={3} strokeLinecap="round" />
+        <line x1={x - 5} x2={x + 5} y1={top} y2={top} stroke={color} strokeWidth={2} strokeLinecap="round" />
+        <line x1={x - 5} x2={x + 5} y1={bot} y2={bot} stroke={color} strokeWidth={2} strokeLinecap="round" />
+        <text x={tx} y={mid} dy="0.35em" textAnchor={left ? 'end' : 'start'} fill={c['--text']} fontSize={11} fontWeight={600} {...halo}>
+          {text}
+        </text>
+        {height >= 240 && (
+          <text x={tx} y={mid + 14} dy="0.35em" textAnchor={left ? 'end' : 'start'} fill={c['--text-secondary']} fontSize={11} {...halo}>
+            {`sur ${fmtEurShort(echeance?.budget)} de budget de l’exercice`}
+          </text>
+        )}
+      </g>
+    );
+  };
+
+  /** Mention de bulle : fin d'exercice puis couverture par le plan. */
+  const tooltipNote = (d: ForecastPoint) => {
+    const cov = d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture);
+    if (!echeance || d.week !== eWeek) return cov;
+    const e = `${eLabel} · budget de l’exercice ${fmtEur(echeance.budget)}`;
+    return cov ? `${e} · ${cov}` : e;
+  };
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
@@ -292,7 +408,8 @@ export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, leg
               shape={(p: RectProps) => <rect x={p.x} y={p.y} width={p.width} height={p.height} style={{ fill: 'var(--series-provision)' }} />}
               label={(p: LabelViewBox) => {
                 const vb = p.viewBox ?? {};
-                if ((vb.height ?? 0) < BAND_LABEL_MIN_HEIGHT || (vb.width ?? 0) < 160) return <g />;
+                // Avec le repère de fin d'exercice, la légende seule nomme la bande (un libellé de moins dans le tracé).
+                if (gap || (vb.height ?? 0) < BAND_LABEL_MIN_HEIGHT || (vb.width ?? 0) < 160) return <g />;
                 return (
                   <text
                     x={(vb.x ?? 0) + (vb.width ?? 0) - 6}
@@ -314,11 +431,11 @@ export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, leg
             wrapperStyle={{ outline: 'none' }}
             isAnimationActive={false}
             content={
-              <ChartTooltip<PrevisionPoint>
+              <ChartTooltip<ForecastPoint>
                 series={FORECAST_SERIES}
                 format={(v) => fmtEur(v)}
                 title={(d) => fmtWeek(d.week)}
-                note={(d) => couvertureNote(d.couverture)}
+                note={tooltipNote}
               />
             }
           />
@@ -356,9 +473,33 @@ export function ForecastChart({ series, asOfWeek, budget, pps, height = 260, leg
               label={{ value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
+          {eWeek && <ReferenceLine x={eWeek} stroke={c['--text-secondary']} strokeDasharray="3 3" strokeWidth={1} label={echeanceLabel} />}
           <Line dataKey="plan_cumul" type="monotone" stroke={c['--blue']} strokeOpacity={0.5} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
           <Line dataKey="tendance_cumul" type="monotone" stroke={c['--orange']} strokeDasharray="4 3" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
           <Line dataKey="reel_cumul" type="monotone" stroke={c['--blue']} strokeWidth={2} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
+          {gap && eWeek && (
+            <ReferenceLine
+              isFront
+              ifOverflow="extendDomain"
+              segment={[
+                { x: eWeek, y: gap.low },
+                { x: eWeek, y: gap.high },
+              ]}
+              shape={gapShape}
+            />
+          )}
+          {showExerciseBudget && eWeek && (
+            <ReferenceDot
+              isFront
+              x={eWeek}
+              y={echeance!.budget}
+              r={4}
+              ifOverflow="extendDomain"
+              fill={c['--card']}
+              stroke={c['--text-secondary']}
+              strokeWidth={2}
+            />
+          )}
         </ComposedChart>
       </ResponsiveContainer>
       {legend && <ChartLegend series={legendSeries} />}

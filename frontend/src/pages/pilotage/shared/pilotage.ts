@@ -3,7 +3,7 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppearance, type GlyphKind, type SortDir, type StatusTone } from '../../../ui';
 import { fmtHours } from '../../../lib/format';
-import type { AnalyseResult, Anomalie, AnomalieCategorie, PrevisionCT, PrevisionStatut, Previsions } from '../../../api/types';
+import type { AnalyseResult, Anomalie, AnomalieCategorie, Couverture, PrevisionCT, PrevisionPoint, PrevisionStatut, Previsions } from '../../../api/types';
 
 // ------------------------------------------------------------------ Couleurs
 // Les attributs SVG de recharts n'acceptent pas var(--…) de façon fiable : on résout les tokens
@@ -100,27 +100,186 @@ export const STATUT_LABEL: Record<PrevisionStatut, string> = {
   depassement: 'Dépassement',
 };
 
-/** Ton d'une ligne / d'un glyphe selon le statut de prévision et le risque de sécurisation. */
-export function rowTone(statut: PrevisionStatut | null | undefined, risque = false): 'danger' | 'warning' | undefined {
+export const SOUS_CONSO_LABEL = 'Sous-consommation';
+
+/**
+ * Ton d'une ligne CT : dépassement ou risque de sécurisation (rouge), vigilance ou sous-consommation (orange).
+ * La sous-consommation est un indicateur séparé du statut (DECISIONS n° 17) : elle ne l'emporte jamais sur lui.
+ */
+export function rowTone(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false): 'danger' | 'warning' | undefined {
   if (statut === 'depassement' || risque) return 'danger';
-  if (statut === 'vigilance') return 'warning';
+  if (statut === 'vigilance' || sousConso) return 'warning';
   return undefined;
 }
 
+/**
+ * Glyphe d'une ligne CT. Forme = sens : octogone (dépassement, risque), triangle (vigilance),
+ * cercle « ! » (sous-consommation : budget perdu s'il n'est pas consommé, comme le cercle de la sous-imputation).
+ */
+export function rowGlyph(
+  statut: PrevisionStatut | null | undefined,
+  risque = false,
+  sousConso = false,
+): { kind: GlyphKind; tone: StatusTone } | null {
+  if (statut === 'depassement' || risque) return { kind: 'danger', tone: 'danger' };
+  if (statut === 'vigilance') return { kind: 'warning', tone: 'warning' };
+  if (sousConso) return SOUS_CONSO_GLYPH;
+  return null;
+}
+
+/** Glyphe du risque de sous-consommation (cercle « ! » orange). */
+export const SOUS_CONSO_GLYPH: { kind: GlyphKind; tone: StatusTone } = { kind: 'attention', tone: 'attention' };
+
 /** Raison affichée en bulle du glyphe d'une ligne CT. */
-export function rowReason(statut: PrevisionStatut | null | undefined, risque = false): string {
+export function rowReason(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false): string {
   const parts: string[] = [];
   if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max)');
   if (statut === 'vigilance') parts.push('Atterrissage proche du budget');
   if (risque) parts.push('Part non sécurisée au-delà du seuil');
+  if (sousConso) parts.push('Budget de l’exercice qui risque de ne pas être consommé');
   return parts.join(' · ');
 }
 
-/** Ton d'un écart au budget (positif = dépassement). */
+/** Ton d'un écart au budget sur tout l'horizon du plan (positif = dépassement). */
 export function ecartTextTone(p: Pick<PrevisionCT, 'statut' | 'ecart_plan'>): 'danger' | 'warning' | 'success' | undefined {
   if (p.statut === 'depassement' || p.ecart_plan > 0) return 'danger';
   if (p.statut === 'vigilance') return 'warning';
   return undefined;
+}
+
+// ------------------------------------------------------------------ Fin d'exercice (DECISIONS n° 17)
+/** Situation à la fin de l'exercice d'un CT ou du périmètre : le budget non consommé à l'échéance est perdu. */
+export interface Echeance {
+  /** Date de fin d'exercice (YYYY-MM-DD). */
+  date: string;
+  /** Budget de l'exercice = PPS prévu jusqu'à l'échéance + provisions de l'exercice. */
+  budget: number;
+  pps: number;
+  provisions: number;
+  projPlan: number;
+  projTendance: number;
+  /** Projection retenue : la plus basse des deux (la pire pour la sous-consommation). */
+  worst: number;
+  source: 'plan' | 'tendance' | '';
+  /** Budget de l'exercice qui risque d'être perdu (≥ 0). */
+  nonConsomme: number;
+  /** Dépassement du budget de l'exercice par les deux projections (au moins ce montant), 0 sinon. */
+  depassement: number;
+  rythmeNecessaire: number;
+  rythmeActuel: number;
+  semaines: number;
+  /** Au-delà des seuils de sous-consommation (Réglages). */
+  sousConso: boolean;
+}
+
+/** Données de fin d'exercice, ou null si le backend ne les fournit pas (lecture défensive). */
+export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
+  if (!p?.echeance) return null;
+  const budget = p.budget_echeance ?? 0;
+  const projPlan = p.projection_plan_echeance ?? 0;
+  const projTendance = p.projection_tendance_echeance ?? 0;
+  const source = p.non_consomme_source ?? '';
+  const worst = source === 'plan' ? projPlan : source === 'tendance' ? projTendance : Math.min(projPlan, projTendance);
+  const nonConsomme = Math.max(0, p.non_consomme ?? 0);
+  const low = Math.min(projPlan, projTendance);
+  return {
+    date: p.echeance,
+    budget,
+    pps: p.pps_echeance ?? 0,
+    provisions: p.provisions_echeance ?? 0,
+    projPlan,
+    projTendance,
+    worst,
+    source,
+    nonConsomme,
+    depassement: nonConsomme > 0.5 ? 0 : Math.max(0, low - budget),
+    rythmeNecessaire: p.rythme_necessaire ?? 0,
+    rythmeActuel: p.rythme_hebdo ?? 0,
+    semaines: p.semaines_echeance ?? 0,
+    sousConso: p.sous_consommation ?? false,
+  };
+}
+
+const DAY_MS = 86_400_000;
+
+/** Semaine de la série qui contient la date (début ≤ date < début + 7 j), ou null hors horizon. */
+export function weekOfDate(series: readonly { week: string; debut?: string }[], date: string): string | null {
+  const t = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(t)) return null;
+  for (const p of series) {
+    const d = p.debut ? Date.parse(`${p.debut.slice(0, 10)}T00:00:00Z`) : NaN;
+    if (!Number.isNaN(d) && t >= d && t < d + 7 * DAY_MS) return p.week;
+  }
+  return null;
+}
+
+/** Semaine ISO « YYYY-Www » du lundi `t` (ms UTC). */
+function isoWeekOf(t: number): string {
+  const thu = new Date(t + 3 * DAY_MS);
+  const y = thu.getUTCFullYear();
+  const w = Math.ceil(((thu.getTime() - Date.UTC(y, 0, 1)) / DAY_MS + 1) / 7);
+  return `${y}-W${String(w).padStart(2, '0')}`;
+}
+
+/** Point du graphique cumulé : point du backend, ou semaine ajoutée au-delà de la fin du plan (`extension`). */
+export type ForecastPoint = Omit<PrevisionPoint, 'couverture'> & { couverture?: Couverture; extension?: boolean };
+
+/**
+ * Prolonge la série jusqu'à la semaine de l'échéance quand le plan s'arrête avant (fin du plan ≠ fin d'exercice) :
+ * PDC cumulé plat, courbes plan et tendance menées linéairement jusqu'aux projections à l'échéance du backend.
+ * Sans effet si l'échéance est dans l'horizon, avant lui, ou si la série n'a pas de date de début.
+ */
+export function extendToEcheance(series: PrevisionPoint[], e: Echeance | null | undefined): ForecastPoint[] {
+  const last = series[series.length - 1];
+  if (!e || !last?.debut) return series;
+  const end = Date.parse(`${e.date.slice(0, 10)}T00:00:00Z`);
+  const lastStart = Date.parse(`${last.debut.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(end) || Number.isNaN(lastStart) || end < lastStart + 7 * DAY_MS) return series;
+  const k = Math.min(Math.floor((end - lastStart) / (7 * DAY_MS)), 60);
+  const lerp = (from: number | null, to: number, i: number) => (from == null ? null : from + ((to - from) * i) / k);
+  const extra: ForecastPoint[] = [];
+  for (let i = 1; i <= k; i++) {
+    const t = lastStart + i * 7 * DAY_MS;
+    extra.push({
+      week: isoWeekOf(t),
+      debut: new Date(t).toISOString().slice(0, 10),
+      budget_cumul: last.budget_cumul,
+      reel_cumul: null,
+      plan_cumul: lerp(last.plan_cumul ?? last.reel_cumul, e.projPlan, i),
+      tendance_cumul: lerp(last.tendance_cumul ?? last.reel_cumul, e.projTendance, i),
+      heures_plan: 0,
+      heures_reel: null,
+      extension: true,
+    });
+  }
+  return [...series, ...extra];
+}
+
+/** "2026-12-31" → « 31/12 ». */
+export function fmtDayMonth(d: string | null | undefined): string {
+  const m = d ? /^\d{4}-(\d{2})-(\d{2})/.exec(d) : null;
+  return m ? `${m[2]}/${m[1]}` : '—';
+}
+
+/** Projection retenue, en clair : « projection tendance ». */
+export const sourceLabel = (s: Echeance['source']) => (s === 'tendance' ? 'projection tendance' : s === 'plan' ? 'projection plan' : 'pire projection');
+
+/** Part du non consommé faite de provisions non engagées (les projections ne consomment pas les provisions). */
+export const provisionsNonEngagees = (e: Echeance) => Math.min(e.nonConsomme, e.provisions);
+
+/** « il faudrait 12 k€/sem. (actuel 8 k€/sem.) », ou null s'il ne reste aucune semaine. */
+export function paceText(e: Echeance): string | null {
+  if (e.semaines <= 0) return null;
+  return `il faudrait ${fmtEurShort(e.rythmeNecessaire)}/sem. (actuel ${fmtEurShort(e.rythmeActuel)}/sem.)`;
+}
+
+/** Fin de phrase de lecture : « au 31/12, 85 k€ du budget de l'exercice risquent d'être perdus (projection tendance) ». */
+export function echeanceSentence(e: Echeance): string {
+  const d = fmtDayMonth(e.date);
+  if (e.nonConsomme > 0.5)
+    return `au ${d}, ${fmtEurShort(e.nonConsomme)} du budget de l’exercice (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)})`;
+  if (e.depassement > 0.5) return `au ${d}, le budget de l’exercice (${fmtEurShort(e.budget)}) serait dépassé d’au moins ${fmtEurShort(e.depassement)}`;
+  return `au ${d}, le budget de l’exercice (${fmtEurShort(e.budget)}) serait entièrement consommé`;
 }
 
 // ------------------------------------------------------------------ Anomalies
@@ -131,6 +290,14 @@ export const CATEGORIE_LABEL: Record<AnomalieCategorie, string> = {
   qualite: 'Qualité des données',
   budget: 'Prévisions budgétaires',
 };
+
+/** Anomalie de sous-consommation (clé `budget_sous_conso|CT`). */
+export const isSousConsoAnomalie = (a: Pick<Anomalie, 'key'>) => a.key.startsWith('budget_sous_conso|');
+
+/** Glyphe d'une anomalie hors écart : sous-consommation = cercle « ! » du risque de perte, sinon gravité. */
+export function anomalieGlyph(a: Pick<Anomalie, 'key' | 'gravite'>): { kind: GlyphKind; tone: StatusTone } {
+  return isSousConsoAnomalie(a) ? SOUS_CONSO_GLYPH : graviteGlyph(a.gravite);
+}
 
 /** Glyphe d'une gravité : 3 octogone rouge, 2 triangle orange, 1 cercle. */
 export function graviteGlyph(g: number): { kind: GlyphKind; tone: StatusTone } {
@@ -154,9 +321,16 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
   return { total: open.length, categories, top };
 }
 
-/** Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). Budget max = PDC + provisions. */
+/**
+ * Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). Budget max = PDC + provisions ;
+ * avec la fin d'exercice, la phrase dit d'abord ce qui reste du budget à l'échéance (risque de perte).
+ */
 export function forecastSentence(p: PrevisionCT, scope: string): string {
   const prov = p.provisions ?? 0;
   const budget = prov > 0 ? `un budget max de ${fmtEurShort(p.budget)} (dont ${fmtEurShort(prov)} de provisions)` : `un budget de ${fmtEurShort(p.budget)}`;
-  return `Au rythme du plan, ${scope} atterrit à ${fmtEurShort(p.atterrissage_plan)} pour ${budget}.`;
+  const base = `Au rythme du plan, ${scope} atterrit à ${fmtEurShort(p.atterrissage_plan)} pour ${budget}`;
+  const e = echeanceOf(p);
+  if (!e) return `${base}.`;
+  const tail = echeanceSentence(e);
+  return `${tail.charAt(0).toUpperCase()}${tail.slice(1)} ; ${base.charAt(0).toLowerCase()}${base.slice(1)}.`;
 }

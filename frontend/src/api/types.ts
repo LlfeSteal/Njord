@@ -209,6 +209,11 @@ export interface Settings {
   purge_delai_jours: number;
   seuil_quantite_semaine_h: number;
   seuil_ecart_tg_eur: number;
+  /** Fin d'exercice (YYYY-MM-DD) ; '' = 31/12 de l'année de as_of (DECISIONS n° 17). */
+  fin_exercice: string;
+  /** Sous-consommation : non consommé > seuil_sous_conso_pct % du budget de l'exercice et > seuil_sous_conso_eur. */
+  seuil_sous_conso_pct: number;
+  seuil_sous_conso_eur: number;
   diviseur_hors_plan_h: number;
   semaines_verrouillees: number[];
   jours_feries: string[];
@@ -524,6 +529,27 @@ export interface PrevisionCT {
   semaines_restantes: number;
   fin_plan: string;
   statut: PrevisionStatut;
+  // Fin d'exercice (DECISIONS n° 17) : budget perdu s'il n'est pas consommé à l'échéance.
+  /** Fin d'exercice retenue (YYYY-MM-DD). */
+  echeance: string;
+  /** pps_echeance + provisions_echeance. */
+  budget_echeance: number;
+  /** PPS prévu jusqu'à la semaine de l'échéance (+ PPS hors série). */
+  pps_echeance: number;
+  /** Provisions datées ≤ échéance (ou sans date). */
+  provisions_echeance: number;
+  /** Consommé + PPS prévu des semaines ]as_of, échéance]. */
+  projection_plan_echeance: number;
+  /** Consommé + rythme × semaines ]as_of, échéance]. */
+  projection_tendance_echeance: number;
+  /** max(0, budget_echeance − min des deux projections) : budget qui risque d'être perdu. */
+  non_consomme: number;
+  non_consomme_source: 'plan' | 'tendance' | '';
+  /** € / semaine à dépenser pour tout consommer à l'échéance (0 si aucune semaine). */
+  rythme_necessaire: number;
+  semaines_echeance: number;
+  /** non_consomme > seuils (% et €). */
+  sous_consommation: boolean;
   series: PrevisionPoint[];
 }
 

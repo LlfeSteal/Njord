@@ -24,6 +24,8 @@ func DefaultSettings() domain.Settings {
 		PurgeDelaiJours:       30,
 		SeuilQuantiteSemaineH: 200,
 		SeuilEcartTGEur:       50000,
+		SeuilSousConsoPct:     10,
+		SeuilSousConsoEur:     5000,
 		DiviseurHorsPlanH:     12,
 		SemainesVerrouillees:  []int{51, 52},
 		JoursFeries:           feries,
@@ -54,6 +56,14 @@ func (s *Store) GetSettings(ctx context.Context) (domain.Settings, error) {
 func (s *Store) PutSettings(ctx context.Context, st domain.Settings, operateur string) (domain.Settings, error) {
 	if st.PurgeDelaiJours < 0 || st.DiviseurHorsPlanH <= 0 {
 		return st, Precondition("paramètres invalides : délai de purge ≥ 0 et diviseur hors plan > 0 requis")
+	}
+	if st.FinExercice != "" {
+		if _, err := time.Parse("2006-01-02", st.FinExercice); err != nil {
+			return st, Precondition("paramètres invalides : fin d'exercice attendue au format AAAA-MM-JJ (ou vide)")
+		}
+	}
+	if st.SeuilSousConsoPct < 0 || st.SeuilSousConsoPct > 100 || st.SeuilSousConsoEur < 0 {
+		return st, Precondition("paramètres invalides : seuil de sous-consommation entre 0 et 100 %% et montant ≥ 0 requis")
 	}
 	raw, err := json.Marshal(st)
 	if err != nil {

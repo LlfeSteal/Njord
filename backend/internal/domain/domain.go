@@ -272,19 +272,23 @@ type Squad struct {
 // Paramètres & journal
 
 type Settings struct {
-	SeuilSurImputationH   float64  `json:"seuil_sur_imputation_h"`   // 15 : écart > +15 h → 🔴
-	SeuilSousImputationH  float64  `json:"seuil_sous_imputation_h"`  // 30 : écart < −30 h → 🟣
-	SeuilCTRisqueEur      float64  `json:"seuil_ct_risque_eur"`      // 10 000
-	SeuilNonSecurisePct   float64  `json:"seuil_non_securise_pct"`   // 15
-	PurgeDelaiJours       int      `json:"purge_delai_jours"`        // 30
-	SeuilQuantiteSemaineH float64  `json:"seuil_quantite_semaine_h"` // 200
-	SeuilEcartTGEur       float64  `json:"seuil_ecart_tg_eur"`       // 50 000
-	DiviseurHorsPlanH     float64  `json:"diviseur_hors_plan_h"`     // 12
-	SemainesVerrouillees  []int    `json:"semaines_verrouillees"`    // [51, 52] (numéros ISO, toute année)
-	JoursFeries           []string `json:"jours_feries"`             // dates YYYY-MM-DD
-	MOTypes               []string `json:"mo_types"`
-	Securise              []string `json:"securise"`
-	NonSecurise           []string `json:"non_securise"`
+	SeuilSurImputationH   float64 `json:"seuil_sur_imputation_h"`   // 15 : écart > +15 h → 🔴
+	SeuilSousImputationH  float64 `json:"seuil_sous_imputation_h"`  // 30 : écart < −30 h → 🟣
+	SeuilCTRisqueEur      float64 `json:"seuil_ct_risque_eur"`      // 10 000
+	SeuilNonSecurisePct   float64 `json:"seuil_non_securise_pct"`   // 15
+	PurgeDelaiJours       int     `json:"purge_delai_jours"`        // 30
+	SeuilQuantiteSemaineH float64 `json:"seuil_quantite_semaine_h"` // 200
+	SeuilEcartTGEur       float64 `json:"seuil_ecart_tg_eur"`       // 50 000
+	// Sous-consommation (DECISIONS n° 17) : budget à consommer avant la fin d'exercice.
+	FinExercice          string   `json:"fin_exercice"`          // YYYY-MM-DD ; "" = 31/12 de l'année de as_of
+	SeuilSousConsoPct    float64  `json:"seuil_sous_conso_pct"`  // 10 : non consommé > 10 % du budget de l'exercice…
+	SeuilSousConsoEur    float64  `json:"seuil_sous_conso_eur"`  // 5 000 : … et > 5 000 €
+	DiviseurHorsPlanH    float64  `json:"diviseur_hors_plan_h"`  // 12
+	SemainesVerrouillees []int    `json:"semaines_verrouillees"` // [51, 52] (numéros ISO, toute année)
+	JoursFeries          []string `json:"jours_feries"`          // dates YYYY-MM-DD
+	MOTypes              []string `json:"mo_types"`
+	Securise             []string `json:"securise"`
+	NonSecurise          []string `json:"non_securise"`
 }
 
 type AuditEntry struct {
@@ -574,23 +578,35 @@ type PrevisionPoint struct {
 
 // PrevisionCT is the landing forecast of one CT (or of the whole perimeter for Global, CT = "").
 type PrevisionCT struct {
-	CT                   string           `json:"ct"`
-	CTLibelle            string           `json:"ct_libelle"`
-	Budget               float64          `json:"budget"`                // charge max = pps + provisions (référence des écarts et du statut)
-	PPS                  float64          `json:"pps"`                   // Σ PPS des lignes de plan (segments de la timeline)
-	Provisions           float64          `json:"provisions"`            // Σ provisions restantes (version de provisions retenue)
-	Consomme             float64          `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of
-	PctConsomme          *float64         `json:"pct_consomme"`          // 0..100, null si budget nul
-	ResteAFaire          float64          `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of
-	AtterrissagePlan     float64          `json:"atterrissage_plan"`     // consomme + reste_a_faire
-	AtterrissageTendance float64          `json:"atterrissage_tendance"` // consomme + rythme_hebdo × semaines_restantes
-	EcartPlan            float64          `json:"ecart_plan"`            // atterrissage_plan − budget
-	EcartTendance        float64          `json:"ecart_tendance"`        // atterrissage_tendance − budget
-	RythmeHebdo          float64          `json:"rythme_hebdo"`          // moyenne € des 4 dernières semaines réalisées
-	SemainesRestantes    int              `json:"semaines_restantes"`    // semaines après as_of jusqu'à fin_plan
-	FinPlan              string           `json:"fin_plan"`              // max date_fin des lignes du CT
-	Statut               PrevisionStatut  `json:"statut"`
-	Series               []PrevisionPoint `json:"series"`
+	CT                   string          `json:"ct"`
+	CTLibelle            string          `json:"ct_libelle"`
+	Budget               float64         `json:"budget"`                // charge max = pps + provisions (référence des écarts et du statut)
+	PPS                  float64         `json:"pps"`                   // Σ PPS des lignes de plan (segments de la timeline)
+	Provisions           float64         `json:"provisions"`            // Σ provisions restantes (version de provisions retenue)
+	Consomme             float64         `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of
+	PctConsomme          *float64        `json:"pct_consomme"`          // 0..100, null si budget nul
+	ResteAFaire          float64         `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of
+	AtterrissagePlan     float64         `json:"atterrissage_plan"`     // consomme + reste_a_faire
+	AtterrissageTendance float64         `json:"atterrissage_tendance"` // consomme + rythme_hebdo × semaines_restantes
+	EcartPlan            float64         `json:"ecart_plan"`            // atterrissage_plan − budget
+	EcartTendance        float64         `json:"ecart_tendance"`        // atterrissage_tendance − budget
+	RythmeHebdo          float64         `json:"rythme_hebdo"`          // moyenne € des 4 dernières semaines réalisées
+	SemainesRestantes    int             `json:"semaines_restantes"`    // semaines après as_of jusqu'à fin_plan
+	FinPlan              string          `json:"fin_plan"`              // max date_fin des lignes du CT
+	Statut               PrevisionStatut `json:"statut"`
+	// Fin d'exercice (DECISIONS n° 17) : budget perdu s'il n'est pas consommé à l'échéance.
+	Echeance                   string           `json:"echeance"`                     // fin d'exercice retenue (YYYY-MM-DD)
+	BudgetEcheance             float64          `json:"budget_echeance"`              // pps_echeance + provisions_echeance
+	PPSEcheance                float64          `json:"pps_echeance"`                 // PPS prévu jusqu'à la semaine de l'échéance (+ PPS hors série)
+	ProvisionsEcheance         float64          `json:"provisions_echeance"`          // provisions datées ≤ échéance (ou sans date)
+	ProjectionPlanEcheance     float64          `json:"projection_plan_echeance"`     // consommé + PPS prévu des semaines ]as_of, échéance]
+	ProjectionTendanceEcheance float64          `json:"projection_tendance_echeance"` // consommé + rythme × semaines ]as_of, échéance]
+	NonConsomme                float64          `json:"non_consomme"`                 // max(0, budget_echeance − min des deux projections)
+	NonConsommeSource          string           `json:"non_consomme_source"`          // plan | tendance | "" (rien de non consommé)
+	RythmeNecessaire           float64          `json:"rythme_necessaire"`            // (budget_echeance − consommé) ÷ semaines_echeance ; 0 si aucune semaine
+	SemainesEcheance           int              `json:"semaines_echeance"`            // semaines après as_of jusqu'à l'échéance (incluse)
+	SousConsommation           bool             `json:"sous_consommation"`            // non_consomme > seuils (% et €)
+	Series                     []PrevisionPoint `json:"series"`
 }
 
 // PrevisionStatut: depassement si atterrissage plan > budget ; vigilance si

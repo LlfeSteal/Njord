@@ -146,7 +146,6 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
           series={scope.series}
           asOfWeek={fc.as_of_week}
           budget={scope.budget}
-          pps={scope.pps}
           echeance={echeanceOf(scope)}
           height={320}
         />

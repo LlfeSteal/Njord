@@ -144,7 +144,6 @@ function Forecast({ result }: { result: AnalyseResult }) {
             series={fc.global.series}
             asOfWeek={fc.as_of_week}
             budget={fc.global.budget}
-            pps={fc.global.pps}
             echeance={echeanceOf(fc.global)}
             height={260}
           />

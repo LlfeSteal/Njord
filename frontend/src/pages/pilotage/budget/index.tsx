@@ -358,7 +358,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       {row.echeance && <EcheanceSection e={row.echeance} />}
       {p && fc && p.series.length > 0 && (
         <InspectorSection title="Trajectoire">
-          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} pps={p.pps} echeance={row.echeance} height={160} />
+          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} echeance={row.echeance} height={160} />
         </InspectorSection>
       )}
       <Classification row={row} />

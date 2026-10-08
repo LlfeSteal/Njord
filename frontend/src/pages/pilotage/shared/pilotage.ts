@@ -326,11 +326,10 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
  * avec la fin d'exercice, la phrase dit d'abord ce qui reste du budget à l'échéance (risque de perte).
  */
 export function forecastSentence(p: PrevisionCT, scope: string): string {
-  const prov = p.provisions ?? 0;
-  const budget = prov > 0 ? `un budget max de ${fmtEurShort(p.budget)} (dont ${fmtEurShort(prov)} de provisions)` : `un budget de ${fmtEurShort(p.budget)}`;
-  const base = `Au rythme du plan, ${scope} atterrit à ${fmtEurShort(p.atterrissage_plan)} pour ${budget}`;
+  // Une seule phrase courte : reliquat à l'échéance d'abord, puis atterrissage face au budget max.
+  const atter = `atterrissage ${fmtEurShort(p.atterrissage_plan)} pour un budget max de ${fmtEurShort(p.budget)}`;
   const e = echeanceOf(p);
-  if (!e) return `${base}.`;
-  const tail = echeanceSentence(e);
-  return `${tail.charAt(0).toUpperCase()}${tail.slice(1)} ; ${base.charAt(0).toLowerCase()}${base.slice(1)}.`;
+  if (e && e.nonConsomme > 0.5) return `Au ${fmtDayMonth(e.date)}, ${fmtEurShort(e.nonConsomme)} risquent d’être perdus ; ${atter}.`;
+  if (p.ecart_plan > 0.5) return `Atterrissage ${fmtEurShort(p.atterrissage_plan)}, soit ${fmtEurShort(p.ecart_plan)} au-dessus du budget max (${scope}).`;
+  return `${atter.charAt(0).toUpperCase()}${atter.slice(1)} (${scope}).`;
 }

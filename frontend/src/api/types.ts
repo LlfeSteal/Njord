@@ -2,7 +2,7 @@
 // Ne modifier qu'en même temps que le Go (intégrateur).
 // Dates : "YYYY-MM-DD" ("" = absent) ; horodatages : ISO 8601.
 
-export type Kind = 'plan' | 'realise';
+export type Kind = 'plan' | 'realise' | 'provision';
 export type VersionStatut = 'active' | 'archivee' | 'purgee';
 export type ParsingStatut = 'ok' | 'warn' | 'drop';
 
@@ -20,10 +20,10 @@ export interface Version {
   nb_drop: number;
   periode_debut: string;
   periode_fin: string;
-  source_format: string; // 'spec' | 'demo'
+  source_format: string; // 'spec' | 'demo' | 'provisions'
   filename: string;
   layout?: string; // plan : 'A' | 'B' | 'mixte'
-  montant_total_eur?: number; // réalisé
+  montant_total_eur?: number; // réalisé, provisions : Σ € des lignes acceptées
   /** Plan : date à partir de laquelle la version remplace les précédentes (timeline, DECISIONS n° 13). */
   date_effet?: string;
 }
@@ -62,6 +62,33 @@ export interface ImportReport {
 export interface ImportResult {
   version: Version;
   report: ImportReport;
+}
+
+// ---------------------------------------------------------------- Provisions (DECISIONS n° 16)
+/** Fonds disponibles non engagés. Charge max d'un CT = Σ PPS du plan + Σ provisions ; budget = Σ charge max. */
+export interface ProvisionLine {
+  id: number;
+  version_id: string;
+  row_num: number;
+  ct: string;
+  libelle: string;
+  /** € : colonne « .PPS », à défaut « Quantité ». */
+  montant: number;
+  unite: string;
+  ligne_cout: string;
+  type_depense: string;
+  /** Informative : le budget ne dépend pas de la date. */
+  date_debut: string;
+  date_fin: string;
+  groupe: string;
+  statut_parsing: ParsingStatut;
+  motif_rejet: string;
+}
+
+export interface ProvisionLinesPage {
+  items: ProvisionLine[];
+  total: number;
+  totals: { montant: number };
 }
 
 // ---------------------------------------------------------------- Plan
@@ -274,6 +301,9 @@ export interface AnalyseContext {
   realise_versions: Version[];
   default_plan_id: string | null;
   default_realise_id: string | null;
+  /** Provisions facultatives ; défaut = version active (null si aucune). */
+  provision_versions: Version[];
+  default_provision_id: string | null;
   default_week_from: string;
   default_week_to: string;
   weeks: WeekInfo[];
@@ -283,6 +313,8 @@ export interface AnalyseContext {
 export interface AnalyseMeta {
   plan_version: Version | null;
   realise_version: Version | null;
+  /** Version de provisions retenue (null : budget = Σ PPS seul). */
+  provision_version: Version | null;
   archived_warning: boolean;
   week_from: string;
   week_to: string;
@@ -348,13 +380,18 @@ export interface KPIs {
   heures_non_couvertes: number;
 }
 
-/** Analyse budgétaire : PPS et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10). */
+/** Analyse budgétaire : budget (PPS + provisions) et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10, 16). */
 export interface BudgetNature {
   nature: 'provision' | 'mo' | 'capacite' | 'frais' | 'autres';
   libelle: string;
+  /** Σ PPS du plan. */
   pps: number;
+  /** Σ provisions importées, ventilées selon leur ligne de coût. */
+  provisions: number;
+  /** pps + provisions ; Σ budget = previsions.global.budget. */
+  budget: number;
   realise: number;
-  /** 0..100+, null si PPS nul. */
+  /** realise ÷ budget, 0..100+, null si budget nul. */
   pct_consomme: number | null;
 }
 
@@ -366,6 +403,10 @@ export interface BudgetCT {
   non_classe: number;
   pct_securite: number | null; // 0..100
   pps_plan: number;
+  /** Σ provisions du CT. */
+  provisions: number;
+  /** pps_plan + provisions (budget du CT). */
+  charge_max: number;
   heures_mo: number;
   cout_mo_eur: number;
   risque: boolean;
@@ -436,6 +477,8 @@ export interface AnalyseResult {
 export interface AnalyseParams {
   plan_version_id?: string;
   realise_version_id?: string;
+  /** Facultatif : défaut = version de provisions active. */
+  provision_version_id?: string;
   week_from?: string;
   week_to?: string;
   include_inactive?: boolean;
@@ -449,6 +492,7 @@ export interface ApiErrorBody {
 export interface PrevisionPoint {
   week: string;
   debut: string;
+  /** Dépense prévue cumulée du plan (hors provisions). */
   budget_cumul: number;
   reel_cumul: number | null;
   plan_cumul: number | null;
@@ -463,7 +507,12 @@ export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
 export interface PrevisionCT {
   ct: string;
   ct_libelle: string;
+  /** Charge max = pps + provisions : référence des écarts et du statut. */
   budget: number;
+  /** Σ PPS du plan (segments de la timeline). */
+  pps: number;
+  /** Σ provisions restantes. */
+  provisions: number;
   consomme: number;
   pct_consomme: number | null;
   reste_a_faire: number;

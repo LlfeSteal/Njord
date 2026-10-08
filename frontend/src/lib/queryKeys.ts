@@ -7,6 +7,7 @@ export const qk = {
   facets: (kind: Kind, id: string) => ['facets', kind, id] as const,
   planLines: (id: string, q: unknown) => ['plan-lines', id, q] as const,
   realiseEntries: (id: string, q: unknown) => ['realise-entries', id, q] as const,
+  provisionLines: (id: string, q: unknown) => ['provision-lines', id, q] as const,
   personnes: (q?: string) => ['personnes', q ?? ''] as const,
   squads: () => ['squads'] as const,
   settings: () => ['settings'] as const,

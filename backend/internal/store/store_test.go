@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,5 +141,52 @@ func TestDateEffet(t *testing.T) {
 	}
 	if _, err := st.SetDateEffet(ctx, "inconnu", "2026-10-01", "u"); err != ErrNotFound {
 		t.Fatalf("id inconnu: %v", err)
+	}
+}
+
+// Une base créée avant le kind 'provision' (CHECK plan/realise) est reconstruite
+// à l'ouverture sans perdre de lignes (DECISIONS n° 16).
+func TestMigrateProvisionKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", "file:"+path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(schema, "'plan','realise','provision'", "'plan','realise'", 1)
+	for _, q := range []string{
+		old,
+		`INSERT INTO versions (id, kind, intitule, importee_le, statut) VALUES ('p1','plan','PDC','2026-09-01T00:00:00Z','active'), ('r1','realise','R','2026-09-01T00:00:00Z','active')`,
+		`INSERT INTO plan_lines (version_id, row_num, statut_parsing) VALUES ('p1', 4, 'ok'), ('p1', 5, 'ok')`,
+		`INSERT INTO realise_entries (version_id, row_num, statut_parsing) VALUES ('r1', 2, 'ok')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw.Close()
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for q, want := range map[string]int{
+		`SELECT COUNT(*) FROM plan_lines`:                                       2,
+		`SELECT COUNT(*) FROM realise_entries`:                                  1,
+		`SELECT COUNT(*) FROM versions`:                                         2,
+		`SELECT COUNT(*) FROM sqlite_master WHERE name = 'versions_one_active'`: 1,
+	} {
+		var n int
+		if err := st.DB().QueryRow(q).Scan(&n); err != nil || n != want {
+			t.Fatalf("%s = %d (%v), attendu %d", q, n, err, want)
+		}
+	}
+	v := domain.Version{Kind: domain.KindProvision, Intitule: "Provisions"}
+	if err := st.CreateVersion(context.Background(), &v, true, nil); err != nil {
+		t.Fatalf("version provision refusée après migration : %v", err)
+	}
+	var fk int
+	if err := st.DB().QueryRow(`PRAGMA foreign_keys`).Scan(&fk); err != nil || fk != 1 {
+		t.Fatalf("foreign_keys = %d %v", fk, err)
 	}
 }

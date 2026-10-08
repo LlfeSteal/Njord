@@ -6,13 +6,14 @@ package domain
 import "time"
 
 // ---------------------------------------------------------------------------
-// Versions (cycle de vie commun plan / réalisé)
+// Versions (cycle de vie commun plan / réalisé / provisions)
 
 type Kind string
 
 const (
-	KindPlan    Kind = "plan"
-	KindRealise Kind = "realise"
+	KindPlan      Kind = "plan"
+	KindRealise   Kind = "realise"
+	KindProvision Kind = "provision" // export « Dépenses prévues » (DECISIONS n° 16)
 )
 
 type VersionStatut string
@@ -33,11 +34,12 @@ const (
 
 // Source formats recognised by the parsers.
 const (
-	FormatSpec = "spec" // format décrit dans les SPEC (12 / 25 colonnes)
-	FormatDemo = "demo" // format d'export des fichiers test_data_demo
+	FormatSpec       = "spec"       // format décrit dans les SPEC (12 / 25 colonnes)
+	FormatDemo       = "demo"       // format d'export des fichiers test_data_demo
+	FormatProvisions = "provisions" // export Planisware « Dépenses prévues » (12 colonnes)
 )
 
-// Version is an import of a plan de charge or of a réalisé.
+// Version is an import of a plan de charge, of a réalisé or of provisions.
 type Version struct {
 	ID           string        `json:"id"`
 	Kind         Kind          `json:"kind"`
@@ -56,7 +58,7 @@ type Version struct {
 	Filename     string        `json:"filename"`
 	// Plan uniquement : "A" | "B" | "mixte".
 	Layout string `json:"layout,omitempty"`
-	// Réalisé uniquement : Σ TOTAL EN € des lignes acceptées.
+	// Réalisé : Σ TOTAL EN € des lignes acceptées ; provisions : Σ montants acceptés.
 	MontantTotalEur *float64 `json:"montant_total_eur,omitempty"`
 	// Plan uniquement : date (YYYY-MM-DD) à partir de laquelle la version
 	// remplace les précédentes dans la timeline (DECISIONS n° 13).
@@ -90,7 +92,7 @@ type ImportReport struct {
 	NouvellesPersonnes []string `json:"nouvelles_personnes,omitempty"`
 	NouveauxSquads     []string `json:"nouveaux_squads,omitempty"`
 	DateEffetProposee  string   `json:"date_effet_proposee,omitempty"` // = periode_debut (pré-remplissage)
-	// Réalisé uniquement.
+	// Réalisé et provisions : Σ € des lignes acceptées.
 	MontantTotalEur *float64 `json:"montant_total_eur,omitempty"`
 	// Détail (tronqué à 500 entrées) et comptage par motif.
 	Issues        []ParseIssue   `json:"issues"`
@@ -208,6 +210,39 @@ type RealiseEntriesPage struct {
 	Totals RealiseEntryTotals `json:"totals"`
 }
 
+// ---------------------------------------------------------------------------
+// Provisions (DECISIONS n° 16) : fonds disponibles non engagés, par CT.
+// charge max d'un CT = Σ PPS du plan + Σ provisions ; budget = Σ charge max.
+
+type ProvisionLine struct {
+	ID        int64  `json:"id"`
+	VersionID string `json:"version_id"`
+	RowNum    int    `json:"row_num"`
+	CT        string `json:"ct"`      // « Tâche ou sous-projet », TrimSpace (même clé que plan.ct / réalisé.tg)
+	Libelle   string `json:"libelle"` // « Libellé »
+	// Montant en € : colonne « .PPS », à défaut « Quantité ».
+	Montant     float64 `json:"montant"`
+	Unite       string  `json:"unite"`        // « EURO » attendu
+	LigneCout   string  `json:"ligne_cout"`   // PROVISIONS POUR ALEAS | CAPACITE SUR SITE | FRAIS ACHATS CAPACITE SUR SITE…
+	TypeDepense string  `json:"type_depense"` // « Standard »
+	DateDebut   string  `json:"date_debut"`   // informative (le budget ne dépend pas de la date)
+	DateFin     string  `json:"date_fin"`
+	Groupe      string  `json:"groupe"` // chemin des groupes Excel, ex. "Réserve de capacité & aléas > Provisions pour aléas"
+	// Parsing.
+	StatutParsing ParsingStatut `json:"statut_parsing"`
+	MotifRejet    string        `json:"motif_rejet"`
+}
+
+type ProvisionLineTotals struct {
+	Montant float64 `json:"montant"`
+}
+
+type ProvisionLinesPage struct {
+	Items  []ProvisionLine     `json:"items"`
+	Total  int                 `json:"total"`
+	Totals ProvisionLineTotals `json:"totals"`
+}
+
 // Facets: valeurs distinctes par nom de filtre, pour peupler les selects.
 type Facets map[string][]string
 
@@ -319,25 +354,30 @@ const (
 )
 
 type AnalyseContext struct {
-	PlanVersions     []Version  `json:"plan_versions"`    // non purgées
-	RealiseVersions  []Version  `json:"realise_versions"` // non purgées
-	DefaultPlanID    *string    `json:"default_plan_id"`
-	DefaultRealiseID *string    `json:"default_realise_id"`
-	DefaultWeekFrom  string     `json:"default_week_from"`
-	DefaultWeekTo    string     `json:"default_week_to"`
-	Weeks            []WeekInfo `json:"weeks"`   // union des semaines couvertes par les versions par défaut
-	Message          string     `json:"message"` // ex. "Aucun plan actif : importez ou réactivez un plan"
+	PlanVersions     []Version `json:"plan_versions"`    // non purgées
+	RealiseVersions  []Version `json:"realise_versions"` // non purgées
+	DefaultPlanID    *string   `json:"default_plan_id"`
+	DefaultRealiseID *string   `json:"default_realise_id"`
+	// Provisions : facultatives (pas de 409 sans version) ; défaut = version active.
+	ProvisionVersions  []Version  `json:"provision_versions"` // non purgées
+	DefaultProvisionID *string    `json:"default_provision_id"`
+	DefaultWeekFrom    string     `json:"default_week_from"`
+	DefaultWeekTo      string     `json:"default_week_to"`
+	Weeks              []WeekInfo `json:"weeks"`   // union des semaines couvertes par les versions par défaut
+	Message            string     `json:"message"` // ex. "Aucun plan actif : importez ou réactivez un plan"
 }
 
 type AnalyseMeta struct {
-	PlanVersion     *Version   `json:"plan_version"`
-	RealiseVersion  *Version   `json:"realise_version"`
-	ArchivedWarning bool       `json:"archived_warning"` // une version archivée est utilisée
-	WeekFrom        string     `json:"week_from"`
-	WeekTo          string     `json:"week_to"`
-	Weeks           []WeekInfo `json:"weeks"`
-	IncludeInactive bool       `json:"include_inactive"`
-	GeneratedAt     time.Time  `json:"generated_at"`
+	PlanVersion    *Version `json:"plan_version"`
+	RealiseVersion *Version `json:"realise_version"`
+	// Version de provisions retenue (null : aucune, budget = Σ PPS seul).
+	ProvisionVersion *Version   `json:"provision_version"`
+	ArchivedWarning  bool       `json:"archived_warning"` // une version archivée est utilisée
+	WeekFrom         string     `json:"week_from"`
+	WeekTo           string     `json:"week_to"`
+	Weeks            []WeekInfo `json:"weeks"`
+	IncludeInactive  bool       `json:"include_inactive"`
+	GeneratedAt      time.Time  `json:"generated_at"`
 	// Timeline du plan : fenêtres des versions retenues (versions importées
 	// jusqu'à plan_version), triées par date. Hors fenêtres = non couvert.
 	Timeline []TimelineWindow `json:"timeline"`
@@ -441,7 +481,9 @@ type BudgetCT struct {
 	NonSecurise float64  `json:"non_securise"`
 	NonClasse   float64  `json:"non_classe"`
 	PctSecurite *float64 `json:"pct_securite"` // 0..100, null si dénominateur nul
-	PPSPlan     float64  `json:"pps_plan"`     // Σ PPS du plan sur ce CT (info)
+	PPSPlan     float64  `json:"pps_plan"`     // Σ PPS du plan sur ce CT
+	Provisions  float64  `json:"provisions"`   // Σ provisions du CT
+	ChargeMax   float64  `json:"charge_max"`   // pps_plan + provisions (budget du CT)
 	HeuresMO    float64  `json:"heures_mo"`    // Σ heures MO réalisées (info)
 	CoutMOEur   float64  `json:"cout_mo_eur"`  // Σ TOTAL EN € des lignes MO (info, hors budget)
 	Risque      bool     `json:"risque"`       // non_securise > seuil
@@ -461,13 +503,16 @@ type Budget struct {
 	ParNature []BudgetNature `json:"par_nature"` // analyse budgétaire, 5 lignes fixes (DECISIONS n° 10)
 }
 
-// BudgetNature : PPS du plan et réalisé (Σ TOTAL EN €, avoirs compris) d'une nature de coût.
+// BudgetNature : budget (PPS du plan + provisions importées) et réalisé
+// (Σ TOTAL EN €, avoirs compris) d'une nature de coût. Σ budget = previsions.global.budget.
 type BudgetNature struct {
-	Nature      string   `json:"nature"`  // provision | mo | capacite | frais | autres
-	Libelle     string   `json:"libelle"` // « Provision », « Main d'œuvre »…
-	PPS         float64  `json:"pps"`
+	Nature      string   `json:"nature"`     // provision | mo | capacite | frais | autres
+	Libelle     string   `json:"libelle"`    // « Provision », « Main d'œuvre »…
+	PPS         float64  `json:"pps"`        // Σ PPS du plan
+	Provisions  float64  `json:"provisions"` // Σ provisions importées, ventilées selon leur ligne de coût
+	Budget      float64  `json:"budget"`     // pps + provisions
 	Realise     float64  `json:"realise"`
-	PctConsomme *float64 `json:"pct_consomme"` // 0..100+, null si PPS nul
+	PctConsomme *float64 `json:"pct_consomme"` // realise ÷ budget, 0..100+, null si budget nul
 }
 
 type AlerteCT struct {
@@ -518,7 +563,7 @@ type Correspondance struct {
 type PrevisionPoint struct {
 	Week          string     `json:"week"`           // "2026-W37"
 	Debut         string     `json:"debut"`          // lundi, YYYY-MM-DD
-	BudgetCumul   float64    `json:"budget_cumul"`   // dépense prévue cumulée (PPS réparti au prorata des heures)
+	BudgetCumul   float64    `json:"budget_cumul"`   // dépense prévue cumulée du plan (PPS réparti au prorata des heures ; hors provisions)
 	ReelCumul     *float64   `json:"reel_cumul"`     // € réalisés cumulés ; null après as_of
 	PlanCumul     *float64   `json:"plan_cumul"`     // projection plan ; null avant as_of (= réel à as_of)
 	TendanceCumul *float64   `json:"tendance_cumul"` // projection au rythme récent ; null avant as_of
@@ -531,7 +576,9 @@ type PrevisionPoint struct {
 type PrevisionCT struct {
 	CT                   string           `json:"ct"`
 	CTLibelle            string           `json:"ct_libelle"`
-	Budget               float64          `json:"budget"`                // Σ PPS des lignes de plan
+	Budget               float64          `json:"budget"`                // charge max = pps + provisions (référence des écarts et du statut)
+	PPS                  float64          `json:"pps"`                   // Σ PPS des lignes de plan (segments de la timeline)
+	Provisions           float64          `json:"provisions"`            // Σ provisions restantes (version de provisions retenue)
 	Consomme             float64          `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of
 	PctConsomme          *float64         `json:"pct_consomme"`          // 0..100, null si budget nul
 	ResteAFaire          float64          `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of

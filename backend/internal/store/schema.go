@@ -6,7 +6,7 @@ package store
 const schema = `
 CREATE TABLE IF NOT EXISTS versions (
 	id                TEXT PRIMARY KEY,
-	kind              TEXT NOT NULL CHECK (kind IN ('plan','realise')),
+	kind              TEXT NOT NULL CHECK (kind IN ('plan','realise','provision')),
 	intitule          TEXT NOT NULL,
 	importee_le       TEXT NOT NULL,          -- RFC3339
 	importeur         TEXT NOT NULL DEFAULT 'local',
@@ -133,6 +133,25 @@ CREATE TABLE IF NOT EXISTS realise_entries (
 	motif_rejet          TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS realise_entries_version ON realise_entries(version_id);
+
+-- Provisions (DECISIONS n° 16) : export « Dépenses prévues », montants en €.
+CREATE TABLE IF NOT EXISTS provision_lines (
+	id             INTEGER PRIMARY KEY AUTOINCREMENT,
+	version_id     TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+	row_num        INTEGER NOT NULL,
+	ct             TEXT NOT NULL DEFAULT '',
+	libelle        TEXT NOT NULL DEFAULT '',
+	montant        REAL NOT NULL DEFAULT 0,
+	unite          TEXT NOT NULL DEFAULT '',
+	ligne_cout     TEXT NOT NULL DEFAULT '',
+	type_depense   TEXT NOT NULL DEFAULT '',
+	date_debut     TEXT NOT NULL DEFAULT '',
+	date_fin       TEXT NOT NULL DEFAULT '',
+	groupe         TEXT NOT NULL DEFAULT '',
+	statut_parsing TEXT NOT NULL CHECK (statut_parsing IN ('ok','warn','drop')),
+	motif_rejet    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS provision_lines_version ON provision_lines(version_id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -39,8 +39,11 @@ func scanVersion(sc interface{ Scan(...any) error }) (domain.Version, error) {
 func objetType(kind domain.Kind) string { return string(kind) + "_version" }
 
 func linesTable(kind domain.Kind) string {
-	if kind == domain.KindPlan {
+	switch kind {
+	case domain.KindPlan:
 		return "plan_lines"
+	case domain.KindProvision:
+		return "provision_lines"
 	}
 	return "realise_entries"
 }

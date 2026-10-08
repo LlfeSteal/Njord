@@ -40,7 +40,7 @@ export interface ImportWizardProps {
 }
 
 const MAX_SIZE = 50 * 1024 * 1024;
-const KIND_LABEL: Record<Kind, string> = { plan: 'plan de charge', realise: 'réalisé' };
+const KIND_LABEL: Record<Kind, string> = { plan: 'plan de charge', realise: 'réalisé', provision: 'provisions' };
 
 const BLOCKING_TITLES: Record<string, string> = {
   sheet_not_found: 'Onglet introuvable',

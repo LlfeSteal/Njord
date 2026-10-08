@@ -84,6 +84,9 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
+	if err := widenVersionKinds(db); err != nil {
+		return err
+	}
 	if err := migrateData(db); err != nil {
 		return err
 	}

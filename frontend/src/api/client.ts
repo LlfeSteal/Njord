@@ -14,6 +14,7 @@ import type {
   Personne,
   PlanLinesPage,
   PlanTimeline,
+  ProvisionLinesPage,
   RealiseEntriesPage,
   Settings,
   Squad,
@@ -166,6 +167,23 @@ export interface RealiseEntriesQuery extends Query {
 export const realiseApi = {
   entries: (id: string, q: RealiseEntriesQuery) => get<RealiseEntriesPage>(`/realise/versions/${id}/entries`, q),
   entriesCsvUrl: (id: string, q: RealiseEntriesQuery) => csvUrl(`/realise/versions/${id}/entries.csv`, q),
+};
+
+// ------------------------------------------------------------------ Provisions (DECISIONS n° 16)
+export interface ProvisionLinesQuery extends Query {
+  ct?: string;
+  ligne_cout?: string;
+  groupe?: string;
+  statut?: string;
+  q?: string; // CT, libellé, groupe (insensible aux accents)
+  sort?: 'ct' | 'montant' | 'date_debut' | 'row_num';
+  order?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+export const provisionApi = {
+  lines: (id: string, q: ProvisionLinesQuery) => get<ProvisionLinesPage>(`/provision/versions/${id}/lines`, q),
+  linesCsvUrl: (id: string, q: ProvisionLinesQuery) => csvUrl(`/provision/versions/${id}/lines.csv`, q),
 };
 
 // ------------------------------------------------------------------ Référentiels

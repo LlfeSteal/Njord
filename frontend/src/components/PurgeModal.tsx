@@ -25,7 +25,11 @@ export interface PurgeModalProps {
   onPurged?: (v: Version) => void;
 }
 
-const LINES_LABEL: Record<Kind, string> = { plan: 'lignes du plan de charge', realise: 'écritures du réalisé' };
+const LINES_LABEL: Record<Kind, string> = {
+  plan: 'lignes du plan de charge',
+  realise: 'écritures du réalisé',
+  provision: 'lignes de provisions',
+};
 
 export default function PurgeModal({ kind, version, onClose, onPurged }: PurgeModalProps) {
   const qc = useQueryClient();

@@ -45,6 +45,7 @@ func (h *Handler) context(c *gin.Context) {
 // params reads the common analysis query parameters.
 type params struct {
 	planID, realiseID string
+	provisionID       string // "" = version de provisions active (facultative)
 	weekFrom, weekTo  string
 	includeInactive   bool
 }
@@ -53,6 +54,7 @@ func readParams(c *gin.Context) (params, error) {
 	p := params{
 		planID:          strings.TrimSpace(c.Query("plan_version_id")),
 		realiseID:       strings.TrimSpace(c.Query("realise_version_id")),
+		provisionID:     strings.TrimSpace(c.Query("provision_version_id")),
 		includeInactive: httpx.QueryBool(c, "include_inactive", false),
 	}
 	var err error
@@ -82,11 +84,15 @@ func (h *Handler) compute(ctx context.Context, p params) (domain.AnalyseResult, 
 	if err != nil {
 		return domain.AnalyseResult{}, err
 	}
+	provision, err := h.repo.ResolveProvision(ctx, p.provisionID)
+	if err != nil {
+		return domain.AnalyseResult{}, err
+	}
 	s, err := h.st.GetSettings(ctx)
 	if err != nil {
 		return domain.AnalyseResult{}, err
 	}
-	in, err := h.repo.LoadInput(ctx, plan, realise)
+	in, err := h.repo.LoadInput(ctx, plan, realise, provision)
 	if err != nil {
 		return domain.AnalyseResult{}, err
 	}
@@ -113,6 +119,9 @@ func (h *Handler) analyse(c *gin.Context) {
 	lp := lastParams{
 		PlanVersionID: res.Meta.PlanVersion.ID, RealiseVersionID: res.Meta.RealiseVersion.ID,
 		WeekFrom: res.Meta.WeekFrom, WeekTo: res.Meta.WeekTo, IncludeInactive: p.includeInactive,
+	}
+	if res.Meta.ProvisionVersion != nil {
+		lp.ProvisionVersionID = res.Meta.ProvisionVersion.ID
 	}
 	if err := h.repo.SaveLast(c, lp, &res); err != nil {
 		httpx.Error(c, err)

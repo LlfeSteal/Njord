@@ -885,3 +885,90 @@ func TestErreurCTDemo(t *testing.T) {
 		t.Errorf("anomalie %s absente", k)
 	}
 }
+
+// ---------------------------------------------------------------- provisions (DECISIONS n° 16)
+
+func TestBudgetProvisions(t *testing.T) {
+	in := baseInput()
+	l := planLine("CTA", "", "DURAND Claire", nil, 10)
+	l.PPS = 5000
+	onePlan(&in, l)
+	drop := provLine("CTA", "CAPACITE SUR SITE", "Proj > A", 99999)
+	drop.StatutParsing = domain.ParsingDrop
+	in.Provisions = []domain.ProvisionLine{
+		provLine("CTA", "CAPACITE SUR SITE", "Proj > A", 1000),
+		provLine("CTA", "FRAIS ACHATS CAPACITE SUR SITE", "Proj > A", 35), // contient CAPACITE → capacité
+		provLine("CTA", "FRAIS DE MISSION", "Proj > A", 200),
+		provLine("CTA", "PROVISIONS POUR ALEAS", "Proj > A", 300),
+		// CT dont le libellé (sous-projet) parle de provision : la provision prime.
+		provLine("CTP", "CAPACITE SUR SITE", "Réserve > Provisions pour aléas", 10000),
+		provLine("CTQ", "Stockage", "Réserve > Fonds", 400),              // provisions seules
+		provLine("CTR", "AUTRES PRESTATIONS", "Achats > Externes", 1000), // réalisé sans plan
+		provLine("", "FRAIS DE MISSION", "", 50),                         // sans CT : natures et global
+		drop,
+	}
+	in.Entries = []domain.RealiseEntry{
+		mo("CTA", "DURAND Claire Mme", 10, "2026-09-08"),       // 1 000 €
+		cost("CTR", "AUTRES PRESTATIONS", "PRESTATION", 60000), // écart > 50 000 € à la charge max
+		cost("CTZ", "AUTRES PRESTATIONS", "PRESTATION", 90000), // ni plan ni provision : non comparé
+	}
+	res := Run(in, store.DefaultSettings())
+
+	byCT := map[string]domain.BudgetCT{}
+	for _, b := range res.Budget.ParCT {
+		byCT[b.CT] = b
+	}
+	if b := byCT["CTA"]; b.PPSPlan != 5000 || b.Provisions != 1535 || b.ChargeMax != 6535 {
+		t.Errorf("CTA : %+v", b)
+	}
+	if b, ok := byCT["CTQ"]; !ok || b.PPSPlan != 0 || b.Provisions != 400 || b.ChargeMax != 400 || b.CTLibelle != "Fonds" {
+		t.Errorf("CTQ (provisions seules) : %+v", b)
+	}
+	if b := byCT["CTR"]; b.Provisions != 1000 || b.ChargeMax != 1000 {
+		t.Errorf("CTR : %+v", b)
+	}
+
+	want := []struct {
+		nature          string
+		pps, provisions float64
+	}{
+		{"provision", 0, 10300}, {"mo", 5000, 0}, {"capacite", 0, 1035}, {"frais", 0, 250}, {"autres", 0, 1400},
+	}
+	var budget float64
+	for i, w := range want {
+		n := res.Budget.ParNature[i]
+		if n.Nature != w.nature || n.PPS != w.pps || n.Provisions != w.provisions || n.Budget != w.pps+w.provisions {
+			t.Errorf("%s : %+v, attendu PPS %.0f provisions %.0f", w.nature, n, w.pps, w.provisions)
+		}
+		budget += n.Budget
+	}
+	if n := res.Budget.ParNature[1]; n.PctConsomme == nil || *n.PctConsomme != 20 {
+		t.Errorf("mo : %% consommé %v", n.PctConsomme)
+	}
+	if n := res.Budget.ParNature[4]; n.PctConsomme == nil || *n.PctConsomme != round2(150000.0/1400*100) {
+		t.Errorf("autres : %% consommé sur le budget %v", n.PctConsomme)
+	}
+	if gl := res.Previsions.Global; budget != gl.Budget || gl.Budget != 5000+12985 {
+		t.Errorf("Σ natures.budget %.2f ≠ budget global %.2f", budget, gl.Budget)
+	}
+
+	// Règle qualité 1 : CTR (réalisé + provisions, sans plan) comparé à sa charge max.
+	q := findQual(res, "tg_ecart_budget")
+	if q == nil || q.Count != 1 || len(q.Details) != 1 ||
+		q.Details[0] != "CTR : réalisé 60000 € / charge max 1000 € (PPS 0 € + provisions 1000 €)" {
+		t.Errorf("tg_ecart_budget : %+v", q)
+	}
+	// Anomalie budget : composition de la charge max dans le détail.
+	found := false
+	for _, a := range res.Anomalies {
+		if a.Categorie == domain.AnomalieBudget && a.CT == "CTR" {
+			found = true
+			if !strings.Contains(a.Detail, "pour un budget de "+fmtEur(1000)+" (PDC "+fmtEur(0)+" + provisions "+fmtEur(1000)+")") {
+				t.Errorf("détail : %q", a.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Error("anomalie budget CTR absente")
+	}
+}

@@ -23,7 +23,7 @@ var qualityOrder = []string{
 }
 
 var qualityDefs = map[string]qualityDef{
-	"tg_ecart_budget":     {1, "%d CT dont le Σ € réalisé s'écarte du PPS planifié au-delà du seuil"},
+	"tg_ecart_budget":     {1, "%d CT dont le Σ € réalisé s'écarte de la charge max (PPS planifié + provisions) au-delà du seuil"},
 	"mo_quantite_semaine": {2, "%d imputations MO hebdomadaires dépassent le seuil d'heures par personne (physiquement impossibles)"},
 	"sans_tg":             {4, "%d écritures sans TG exclues de l'analyse"},
 	"cloture":             {5, "%d écritures dont la période comptable précède la date de dépense de plus de 7 jours"},
@@ -82,9 +82,13 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func fmtH(v float64) string { return strconv.FormatFloat(round2(v), 'f', -1, 64) }
 
 // dataQuality: §10 rules 1, 4, 5 and the warn counts (segments of the
-// timeline, whole réalisé version).
+// timeline, whole réalisé version). Règle 1 : réalisé comparé à la charge max
+// (PPS + provisions, DECISIONS n° 16) des CT présents au plan ou aux provisions.
 func (r *run) dataQuality() {
-	ppsByCT := map[string]float64{}
+	ppsByCT, provByCT := map[string]float64{}, map[string]float64{}
+	for i := range r.provs {
+		provByCT[strings.TrimSpace(r.provs[i].CT)] += r.provs[i].Montant
+	}
 	for i := range r.lines {
 		l := &r.lines[i]
 		ppsByCT[strings.TrimSpace(l.CT)] += l.PPS
@@ -117,11 +121,16 @@ func (r *run) dataQuality() {
 	sortStrings(tgs)
 	for _, tg := range tgs {
 		pps, inPlan := ppsByCT[tg]
-		if !inPlan {
+		prov, inProv := provByCT[tg]
+		if !inPlan && !inProv {
 			continue
 		}
-		if d := eurByTG[tg] - pps; d > r.s.SeuilEcartTGEur || -d > r.s.SeuilEcartTGEur {
-			r.q.add("tg_ecart_budget", tg+" : réalisé "+fmtH(eurByTG[tg])+" € / PPS "+fmtH(pps)+" €")
+		if d := eurByTG[tg] - (pps + prov); d > r.s.SeuilEcartTGEur || -d > r.s.SeuilEcartTGEur {
+			ref := "PPS " + fmtH(pps) + " €"
+			if inProv {
+				ref = "charge max " + fmtH(pps+prov) + " € (PPS " + fmtH(pps) + " € + provisions " + fmtH(prov) + " €)"
+			}
+			r.q.add("tg_ecart_budget", tg+" : réalisé "+fmtH(eurByTG[tg])+" € / "+ref)
 		}
 	}
 }

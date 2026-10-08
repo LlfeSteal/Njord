@@ -69,7 +69,8 @@ func pct(num, den float64) *float64 {
 
 // budget computes §7.4 (per CT + global) and the alerts of §7.5 on every
 // entry of the réalisé version (avoirs included), independently of the week
-// period which only scopes the hours comparison.
+// period which only scopes the hours comparison. Charge max d'un CT = PPS du
+// plan + provisions (DECISIONS n° 16) ; les natures ventilent les deux.
 func (r *run) budget() (domain.Budget, domain.Alertes) {
 	byCT := map[string]*domain.BudgetCT{}
 	get := func(ct string) *domain.BudgetCT {
@@ -87,7 +88,7 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 			natCT[ct] = true
 		}
 	}
-	natPPS, natReel := map[string]float64{}, map[string]float64{}
+	natPPS, natProv, natReel := map[string]float64{}, map[string]float64{}, map[string]float64{}
 	for i := range r.lines {
 		l := &r.lines[i]
 		ct := strings.TrimSpace(l.CT)
@@ -98,6 +99,15 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 		get(ct).PPSPlan += l.PPS
 		if canon(l.LigneCout) == provisionType {
 			provCT[ct] = true
+		}
+	}
+	// Provisions : même classifieur que le plan, sur leur ligne de coût.
+	for i := range r.provs {
+		p := &r.provs[i]
+		ct := strings.TrimSpace(p.CT)
+		natProv[planNature(natCT[ct] || (ct != "" && isProvisionCT(r.ctLibelle[ct])), p.LigneCout)] += p.Montant
+		if ct != "" {
+			get(ct).Provisions += p.Montant
 		}
 	}
 
@@ -155,7 +165,9 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 		g.NonSecurise += b.NonSecurise
 		g.NonClasse += b.NonClasse
 		b.Securise, b.NonSecurise, b.NonClasse = round2(b.Securise), round2(b.NonSecurise), round2(b.NonClasse)
-		b.PPSPlan, b.HeuresMO, b.CoutMOEur = round2(b.PPSPlan), round2(b.HeuresMO), round2(b.CoutMOEur)
+		b.ChargeMax = round2(b.PPSPlan + b.Provisions)
+		b.PPSPlan, b.Provisions = round2(b.PPSPlan), round2(b.Provisions)
+		b.HeuresMO, b.CoutMOEur = round2(b.HeuresMO), round2(b.CoutMOEur)
 		b.PctSecurite = pct(b.Securise, b.Securise+b.NonSecurise)
 		b.Risque = b.NonSecurise > r.s.SeuilCTRisqueEur
 		if b.Risque {
@@ -170,8 +182,9 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 	out.Global = g
 	out.ParNature = make([]domain.BudgetNature, 0, len(natures))
 	for _, n := range natures {
-		pps, reel := round2(natPPS[n.code]), round2(natReel[n.code])
-		out.ParNature = append(out.ParNature, domain.BudgetNature{Nature: n.code, Libelle: n.libelle, PPS: pps, Realise: reel, PctConsomme: pct(reel, pps)})
+		bud, reel := round2(natPPS[n.code]+natProv[n.code]), round2(natReel[n.code])
+		out.ParNature = append(out.ParNature, domain.BudgetNature{Nature: n.code, Libelle: n.libelle,
+			PPS: round2(natPPS[n.code]), Provisions: round2(natProv[n.code]), Budget: bud, Realise: reel, PctConsomme: pct(reel, bud)})
 	}
 	al.PctNonSecurise = g.PctNonSecurise
 	al.AlerteGlobale = g.PctNonSecurise != nil && *g.PctNonSecurise > r.s.SeuilNonSecurisePct

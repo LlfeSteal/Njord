@@ -13,22 +13,29 @@ import (
 //
 //   - dépense prévue hebdo d'une ligne = PPS × heures de la semaine ÷ heures de
 //     la ligne (répartition en jours ouvrés, Calendar.Distribute) ;
+//   - budget = charge max = Σ PPS des segments + Σ provisions du CT
+//     (DECISIONS n° 16) ; c'est la référence des écarts, du % consommé et du statut ;
 //   - consommé = Σ TOTAL EN € brut (MO comprise) ;
-//   - reste à faire = dépense prévue des semaines > as_of_week ;
+//   - reste à faire = dépense prévue (plan seul) des semaines > as_of_week ;
 //   - tendance = rythme moyen des 4 dernières semaines × semaines restantes.
+//
+// Les provisions ne sont qu'un budget disponible : ni reste à faire, ni
+// atterrissage, ni série (budget_cumul = dépense prévue cumulée du plan seul) ;
+// leurs dates sont ignorées.
 
 // fcTolerance absorbe les arrondis dans la comparaison atterrissage / budget.
 const fcTolerance = 0.5
 
 // fcBucket accumulates the raw (unrounded) figures of one CT.
 type fcBucket struct {
-	budget, consomme float64
-	undated          float64 // € d'écritures sans date de dépense valide (comptés au consommé)
-	prevu            map[string]float64
-	reel             map[string]float64
-	hplan            map[string]float64
-	hreel            map[string]float64
-	fin              string // max date_fin (YYYY-MM-DD)
+	pps, provisions float64
+	consomme        float64
+	undated         float64 // € d'écritures sans date de dépense valide (comptés au consommé)
+	prevu           map[string]float64
+	reel            map[string]float64
+	hplan           map[string]float64
+	hreel           map[string]float64
+	fin             string // max date_fin (YYYY-MM-DD)
 }
 
 func newFcBucket() *fcBucket {
@@ -37,10 +44,11 @@ func newFcBucket() *fcBucket {
 
 // fcCalc is the computed forecast of one bucket, series aligned on the axis.
 type fcCalc struct {
-	budget, consomme, reste, atterPlan, atterTend, rythme float64
-	sr                                                    int
-	fin                                                   string
-	budgetCum, reelCum, planCum, tendCum, hp, hr          []float64
+	pps, provisions, budget                       float64 // budget = pps + provisions (charge max)
+	consomme, reste, atterPlan, atterTend, rythme float64
+	sr                                            int
+	fin                                           string
+	budgetCum, reelCum, planCum, tendCum, hp, hr  []float64
 }
 
 // previsions computes the landing forecast (SPEC_analyse §7.7).
@@ -67,11 +75,11 @@ func (r *run) previsions() domain.Previsions {
 		}
 	}
 
-	// Plan : budget, dépense prévue et heures MO par semaine (segments de la timeline).
+	// Plan : PPS, dépense prévue et heures MO par semaine (segments de la timeline).
 	for i := range r.lines {
 		l := &r.lines[i]
 		b := get(strings.TrimSpace(l.CT))
-		b.budget += l.PPS
+		b.pps += l.PPS
 		if _, ok := ParseDate(l.DateDebut); ok {
 			extend(WeekOfDate(l.DateDebut))
 		}
@@ -92,6 +100,11 @@ func (r *run) previsions() domain.Previsions {
 				}
 			}
 		}
+	}
+
+	// Provisions : budget disponible du CT, sans date ni série.
+	for i := range r.provs {
+		get(strings.TrimSpace(r.provs[i].CT)).provisions += r.provs[i].Montant
 	}
 
 	// Réalisé : consommé brut, heures MO, as_of.
@@ -147,6 +160,8 @@ func (r *run) previsions() domain.Previsions {
 	out := domain.Previsions{AsOf: asOf, AsOfWeek: asOfWeek, ParCT: []domain.PrevisionCT{}}
 	for _, ct := range cts {
 		c := r.fcCompute(buckets[ct], axis, asIdx, asOfWeek, last4)
+		g.pps += c.pps
+		g.provisions += c.provisions
 		g.budget += c.budget
 		g.consomme += c.consomme
 		g.reste += c.reste
@@ -238,7 +253,7 @@ func (r *run) spreadPPS(l *domain.PlanLine) map[string]float64 {
 // fcCompute derives the figures and the raw cumulative series of one bucket.
 func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, last4 []string) fcCalc {
 	n := len(axis)
-	c := fcCalc{budget: b.budget, consomme: b.consomme, fin: b.fin,
+	c := fcCalc{pps: b.pps, provisions: b.provisions, budget: b.pps + b.provisions, consomme: b.consomme, fin: b.fin,
 		budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n)}
 	for w, v := range b.prevu {
@@ -312,8 +327,8 @@ func fcRemaining(axis []string, asOfWeek, fin string) int {
 	return int(z.Sub(a).Hours()/24/7+0.5) + extra
 }
 
-// fcStatut: dépassement si atterrissage plan > budget (ou CT hors plan
-// consommé) ; vigilance si tendance > budget ou plan > 95 % du budget.
+// fcStatut: dépassement si atterrissage plan > budget (charge max) ou CT sans
+// budget consommé ; vigilance si tendance > budget ou plan > 95 % du budget.
 func fcStatut(c fcCalc) domain.PrevisionStatut {
 	switch {
 	case c.atterPlan > c.budget+fcTolerance, c.budget == 0 && c.consomme > 0:
@@ -335,6 +350,8 @@ func fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couvertur
 		CT:                   ct,
 		CTLibelle:            libelle,
 		Budget:               round2(c.budget),
+		PPS:                  round2(c.pps),
+		Provisions:           round2(c.provisions),
 		Consomme:             round2(c.consomme),
 		PctConsomme:          pct(c.consomme, c.budget),
 		ResteAFaire:          round2(c.reste),

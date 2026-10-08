@@ -319,3 +319,106 @@ func TestPrevisionsSansRealise(t *testing.T) {
 		t.Errorf("vide = %+v", pv)
 	}
 }
+
+// provLine: une ligne de provision (DECISIONS n° 16).
+func provLine(ct, ligneCout, groupe string, montant float64) domain.ProvisionLine {
+	rowSeq++
+	return domain.ProvisionLine{RowNum: rowSeq, CT: ct, Libelle: "Provision " + ct, Montant: montant, Unite: "EURO",
+		LigneCout: ligneCout, TypeDepense: "Standard", DateDebut: "2026-12-30", DateFin: "2026-12-31", Groupe: groupe,
+		StatutParsing: domain.ParsingOK}
+}
+
+func TestPrevisionsProvisions(t *testing.T) {
+	in := baseInput()
+	onePlan(&in,
+		fcLine("A", 80, 4000, "2026-09-07", "2026-10-02", "MAIN D'OEUVRE SUR SITE"),
+		// D : budget 1 000 €, consommé 1 500 € → dépassement sans provisions.
+		fcLine("D", 10, 1000, "2026-09-14", "2026-09-18", "MAIN D'OEUVRE SUR SITE"),
+		// B : sans réalisé, 2 000 € → vigilance (100 % du budget) sans provisions.
+		fcLine("B", 0, 2000, "2026-10-05", "2026-10-16", "FRAIS"),
+	)
+	in.Entries = []domain.RealiseEntry{
+		mo("A", "DURAND Claire", 30, "2026-09-08"),
+		fcEntry("D", 1500, "2026-09-15"),
+		fcEntry("X", 300, "2026-10-03"), // hors plan : dépassement sans provisions
+	}
+	s := store.DefaultSettings()
+	sans := Run(in, s).Previsions
+
+	drop := provLine("A", "CAPACITE SUR SITE", "Proj > A", 99999)
+	drop.StatutParsing = domain.ParsingDrop
+	in.ProvisionVersion = &domain.Version{ID: "prov1", Kind: domain.KindProvision, Statut: domain.StatutActive}
+	in.Provisions = []domain.ProvisionLine{
+		provLine("D", "CAPACITE SUR SITE", "Proj > Squad D", 600),
+		provLine("B", "PROVISIONS POUR ALEAS", "Proj > Squad B", 1000),
+		provLine("X", "FRAIS DE MISSION", "Proj > Missions", 1000),
+		provLine("P", "CAPACITE SUR SITE", "Réserve > Fonds de transformation", 1500),
+		provLine("P", "FRAIS ACHATS CAPACITE SUR SITE", "Réserve > Autre libellé", 500),
+		provLine("", "FRAIS DE MISSION", "", 50), // sans CT : global seulement
+		drop,
+	}
+	res := Run(in, s)
+	pv := res.Previsions
+	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov1" {
+		t.Errorf("meta.provision_version = %+v", res.Meta.ProvisionVersion)
+	}
+
+	d := findCT(t, pv, "D")
+	// Charge max 1 600 € ; atterrissage 1 500 € < 95 % → ok ; l'atterrissage ne contient pas les provisions.
+	if d.PPS != 1000 || d.Provisions != 600 || d.Budget != 1600 || d.AtterrissagePlan != 1500 || d.ResteAFaire != 0 ||
+		d.EcartPlan != -100 || d.Statut != domain.PrevisionOK || d.PctConsomme == nil || *d.PctConsomme != 93.75 {
+		t.Errorf("D = %+v", d)
+	}
+	b := findCT(t, pv, "B")
+	if b.Budget != 3000 || b.ResteAFaire != 2000 || b.AtterrissagePlan != 2000 || b.Statut != domain.PrevisionOK {
+		t.Errorf("B = %+v", b)
+	}
+	x := findCT(t, pv, "X")
+	if x.PPS != 0 || x.Provisions != 1000 || x.Budget != 1000 || x.Consomme != 300 || x.Statut != domain.PrevisionOK {
+		t.Errorf("X = %+v", x)
+	}
+	// CT présent seulement dans les provisions : libellé = sous-projet de la 1re ligne.
+	p := findCT(t, pv, "P")
+	if p.CTLibelle != "Fonds de transformation" || p.PPS != 0 || p.Provisions != 2000 || p.Budget != 2000 || p.Consomme != 0 ||
+		p.ResteAFaire != 0 || p.AtterrissagePlan != 0 || p.Statut != domain.PrevisionOK || p.FinPlan != "" || p.SemainesRestantes != 0 {
+		t.Errorf("P = %+v", p)
+	}
+	for _, c := range append(pv.ParCT, pv.Global) {
+		checkInvariants(t, c, pv.AsOf)
+		if !near(c.Budget, c.PPS+c.Provisions, 0.02) {
+			t.Errorf("%s : budget %v ≠ pps %v + provisions %v", c.CT, c.Budget, c.PPS, c.Provisions)
+		}
+	}
+
+	// Global : budget = Σ PPS + Σ provisions (lignes sans CT comprises, drop exclue) ;
+	// reste, atterrissages et budget_cumul inchangés.
+	gl, gs := pv.Global, sans.Global
+	if gl.PPS != 7000 || gl.Provisions != 4650 || gl.Budget != 11650 || gs.Budget != 7000 || gs.Provisions != 0 || gs.PPS != 7000 {
+		t.Errorf("global = pps %v provisions %v budget %v (sans : %v)", gl.PPS, gl.Provisions, gl.Budget, gs.Budget)
+	}
+	if gl.ResteAFaire != gs.ResteAFaire || gl.AtterrissagePlan != gs.AtterrissagePlan || gl.AtterrissageTendance != gs.AtterrissageTendance ||
+		gl.Consomme != gs.Consomme || len(gl.Series) != len(gs.Series) {
+		t.Errorf("les provisions ne doivent changer ni reste ni atterrissage : %+v / %+v", gl, gs)
+	}
+	for i := range gl.Series {
+		if gl.Series[i].BudgetCumul != gs.Series[i].BudgetCumul {
+			t.Errorf("budget_cumul %s : %v ≠ %v (plan seul)", gl.Series[i].Week, gl.Series[i].BudgetCumul, gs.Series[i].BudgetCumul)
+		}
+	}
+	// Sans provisions : statuts antérieurs.
+	if findCT(t, sans, "D").Statut != domain.PrevisionDepassement || findCT(t, sans, "X").Statut != domain.PrevisionDepassement ||
+		findCT(t, sans, "B").Statut != domain.PrevisionVigilance {
+		t.Error("statuts sans provisions modifiés")
+	}
+	for _, c := range sans.ParCT {
+		if c.CT == "P" {
+			t.Error("CT P sans provisions : ne doit pas apparaître")
+		}
+	}
+	// Anomalies budget : X n'est plus « hors budget », plus d'anomalie pour D.
+	for _, a := range res.Anomalies {
+		if a.Categorie == domain.AnomalieBudget && (a.CT == "D" || a.CT == "X" || a.CT == "P") {
+			t.Errorf("anomalie budget inattendue : %+v", a)
+		}
+	}
+}

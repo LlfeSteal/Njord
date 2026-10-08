@@ -28,6 +28,10 @@ type Input struct {
 	Entries        []domain.RealiseEntry
 	Personnes      []domain.Personne // référentiel (clé nom_normalise = names.Key)
 	Squads         []domain.Squad
+	// Provisions (DECISIONS n° 16) : version retenue (nil = aucune, budget = Σ PPS)
+	// et ses lignes ; charge max d'un CT = Σ PPS + Σ provisions.
+	ProvisionVersion *domain.Version
+	Provisions       []domain.ProvisionLine
 	// Période d'analyse en semaines ISO "2026-W36" ; "" = défaut (semaines communes).
 	WeekFrom, WeekTo string
 	IncludeInactive  bool
@@ -72,6 +76,7 @@ type run struct {
 	multi     bool // plusieurs versions dans la timeline (références de ligne qualifiées)
 	nonCouv   float64
 	entries   []domain.RealiseEntry
+	provs     []domain.ProvisionLine // lignes de provision non drop
 	enr       []Enrichment
 	ids       []*identity // résolution des écritures MO (heures ≠ 0), nil sinon
 	personnes map[string]*domain.Personne
@@ -109,6 +114,11 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 		}
 	}
 	sort.SliceStable(r.entries, func(i, j int) bool { return r.entries[i].RowNum < r.entries[j].RowNum })
+	for _, p := range in.Provisions {
+		if p.StatutParsing != domain.ParsingDrop {
+			r.provs = append(r.provs, p)
+		}
+	}
 	for i := range in.Personnes {
 		r.personnes[in.Personnes[i].ID] = &in.Personnes[i]
 	}
@@ -118,6 +128,7 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 	r.m = newMatcher(in.Personnes, r.lines)
 
 	r.enrich()
+	r.provisionLibelles()
 	r.period()
 	r.planSide()
 	r.realSide()
@@ -139,15 +150,16 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 	plan, real := in.PlanRef, in.Realise
 	res := domain.AnalyseResult{
 		Meta: domain.AnalyseMeta{
-			PlanVersion:     &plan,
-			RealiseVersion:  &real,
-			ArchivedWarning: in.PlanSuperseded || real.Statut == domain.StatutArchivee,
-			WeekFrom:        r.from,
-			WeekTo:          r.to,
-			Weeks:           r.tl.weeks(r.cal, r.from, r.to),
-			IncludeInactive: in.IncludeInactive,
-			GeneratedAt:     in.Now,
-			Timeline:        r.tl.Windows,
+			PlanVersion:      &plan,
+			RealiseVersion:   &real,
+			ProvisionVersion: in.ProvisionVersion,
+			ArchivedWarning:  in.PlanSuperseded || real.Statut == domain.StatutArchivee,
+			WeekFrom:         r.from,
+			WeekTo:           r.to,
+			Weeks:            r.tl.weeks(r.cal, r.from, r.to),
+			IncludeInactive:  in.IncludeInactive,
+			GeneratedAt:      in.Now,
+			Timeline:         r.tl.Windows,
 		},
 		KPIs:            kpis,
 		Ecarts:          ecarts,
@@ -194,6 +206,25 @@ func (r *run) enrich() {
 		if r.enr[i].MO && r.enr[i].Heures != 0 { // contre-passations (heures < 0) incluses
 			id := r.m.resolve(e.NomPrenom, entryName(e))
 			r.ids[i] = &id
+		}
+	}
+}
+
+// provisionLibelles: libellé des CT sans libellé réalisé = dernier segment du
+// groupe de leurs lignes de provision (le sous-projet de l'export est le CT).
+func (r *run) provisionLibelles() {
+	for i := range r.provs {
+		p := &r.provs[i]
+		ct := strings.TrimSpace(p.CT)
+		if ct == "" || r.ctLibelle[ct] != "" {
+			continue
+		}
+		g := p.Groupe
+		if k := strings.LastIndex(g, ">"); k >= 0 {
+			g = g[k+1:]
+		}
+		if g = strings.TrimSpace(g); g != "" {
+			r.ctLibelle[ct] = g
 		}
 	}
 }

@@ -509,10 +509,15 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			montant = p.EcartTendance
 			titre += " (tendance +" + fmtEur(montant) + ")"
 		}
-		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour un budget de " + fmtEur(p.Budget) +
+		budget := fmtEur(p.Budget)
+		if p.Provisions != 0 {
+			// Budget = charge max (DECISIONS n° 16) : on en donne la composition.
+			budget += " (PDC " + fmtEur(p.PPS) + " + provisions " + fmtEur(p.Provisions) + ")"
+		}
+		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour un budget de " + budget +
 			" (tendance " + fmtEur(p.AtterrissageTendance) + ")"
 		if p.Budget == 0 {
-			// CT présent au réalisé mais absent du plan : dépense sans budget plutôt que « dépassement ».
+			// CT présent au réalisé mais absent du plan et des provisions : dépense sans budget plutôt que « dépassement ».
 			titre = "Dépense hors budget · " + p.CT + " (" + fmtEur(p.Consomme) + ")"
 			detail = fmtEur(p.Consomme) + " dépensés sur un CT absent du plan de charge (aucun budget prévu)"
 		}

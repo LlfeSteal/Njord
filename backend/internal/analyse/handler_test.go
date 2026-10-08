@@ -285,7 +285,7 @@ func TestRepoLoadInput(t *testing.T) {
 	ctx := context.Background()
 	plan, _ := e.st.GetVersion(ctx, domain.KindPlan, "plan1")
 	real, _ := e.st.GetVersion(ctx, domain.KindRealise, "real1")
-	in, err := repo.LoadInput(ctx, plan, real)
+	in, err := repo.LoadInput(ctx, plan, real, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestRepoLoadInput(t *testing.T) {
 		t.Errorf("nom_prenom du plan mal relu : %q / %q", lines[0].NomPrenom, lines[3].NomPrenom)
 	}
 	plan0, _ := e.st.GetVersion(ctx, domain.KindPlan, "plan0")
-	if in, err = repo.LoadInput(ctx, plan0, real); err != nil || len(in.Plans) != 1 || !in.PlanSuperseded {
+	if in, err = repo.LoadInput(ctx, plan0, real, nil); err != nil || len(in.Plans) != 1 || !in.PlanSuperseded {
 		t.Errorf("timeline connue à plan0 : %d versions, superseded %v, %v", len(in.Plans), in.PlanSuperseded, err)
 	}
 	if in.Entries[0].NomPrenom != "DURAND Claire" || in.Entries[0].Matricule != "A00001" {
@@ -451,5 +451,115 @@ func TestHandlerAnalyseTimeline(t *testing.T) {
 	}
 	if ctx := decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil)); ctx.DefaultPlanID == nil || *ctx.DefaultPlanID != "pB" || ctx.Message != "" {
 		t.Errorf("context sans active : %+v", ctx)
+	}
+}
+
+// seedProvisions: prov0 (archivée), prov1 (active), prov9 (purgée).
+func (e *env) seedProvisions() {
+	e.versionAt("prov0", "provision", "archivee", "Provisions septembre", "2026-09-01T10:00:00Z", "")
+	e.version("prov1", "provision", "active", "Provisions octobre")
+	e.version("prov9", "provision", "purgee", "Provisions purgées")
+	line := `INSERT INTO provision_lines(version_id,row_num,ct,libelle,montant,unite,ligne_cout,type_depense,date_debut,date_fin,groupe,statut_parsing)
+		VALUES (?,?,?,?,?,'EURO',?,'Standard','2026-12-31','2027-01-01',?,?)`
+	e.exec(line, "prov1", 5, "Y99F900012", "Provision", 100000, "PROVISIONS POUR ALEAS", "Réserve de capacité & aléas > Provisions pour aléas", "ok")
+	e.exec(line, "prov1", 6, "Y99F900015", "Fonds", 40000, "CAPACITE SUR SITE", "Réserve de capacité & aléas > Fonds de transformation", "warn")
+	e.exec(line, "prov1", 7, "Y99F90001", "Rejetée", 99999, "CAPACITE SUR SITE", "", "drop")
+	e.exec(line, "prov0", 5, "Y99F90001", "Ancienne", 500, "CAPACITE SUR SITE", "Programme > Socle", "ok")
+}
+
+func TestHandlerAnalyseProvisions(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	ctx := decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil))
+	if ctx.DefaultProvisionID != nil || ctx.ProvisionVersions == nil || len(ctx.ProvisionVersions) != 0 {
+		t.Errorf("context sans provisions : %+v / %v", ctx.ProvisionVersions, ctx.DefaultProvisionID)
+	}
+	sans := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
+	gs := sans.Previsions.Global
+	if sans.Meta.ProvisionVersion != nil || gs.Provisions != 0 || gs.Budget != gs.PPS || gs.Budget != 10000 {
+		t.Fatalf("sans provisions : meta %+v, global %+v", sans.Meta.ProvisionVersion, gs)
+	}
+	// Id explicite sans aucune version de provisions → 404.
+	if w := e.do("GET", "/api/analyse?provision_version_id=nope", nil); w.Code != http.StatusNotFound {
+		t.Errorf("provisions inconnues : %d", w.Code)
+	}
+
+	e.seedProvisions()
+	ctx = decode[domain.AnalyseContext](t, e.do("GET", "/api/analyse/context", nil))
+	if ctx.DefaultProvisionID == nil || *ctx.DefaultProvisionID != "prov1" || len(ctx.ProvisionVersions) != 2 {
+		t.Errorf("context : %d versions, défaut %v", len(ctx.ProvisionVersions), ctx.DefaultProvisionID)
+	}
+
+	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
+	gl := res.Previsions.Global
+	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov1" {
+		t.Fatalf("meta.provision_version : %+v", res.Meta.ProvisionVersion)
+	}
+	if gl.PPS != gs.PPS || gl.Provisions != 140000 || gl.Budget != gs.Budget+140000 ||
+		gl.AtterrissagePlan != gs.AtterrissagePlan || gl.ResteAFaire != gs.ResteAFaire {
+		t.Errorf("global : %+v (sans : %+v)", gl, gs)
+	}
+	p12 := findCT(t, res.Previsions, "Y99F900012")
+	if p12.PPS != 5000 || p12.Provisions != 100000 || p12.Budget != 105000 || p12.Statut != domain.PrevisionOK {
+		t.Errorf("Y99F900012 : %+v", p12)
+	}
+	if s12 := findCT(t, sans.Previsions, "Y99F900012"); s12.Statut != domain.PrevisionDepassement {
+		t.Errorf("Y99F900012 sans provisions : %+v", s12)
+	}
+	p15 := findCT(t, res.Previsions, "Y99F900015")
+	if p15.CTLibelle != "Fonds de transformation" || p15.Budget != 40000 || p15.Consomme != 0 || p15.Statut != domain.PrevisionOK {
+		t.Errorf("Y99F900015 (provisions seules) : %+v", p15)
+	}
+	var b15 *domain.BudgetCT
+	for i := range res.Budget.ParCT {
+		if res.Budget.ParCT[i].CT == "Y99F900015" {
+			b15 = &res.Budget.ParCT[i]
+		}
+	}
+	if b15 == nil || b15.ChargeMax != 40000 || b15.Provisions != 40000 {
+		t.Errorf("budget Y99F900015 : %+v", b15)
+	}
+	nat := 0.0
+	for _, n := range res.Budget.ParNature {
+		nat += n.Budget
+	}
+	if nat != gl.Budget {
+		t.Errorf("Σ natures.budget %v ≠ budget %v", nat, gl.Budget)
+	}
+	var params string
+	e.st.DB().QueryRow(`SELECT params FROM analyse_last_result WHERE id = 1`).Scan(&params)
+	if !strings.Contains(params, `"provision_version_id":"prov1"`) {
+		t.Errorf("analyse_last_result : %s", params)
+	}
+
+	// Version archivée choisie explicitement.
+	res = decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse?provision_version_id=prov0", nil))
+	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov0" || res.Previsions.Global.Budget != gs.Budget+500 {
+		t.Errorf("prov0 : %+v, budget %v", res.Meta.ProvisionVersion, res.Previsions.Global.Budget)
+	}
+	// Inconnue ou purgée → 404, y compris pour les exports qui partagent les paramètres.
+	for _, path := range []string{"/api/analyse?provision_version_id=nope", "/api/analyse?provision_version_id=prov9",
+		"/api/analyse/ecarts.csv?provision_version_id=nope"} {
+		if w := e.do("GET", path, nil); w.Code != http.StatusNotFound {
+			t.Errorf("%s : %d", path, w.Code)
+		}
+	}
+	if w := e.do("GET", "/api/analyse/ecarts.csv?provision_version_id=prov1", nil); w.Code != http.StatusOK {
+		t.Errorf("ecarts.csv avec provisions : %d", w.Code)
+	}
+
+	// Plus de version active : retour au budget = Σ PPS, sans 409.
+	e.exec(`UPDATE versions SET statut = 'archivee' WHERE id = 'prov1'`)
+	w := e.do("GET", "/api/analyse", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("sans provision active : %d %s", w.Code, w.Body.String())
+	}
+	res = decode[domain.AnalyseResult](t, w)
+	if res.Meta.ProvisionVersion != nil || res.Previsions.Global.Budget != gs.Budget {
+		t.Errorf("sans provision active : %+v, budget %v", res.Meta.ProvisionVersion, res.Previsions.Global.Budget)
+	}
+	e.st.DB().QueryRow(`SELECT params FROM analyse_last_result WHERE id = 1`).Scan(&params)
+	if !strings.Contains(params, `"provision_version_id":""`) {
+		t.Errorf("analyse_last_result sans provisions : %s", params)
 	}
 }

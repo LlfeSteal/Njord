@@ -85,6 +85,29 @@ func (r *Repo) Entries(ctx context.Context, versionID string) ([]domain.RealiseE
 	return out, rows.Err()
 }
 
+const provisionCols = `id, version_id, row_num, ct, libelle, montant, unite, ligne_cout, type_depense,
+	date_debut, date_fin, groupe, statut_parsing, motif_rejet`
+
+// ProvisionLines returns the non-drop lines of a provision version (DECISIONS n° 16).
+func (r *Repo) ProvisionLines(ctx context.Context, versionID string) ([]domain.ProvisionLine, error) {
+	rows, err := r.st.DB().QueryContext(ctx, `SELECT `+provisionCols+` FROM provision_lines
+		WHERE version_id = ? AND statut_parsing <> 'drop' ORDER BY row_num, id`, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.ProvisionLine{}
+	for rows.Next() {
+		var l domain.ProvisionLine
+		if err := rows.Scan(&l.ID, &l.VersionID, &l.RowNum, &l.CT, &l.Libelle, &l.Montant, &l.Unite, &l.LigneCout,
+			&l.TypeDepense, &l.DateDebut, &l.DateFin, &l.Groupe, &l.StatutParsing, &l.MotifRejet); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func nullStr(ns sql.NullString) *string {
 	if !ns.Valid || ns.String == "" {
 		return nil
@@ -205,16 +228,21 @@ func (r *Repo) LoadPlans(ctx context.Context, ref domain.Version) ([]PlanSource,
 	return out, superseded, nil
 }
 
-// LoadInput loads every engine input: the plan timeline known at planRef and
-// the réalisé version.
-func (r *Repo) LoadInput(ctx context.Context, planRef, realise domain.Version) (Input, error) {
-	in := Input{PlanRef: planRef, Realise: realise}
+// LoadInput loads every engine input: the plan timeline known at planRef,
+// the réalisé version and the provision version (nil = aucune provision).
+func (r *Repo) LoadInput(ctx context.Context, planRef, realise domain.Version, provision *domain.Version) (Input, error) {
+	in := Input{PlanRef: planRef, Realise: realise, ProvisionVersion: provision}
 	var err error
 	if in.Plans, in.PlanSuperseded, err = r.LoadPlans(ctx, planRef); err != nil {
 		return in, err
 	}
 	if in.Entries, err = r.Entries(ctx, realise.ID); err != nil {
 		return in, err
+	}
+	if provision != nil {
+		if in.Provisions, err = r.ProvisionLines(ctx, provision.ID); err != nil {
+			return in, err
+		}
 	}
 	if in.Personnes, err = r.Personnes(ctx); err != nil {
 		return in, err
@@ -277,6 +305,23 @@ func (r *Repo) ResolveVersion(ctx context.Context, kind domain.Kind, id string) 
 	return *v, nil
 }
 
+// ResolveProvision returns the chosen provision version (id != "") or the
+// active one ; nil if none (les provisions sont facultatives : jamais de 409).
+// Unknown or purged id → store.ErrNotFound.
+func (r *Repo) ResolveProvision(ctx context.Context, id string) (*domain.Version, error) {
+	if id == "" {
+		return r.st.ActiveVersion(ctx, domain.KindProvision)
+	}
+	v, err := r.st.GetVersion(ctx, domain.KindProvision, id)
+	if err != nil {
+		return nil, err
+	}
+	if v.Statut == domain.StatutPurgee {
+		return nil, store.ErrNotFound
+	}
+	return &v, nil
+}
+
 func (r *Repo) realRange(ctx context.Context, versionID string) (string, string, error) {
 	var a, b sql.NullString
 	err := r.st.DB().QueryRowContext(ctx, `SELECT MIN(substr(date_depense,1,10)), MAX(substr(date_depense,1,10)) FROM realise_entries
@@ -321,6 +366,14 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 	}
 	if out.RealiseVersions, err = r.st.ListVersions(ctx, domain.KindRealise, false); err != nil {
 		return out, err
+	}
+	if out.ProvisionVersions, err = r.st.ListVersions(ctx, domain.KindProvision, false); err != nil {
+		return out, err
+	}
+	if v, err := r.st.ActiveVersion(ctx, domain.KindProvision); err != nil {
+		return out, err
+	} else if v != nil {
+		out.DefaultProvisionID = &v.ID
 	}
 	var pMin, pMax, rMin, rMax string
 	var tl Timeline
@@ -370,11 +423,12 @@ func (r *Repo) Context(ctx context.Context) (domain.AnalyseContext, error) {
 
 // lastParams is stored with the last rendered result.
 type lastParams struct {
-	PlanVersionID    string `json:"plan_version_id"`
-	RealiseVersionID string `json:"realise_version_id"`
-	WeekFrom         string `json:"week_from"`
-	WeekTo           string `json:"week_to"`
-	IncludeInactive  bool   `json:"include_inactive"`
+	PlanVersionID      string `json:"plan_version_id"`
+	RealiseVersionID   string `json:"realise_version_id"`
+	ProvisionVersionID string `json:"provision_version_id"` // "" = aucune provision
+	WeekFrom           string `json:"week_from"`
+	WeekTo             string `json:"week_to"`
+	IncludeInactive    bool   `json:"include_inactive"`
 }
 
 // SaveLast upserts the last rendered analysis (SPEC_analyse §11).

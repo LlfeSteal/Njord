@@ -1,4 +1,4 @@
-// Enveloppe d'un CT dans l'inspecteur : période d'utilisation, montant, commentaire (DECISIONS n° 18).
+// Enveloppe d'un CT dans l'inspecteur : période d'utilisation, montant, commentaire (DECISIONS n° 18, 19).
 // La ligne vient de la liste (pas de route unitaire). Monté avec key={ct} : l'état repart à zéro à chaque CT.
 import { useId, useState } from 'react';
 import {
@@ -179,7 +179,11 @@ export default function EnveloppeInspector({ ct, onClose }: Props) {
                     }
                   />
                 )}
-                <p className="env-help">Saisie seule : l'enveloppe n'est pas encore utilisée par le pilotage.</p>
+                <p className="env-help">
+                  L'enveloppe remplace la charge max reconstruite comme budget du CT sur sa période : consommé, atterrissage et
+                  échéance (fin de l'enveloppe) y sont restreints. Dépassement et sous-consommation apparaissent dans Budget et
+                  Prévisions.
+                </p>
               </Stack>
             </form>
           </InspectorSection>

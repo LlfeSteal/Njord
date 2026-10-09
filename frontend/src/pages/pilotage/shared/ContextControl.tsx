@@ -266,7 +266,7 @@ export function NoProvisionNote({ result }: { result: AnalyseResult | undefined 
   if (!result || result.meta.provision_version) return null;
   return (
     <p className="pil-note">
-      Aucune provision importée : budget = plan de charge seul.{' '}
+      Aucune provision importée : charge max reconstruite = plan de charge seul.{' '}
       <Link to="/provisions" size="sm">
         Importer des provisions
       </Link>

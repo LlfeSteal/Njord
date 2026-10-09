@@ -1,8 +1,12 @@
 // Ligne CT du pilotage budgétaire : fusion de la synthèse budget (classification, MO, risque)
 // et des prévisions (consommé, atterrissage, statut), par code CT. Partagé avec /previsions.
-// Budget d'un CT = charge max = Σ PPS du plan + provisions restantes (DECISIONS n° 16).
-import type { AnalyseResult, BudgetCT, PrevisionCT, PrevisionStatut } from '../../../api/types';
-import { echeanceOf, forecastOf, type Echeance } from '../shared/pilotage';
+// Budget d'un CT = montant de son enveloppe s'il en a une (DECISIONS n° 19), sinon charge max reconstruite
+// = Σ PPS du plan + provisions restantes (DECISIONS n° 16).
+import type { AnalyseResult, BudgetCT, Enveloppe, PrevisionCT, PrevisionStatut } from '../../../api/types';
+import { budgetSourceOf, chargeMaxOf, echeanceOf, forecastOf, type Echeance } from '../shared/pilotage';
+
+/** Source du budget d'une ligne CT : enveloppe saisie ou charge max reconstruite. */
+export type BudgetSource = 'enveloppe' | 'charge_max';
 
 export interface CtRow {
   ct: string;
@@ -11,8 +15,13 @@ export interface CtRow {
   pps: number;
   /** Provisions restantes du CT. */
   provisions: number;
-  /** Charge max = pps + provisions : référence du % consommé et de l'écart. */
+  /** Budget : montant de l'enveloppe, sinon charge max ; référence du % consommé et de l'écart. */
   budget: number;
+  source: BudgetSource;
+  /** Charge max reconstruite = pps + provisions (= budget sans enveloppe ; comparaison sinon). */
+  chargeMax: number;
+  /** Enveloppe du CT (null = à configurer, ou prévisions absentes). */
+  enveloppe: Enveloppe | null;
   consomme: number | null;
   /** % du budget consommé (0..100+). */
   pct: number | null;
@@ -40,12 +49,16 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
   const fc = forecastOf(result);
   const byCt = new Map<string, CtRow>();
   for (const b of result.budget.par_ct) {
+    const chargeMax = b.charge_max ?? b.pps_plan + (b.provisions ?? 0);
     byCt.set(b.ct, {
       ct: b.ct,
       libelle: b.ct_libelle,
       pps: b.pps_plan,
       provisions: b.provisions ?? 0,
-      budget: b.charge_max ?? b.pps_plan + (b.provisions ?? 0),
+      budget: chargeMax,
+      source: 'charge_max',
+      chargeMax,
+      enveloppe: null,
       consomme: null,
       pct: null,
       atterrissage: null,
@@ -67,6 +80,9 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       pps: p.pps ?? 0,
       provisions: p.provisions ?? 0,
       budget: p.budget,
+      source: 'charge_max',
+      chargeMax: chargeMaxOf(p),
+      enveloppe: null,
       consomme: null,
       pct: null,
       atterrissage: null,
@@ -87,6 +103,9 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       pps: p.pps ?? row.pps,
       provisions: p.provisions ?? row.provisions,
       budget: p.budget,
+      source: budgetSourceOf(p) === 'enveloppe' ? 'enveloppe' : 'charge_max',
+      chargeMax: chargeMaxOf(p),
+      enveloppe: p.enveloppe ?? null,
       consomme: p.consomme,
       pct: p.pct_consomme ?? (p.budget ? (p.consomme / p.budget) * 100 : null),
       atterrissage: p.atterrissage_plan,

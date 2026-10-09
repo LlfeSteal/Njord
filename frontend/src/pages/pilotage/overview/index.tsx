@@ -11,9 +11,11 @@ import {
   anomalieGlyph,
   anomaliesATraiter,
   CATEGORIE_LABEL,
+  capitalize,
   ecartTextTone,
   echeanceOf,
-  fmtDayMonth,
+  echeanceWords,
+  enveloppesOf,
   fmtEurShort,
   fmtEurSigned,
   fmtMonthYear,
@@ -45,9 +47,15 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
   const over = g.statut === 'depassement';
   const tone = ecartTextTone(g) ?? (g.statut === 'ok' ? 'success' : undefined);
   const e = echeanceOf(g);
-  // Budget = charge max = plan de charge + provisions restantes (DECISIONS n° 16).
+  // Budget = charge max = plan de charge + provisions restantes (DECISIONS n° 16), ou enveloppe des CT configurés (n° 19).
   const prov = g.provisions ?? 0;
-  const budgetText = prov > 0 ? `sur ${fmtEur(g.budget)} de budget max (dont ${fmtEurShort(prov)} de provisions)` : `sur ${fmtEur(g.budget)} de budget`;
+  const env = enveloppesOf(fc);
+  const budgetText =
+    env && env.nb_configures > 0
+      ? `sur ${fmtEur(g.budget)} de budget (dont ${fmtEurShort(env.montant)} d’enveloppes sur ${env.nb_configures} CT)`
+      : prov > 0
+        ? `sur ${fmtEur(g.budget)} de budget max (dont ${fmtEurShort(prov)} de provisions)`
+        : `sur ${fmtEur(g.budget)} de budget`;
   return (
     <div className="pil-metrics">
       <Metric label="Consommé" value={fmtEur(g.consomme)} sub={`${budgetText} · ${fmtPct(pct)}`}>
@@ -64,7 +72,7 @@ function BudgetMetrics({ result }: { result: AnalyseResult }) {
         tone={over ? 'danger' : undefined}
         sub={
           e
-            ? `Au ${fmtDayMonth(e.date)} : ${fmtEurShort(e.projPlan)} (plan) · ${fmtEurShort(e.projTendance)} (tendance)`
+            ? `${capitalize(echeanceWords(e).when)} : ${fmtEurShort(e.projPlan)} (plan) · ${fmtEurShort(e.projTendance)} (tendance)`
             : `Tendance ${fmtEur(g.atterrissage_tendance)}`
         }
       />

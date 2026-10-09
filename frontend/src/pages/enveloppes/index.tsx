@@ -33,7 +33,10 @@ export default function EnveloppesPage() {
   const openCt = sp.get('ct');
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(norm(search.trim()), 200);
-  const [filter, setFilter] = useState<ConfigFilter>('all');
+  // ?filtre=a_configurer (lien « k CT à configurer » de la page Budget) : filtre initial.
+  const [filter, setFilter] = useState<ConfigFilter>(() =>
+    sp.get('filtre') === 'a_configurer' ? 'todo' : sp.get('filtre') === 'configures' ? 'done' : 'all',
+  );
   const [page, setPage] = useState(1);
 
   const q = useEnveloppes();

@@ -1,4 +1,4 @@
-// Enveloppes par CT (DECISIONS n° 18) : liste, enregistrement, retrait, validation du formulaire.
+// Enveloppes par CT (DECISIONS n° 18, 19) : liste, enregistrement, retrait, validation du formulaire.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { enveloppeApi } from '../../api/client';
 import type { Enveloppe, EnveloppeCT, EnveloppeInput, EnveloppeSources } from '../../api/types';
@@ -31,6 +31,8 @@ export function useSaveEnveloppe(onSaved?: (row: EnveloppeCT) => void) {
     onSuccess: (row, { ct }) => {
       qc.setQueryData<EnveloppeCT[]>(qk.enveloppes(), (rows) => patchList(rows, ct, row));
       void qc.invalidateQueries({ queryKey: qk.enveloppes() });
+      // L'enveloppe remplace la charge max dans l'analyse (DECISIONS n° 19) : Budget et Prévisions à recalculer.
+      void qc.invalidateQueries({ queryKey: ['analyse'] });
       toast({ tone: 'success', title: 'Enveloppe enregistrée.' });
       onSaved?.(row);
     },
@@ -46,6 +48,7 @@ export function useRemoveEnveloppe(onRemoved?: (row: EnveloppeCT | null) => void
       const next = hasSource(row.sources) ? { ...row, enveloppe: null } : null;
       qc.setQueryData<EnveloppeCT[]>(qk.enveloppes(), (rows) => patchList(rows, row.ct, next));
       void qc.invalidateQueries({ queryKey: qk.enveloppes() });
+      void qc.invalidateQueries({ queryKey: ['analyse'] });
       toast({ tone: 'success', title: 'Enveloppe retirée.' });
       onRemoved?.(next);
     },

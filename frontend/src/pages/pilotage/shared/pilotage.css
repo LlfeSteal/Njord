@@ -383,3 +383,26 @@
   font-size: 12px;
 }
 
+
+/* ------------------------------------------------------------------ Enveloppes (DECISIONS n° 19) */
+/* Cellule « Budget » : provenance en pastille neutre (Enveloppe / Reconstruit) puis montant, sur une ligne. */
+.pil-budget {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pil-budget__value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Plan de charge face aux enveloppes : une ligne par CT, clic = inspecteur du CT. */
+.pil-env-chart .recharts-surface {
+  cursor: pointer;
+}
+
+/* Ligne d'action ou de contexte sous un KeyValue de l'inspecteur. */
+.pil-inspector-note {
+  margin-top: 8px;
+}

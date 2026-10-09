@@ -1,9 +1,9 @@
 // Cellules partagées des tableaux par CT (Budget, Prévisions) : une ligne, sans retour.
-import { ProgressBar, StatusGlyph } from '../../../ui';
-import { fmtPct } from '../../../lib/format';
-import { fmtEur } from '../../../lib/format';
+import { Pill, ProgressBar, StatusGlyph } from '../../../ui';
+import type { Enveloppe } from '../../../api/types';
+import { fmtEur, fmtPct, fmtPeriod } from '../../../lib/format';
 import { fmtEurSigned, rowGlyph, rowReason } from '../shared/pilotage';
-import type { CtRow } from './model';
+import type { BudgetSource, CtRow } from './model';
 
 export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
   return (
@@ -15,10 +15,42 @@ export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
 }
 
 /** Glyphe d'une ligne CT : octogone (dépassement, risque), triangle (vigilance), cercle « ! » (sous-consommation). */
-export function RowGlyph({ row, size }: { row: Pick<CtRow, 'statut' | 'risque'> & { sousConso?: boolean }; size?: number }) {
+export function RowGlyph({
+  row,
+  size,
+}: {
+  row: Pick<CtRow, 'statut' | 'risque'> & { sousConso?: boolean; configured?: boolean };
+  size?: number;
+}) {
   const g = rowGlyph(row.statut, row.risque, row.sousConso);
   if (!g) return null;
-  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={rowReason(row.statut, row.risque, row.sousConso)} />;
+  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={rowReason(row.statut, row.risque, row.sousConso, row.configured)} />;
+}
+
+/** Infobulle de la source du budget : période et montant de l'enveloppe, ou détail de la charge max reconstruite. */
+function budgetSourceTitle(b: { source: BudgetSource; enveloppe: Enveloppe | null; pps: number; provisions: number; budget: number }): string {
+  if (b.source === 'enveloppe' && b.enveloppe)
+    return `Enveloppe ${fmtPeriod(b.enveloppe.date_debut, b.enveloppe.date_fin)} : ${fmtEur(b.enveloppe.montant)}`;
+  return `Charge max reconstruite : PDC ${fmtEur(b.pps)} + provisions ${fmtEur(b.provisions)} = ${fmtEur(b.budget)}`;
+}
+
+/**
+ * Cellule « Budget » (DECISIONS n° 19) : montant, précédé de sa provenance en pastille neutre (« Enveloppe » /
+ * « Reconstruit ») quand le tableau mêle les deux sources (`showSource`). Une ligne ; détail en infobulle.
+ */
+export function BudgetCell({
+  b,
+  showSource,
+}: {
+  b: { source: BudgetSource; enveloppe: Enveloppe | null; pps: number; provisions: number; budget: number };
+  showSource: boolean;
+}) {
+  return (
+    <span className="pil-budget" title={budgetSourceTitle(b)}>
+      {showSource && <Pill>{b.source === 'enveloppe' ? 'Enveloppe' : 'Reconstruit'}</Pill>}
+      <span className="pil-budget__value">{fmtEur(b.budget)}</span>
+    </span>
+  );
 }
 
 /**

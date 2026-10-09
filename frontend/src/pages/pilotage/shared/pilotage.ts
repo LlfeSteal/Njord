@@ -3,7 +3,18 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppearance, type GlyphKind, type SortDir, type StatusTone } from '../../../ui';
 import { fmtHours } from '../../../lib/format';
-import type { AnalyseResult, Anomalie, AnomalieCategorie, Couverture, PrevisionCT, PrevisionPoint, PrevisionStatut, Previsions } from '../../../api/types';
+import type {
+  AnalyseResult,
+  Anomalie,
+  AnomalieCategorie,
+  Couverture,
+  Enveloppe,
+  EnveloppesSynthese,
+  PrevisionCT,
+  PrevisionPoint,
+  PrevisionStatut,
+  Previsions,
+} from '../../../api/types';
 
 // ------------------------------------------------------------------ Couleurs
 // Les attributs SVG de recharts n'acceptent pas var(--…) de façon fiable : on résout les tokens
@@ -42,6 +53,13 @@ export function fmtEurShort(v: number | null | undefined): string {
   if (a >= 1e6) return `${nf2.format(v / 1e6)}${nbsp}M€`;
   if (a >= 1e3) return `${nf0.format(v / 1e3)}${nbsp}k€`;
   return `${nf0.format(v)}${nbsp}€`;
+}
+
+/** Euros abrégés signés : « +12 k€ » / « −1,2 M€ ». */
+export function fmtEurShortSigned(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const s = v > 0.5 ? '+' : v < -0.5 ? '−' : '';
+  return `${s}${fmtEurShort(Math.abs(v))}`;
 }
 
 /** Euros signés : « +12 345 € » / « −4 000 € ». */
@@ -135,12 +153,18 @@ export function rowGlyph(
 /** Glyphe du risque de sous-consommation (cercle « ! » orange). */
 export const SOUS_CONSO_GLYPH: { kind: GlyphKind; tone: StatusTone } = { kind: 'attention', tone: 'attention' };
 
-/** Raison affichée en bulle du glyphe d'une ligne CT. */
-export function rowReason(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false): string {
+/** Raison affichée en bulle du glyphe d'une ligne CT (`enveloppe` : CT configuré, DECISIONS n° 19). */
+export function rowReason(statut: PrevisionStatut | null | undefined, risque = false, sousConso = false, enveloppe = false): string {
   const parts: string[] = [];
-  if (sousConso) parts.push('Budget de l’exercice qui risque de ne pas être consommé (fin d’exercice)');
-  if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max, fin du plan)');
-  if (statut === 'vigilance') parts.push('Atterrissage proche du budget (fin du plan)');
+  if (enveloppe) {
+    if (sousConso) parts.push('Enveloppe qui risque de ne pas être consommée (fin de l’enveloppe)');
+    if (statut === 'depassement') parts.push('Atterrissage au-delà de l’enveloppe (sur-imputation)');
+    if (statut === 'vigilance') parts.push('Atterrissage proche de l’enveloppe');
+  } else {
+    if (sousConso) parts.push('Budget de l’exercice qui risque de ne pas être consommé (fin d’exercice)');
+    if (statut === 'depassement') parts.push('Atterrissage au-delà du budget (charge max, fin du plan)');
+    if (statut === 'vigilance') parts.push('Atterrissage proche du budget (fin du plan)');
+  }
   if (risque) parts.push('Part non sécurisée au-delà du seuil');
   return parts.join(' · ');
 }
@@ -155,7 +179,14 @@ export function ecartTextTone(p: Pick<PrevisionCT, 'statut' | 'ecart_plan'>): 'd
 // ------------------------------------------------------------------ Fin d'exercice (DECISIONS n° 17)
 /** Situation à la fin de l'exercice d'un CT ou du périmètre : le budget non consommé à l'échéance est perdu. */
 export interface Echeance {
-  /** Date de fin d'exercice (YYYY-MM-DD). */
+  /**
+   * `exercice` : fin d'exercice, budget = charge max (n° 17) ; `enveloppe` : CT configuré, échéance = fin de son
+   * enveloppe (n° 19) ; `mixte` : périmètre dont des CT ont leur propre échéance (les montants sont sommés CT par CT).
+   */
+  kind: 'exercice' | 'enveloppe' | 'mixte';
+  /** Enveloppe du CT (kind `enveloppe`), null sinon. */
+  enveloppe: Enveloppe | null;
+  /** Date de fin d'exercice ou de fin de l'enveloppe (YYYY-MM-DD). */
   date: string;
   /** Budget de l'exercice = PPS prévu jusqu'à l'échéance + provisions de l'exercice. */
   budget: number;
@@ -187,8 +218,11 @@ export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
   const worst = source === 'plan' ? projPlan : source === 'tendance' ? projTendance : Math.min(projPlan, projTendance);
   const nonConsomme = Math.max(0, p.non_consomme ?? 0);
   const low = Math.min(projPlan, projTendance);
+  const src = budgetSourceOf(p);
   return {
-    date: p.echeance,
+    kind: p.enveloppe ? 'enveloppe' : src === 'charge_max' ? 'exercice' : 'mixte',
+    enveloppe: p.enveloppe ?? null,
+    date: p.enveloppe?.date_fin ?? p.echeance,
     budget,
     pps: p.pps_echeance ?? 0,
     provisions: p.provisions_echeance ?? 0,
@@ -284,13 +318,89 @@ export function paceText(e: Echeance): string | null {
   return `il faudrait ${fmtEurShort(e.rythmeNecessaire)}/sem. (actuel ${fmtEurShort(e.rythmeActuel)}/sem.)`;
 }
 
+/** Mots de l'échéance selon la source du budget : fin d'exercice, fin de l'enveloppe d'un CT, ou échéances mêlées. */
+export interface EcheanceWords {
+  /** « au 31/12 », « à la fin de l'enveloppe (30/06) », « à l'échéance ». */
+  when: string;
+  /** Repère du graphique : « Fin d'exercice 31/12 », « Fin de l'enveloppe 30/06 », « Échéance 31/12 ». */
+  marker: string;
+  /** « budget de l'exercice », « enveloppe », « budget à l'échéance ». */
+  budget: string;
+  /** « du budget de l'exercice », « de l'enveloppe »… */
+  of: string;
+  /** « le budget de l'exercice », « l'enveloppe »… */
+  the: string;
+  /** Accord : « l'enveloppe serait dépassée ». */
+  fem: boolean;
+}
+
+export function echeanceWords(e: Echeance): EcheanceWords {
+  const d = fmtDayMonth(e.date);
+  if (e.kind === 'enveloppe')
+    return { when: `à la fin de l’enveloppe (${d})`, marker: `Fin de l’enveloppe ${d}`, budget: 'enveloppe', of: 'de l’enveloppe', the: 'l’enveloppe', fem: true };
+  if (e.kind === 'mixte')
+    return { when: 'à l’échéance', marker: `Échéance ${d}`, budget: 'budget à l’échéance', of: 'du budget à l’échéance', the: 'le budget à l’échéance', fem: false };
+  return { when: `au ${d}`, marker: `Fin d’exercice ${d}`, budget: 'budget de l’exercice', of: 'du budget de l’exercice', the: 'le budget de l’exercice', fem: false };
+}
+
+/** Majuscule initiale. */
+export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** Fin de phrase de lecture : « au 31/12, 85 k€ du budget de l'exercice risquent d'être perdus (projection tendance) ». */
 export function echeanceSentence(e: Echeance): string {
-  const d = fmtDayMonth(e.date);
+  const w = echeanceWords(e);
   if (e.nonConsomme > 0.5)
-    return `au ${d}, ${fmtEurShort(e.nonConsomme)} du budget de l’exercice (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)})`;
-  if (e.depassement > 0.5) return `au ${d}, le budget de l’exercice (${fmtEurShort(e.budget)}) serait dépassé d’au moins ${fmtEurShort(e.depassement)}`;
-  return `au ${d}, le budget de l’exercice (${fmtEurShort(e.budget)}) serait entièrement consommé`;
+    return `${w.when}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)})`;
+  if (e.depassement > 0.5)
+    return `${w.when}, ${w.the} (${fmtEurShort(e.budget)}) serait dépassé${w.fem ? 'e' : ''} d’au moins ${fmtEurShort(e.depassement)}`;
+  return `${w.when}, ${w.the} (${fmtEurShort(e.budget)}) serait entièrement consommé${w.fem ? 'e' : ''}`;
+}
+
+// ------------------------------------------------------------------ Enveloppes (DECISIONS n° 19)
+/** Source du budget d'une prévision (lecture défensive : backend antérieur = charge max). */
+export function budgetSourceOf(p: Pick<PrevisionCT, 'budget_source' | 'enveloppe'> | null | undefined): PrevisionCT['budget_source'] {
+  if (!p) return 'charge_max';
+  if (p.enveloppe) return 'enveloppe';
+  return p.budget_source ?? 'charge_max';
+}
+
+/** Charge max reconstruite (Σ PPS + provisions), gardée pour comparaison. */
+export const chargeMaxOf = (p: Pick<PrevisionCT, 'charge_max' | 'pps' | 'provisions'>) => p.charge_max ?? (p.pps ?? 0) + (p.provisions ?? 0);
+
+/**
+ * Plan de charge face aux enveloppes : synthèse du backend, ou recalculée depuis `par_ct` (backend qui
+ * fournit les enveloppes par CT sans la synthèse). Sans aucune enveloppe : nb_configures = 0.
+ */
+export function enveloppesOf(fc: Previsions | null | undefined): EnveloppesSynthese | null {
+  if (!fc) return null;
+  if (fc.enveloppes && typeof fc.enveloppes.nb_configures === 'number') return fc.enveloppes;
+  const s: EnveloppesSynthese = {
+    nb_ct: fc.par_ct.length,
+    nb_configures: 0,
+    montant: 0,
+    atterrissage: 0,
+    ecart: 0,
+    depassement: 0,
+    nb_depassement: 0,
+    non_consomme: 0,
+    nb_sous_consommation: 0,
+    plan_hors_enveloppe: 0,
+  };
+  for (const p of fc.par_ct) {
+    if (!p.enveloppe) continue;
+    s.nb_configures += 1;
+    s.montant += p.enveloppe.montant;
+    s.atterrissage += p.atterrissage_plan;
+    if (p.ecart_plan > 0) {
+      s.depassement += p.ecart_plan;
+      s.nb_depassement += 1;
+    }
+    s.non_consomme += Math.max(0, p.non_consomme ?? 0);
+    if (p.sous_consommation) s.nb_sous_consommation += 1;
+    s.plan_hors_enveloppe += p.plan_hors_enveloppe ?? 0;
+  }
+  s.ecart = s.atterrissage - s.montant;
+  return s;
 }
 
 // ------------------------------------------------------------------ Anomalies
@@ -333,16 +443,28 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
 }
 
 /**
- * Phrase de lecture du graphique cumulé (`scope` : « le périmètre », « le CT Y99… »). Budget max = PDC + provisions ;
- * avec la fin d'exercice, la phrase dit d'abord ce qui reste du budget à l'échéance (risque de perte).
+ * Phrase de lecture du graphique cumulé. Budget max = PDC + provisions ; avec la fin d'exercice (ou la fin de
+ * l'enveloppe d'un CT configuré), la phrase dit d'abord ce qui reste du budget à l'échéance (risque de perte).
  */
 export function forecastSentence(p: PrevisionCT): string {
-  // Une seule phrase courte : reliquat à l'échéance d'abord, puis atterrissage face au budget max.
-  const atter = `atterrissage ${fmtEurShort(p.atterrissage_plan)} pour un budget max de ${fmtEurShort(p.budget)}`;
   const e = echeanceOf(p);
+  const src = budgetSourceOf(p);
+  // CT configuré : l'atterrissage est pris à la fin de l'enveloppe, face à son montant (DECISIONS n° 19).
+  if (src === 'enveloppe' && p.enveloppe) {
+    const d = fmtDayMonth(p.enveloppe.date_fin);
+    if (e && e.nonConsomme > 0.5)
+      return `À la fin de l’enveloppe (${d}), ${fmtEurShort(e.nonConsomme)} de l’enveloppe (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
+    if (p.ecart_plan > 0.5)
+      return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} à la fin de l’enveloppe (${d}), soit ${fmtEurShort(p.ecart_plan)} au-dessus de l’enveloppe (${fmtEurShort(p.budget)}).`;
+    return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} à la fin de l’enveloppe (${d}) pour une enveloppe de ${fmtEurShort(p.budget)}.`;
+  }
   // Échéance d'abord, avec le budget de l'exercice : le montant se lit sur le crochet du graphique.
-  if (e && e.nonConsomme > 0.5)
+  if (e && e.nonConsomme > 0.5) {
+    if (e.kind === 'mixte')
+      return `À l’échéance de chaque CT, ${fmtEurShort(e.nonConsomme)} du budget (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
     return `Au ${fmtDayMonth(e.date)}, ${fmtEurShort(e.nonConsomme)} du budget ${e.date.slice(0, 4)} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
-  if (p.ecart_plan > 0.5) return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} à la fin du plan, soit ${fmtEurShort(p.ecart_plan)} au-dessus du budget max.`;
-  return `${atter.charAt(0).toUpperCase()}${atter.slice(1)} à la fin du plan.`;
+  }
+  const what = src === 'charge_max' ? 'budget max' : 'budget';
+  if (p.ecart_plan > 0.5) return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} à la fin du plan, soit ${fmtEurShort(p.ecart_plan)} au-dessus du ${what}.`;
+  return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} pour un ${what} de ${fmtEurShort(p.budget)} à la fin du plan.`;
 }

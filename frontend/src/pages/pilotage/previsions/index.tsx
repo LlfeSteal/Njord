@@ -14,12 +14,23 @@ import {
   type Option,
 } from '../../../ui';
 import type { AnalyseResult, PrevisionCT, Previsions } from '../../../api/types';
-import { fmtDate, fmtEur, fmtHours } from '../../../lib/format';
-import { CtLabel, Reste, RowGlyph, Signed } from '../budget/cells';
+import { fmtDate, fmtEur, fmtHours, fmtPeriod } from '../../../lib/format';
+import { BudgetCell, CtLabel, Reste, RowGlyph, Signed } from '../budget/cells';
 import { ForecastChart, LoadChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, UncoveredNote } from '../shared/ContextControl';
-import { cmp, echeanceOf, fmtEurSigned, forecastOf, forecastSentence, rowTone, useSort } from '../shared/pilotage';
+import {
+  budgetSourceOf,
+  cmp,
+  echeanceOf,
+  enveloppesOf,
+  fmtEurShort,
+  fmtEurSigned,
+  forecastOf,
+  forecastSentence,
+  rowTone,
+  useSort,
+} from '../shared/pilotage';
 import '../shared/pilotage.css';
 
 const ALL = '__all__';
@@ -27,21 +38,32 @@ type SortKey = 'ct' | 'budget' | 'atterrissage_plan' | 'atterrissage_tendance' |
 
 function ScopeMetrics({ p }: { p: PrevisionCT }) {
   const over = p.statut === 'depassement';
+  // CT configuré (DECISIONS n° 19) : écarts face au montant de l'enveloppe, horizon = fin de l'enveloppe.
+  const env = budgetSourceOf(p) === 'enveloppe' ? p.enveloppe : null;
+  const ref = env
+    ? `sur l’enveloppe (${fmtEur(p.budget)})`
+    : budgetSourceOf(p) === 'charge_max' && p.provisions > 0
+      ? `sur le budget max (${fmtEur(p.budget)})`
+      : `sur le budget (${fmtEur(p.budget)})`;
+  const horsPlan = env ? (p.plan_hors_enveloppe ?? 0) : 0;
   return (
     <div className="pil-metrics">
-      <Metric
-        label="Atterrissage plan"
-        value={fmtEur(p.atterrissage_plan)}
-        tone={over ? 'danger' : undefined}
-        sub={`${fmtEurSigned(p.ecart_plan)} sur ${fmtEur(p.budget)} de ${p.provisions > 0 ? 'budget max' : 'budget'}`}
-      />
+      <Metric label="Atterrissage plan" value={fmtEur(p.atterrissage_plan)} tone={over ? 'danger' : undefined} sub={`${fmtEurSigned(p.ecart_plan)} ${ref}`} />
       <Metric
         label="Atterrissage tendance"
         value={fmtEur(p.atterrissage_tendance)}
         tone={p.ecart_tendance > 0 ? 'danger' : undefined}
-        sub={`${fmtEurSigned(p.ecart_tendance)} · rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
+        sub={`${fmtEurSigned(p.ecart_tendance)} ${env ? 'sur l’enveloppe' : 'sur le budget'} · rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
       />
-      <Metric label="Reste à faire" value={fmtEur(p.reste_a_faire)} sub={`jusqu’au ${fmtDate(p.fin_plan)}`} />
+      <Metric
+        label="Reste à faire"
+        value={fmtEur(p.reste_a_faire)}
+        sub={
+          env
+            ? `jusqu’à la fin de l’enveloppe (${fmtDate(env.date_fin)})${horsPlan > 0.5 ? ` · ${fmtEurShort(horsPlan)} planifiés hors enveloppe` : ''}`
+            : `jusqu’au ${fmtDate(p.fin_plan)}`
+        }
+      />
     </div>
   );
 }
@@ -59,6 +81,9 @@ function ChartCard({ title, sub, children }: { title: string; sub: string; child
 }
 
 function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: string | null; onPick: (ct: string) => void }) {
+  // Provenance du budget affichée seulement quand le tableau mêle enveloppes et charges max (DECISIONS n° 19).
+  const nbEnv = list.filter((p) => budgetSourceOf(p) === 'enveloppe').length;
+  const mixed = nbEnv > 0 && nbEnv < list.length;
   const { sort, toggle } = useSort<SortKey>({ key: 'ecart_plan', dir: 'desc' });
   const rows = useMemo(
     // Lecture défensive : `non_consomme` absent d'un backend antérieur.
@@ -81,7 +106,7 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
         <tr>
           <th data-glyph aria-label="Statut" />
           {th('ct', 'CT', false)}
-          {th('budget', 'Charge max')}
+          {th('budget', 'Budget')}
           {th('atterrissage_plan', 'Atterrissage plan')}
           {th('atterrissage_tendance', 'Tendance')}
           {th('ecart_plan', 'Écart')}
@@ -101,12 +126,25 @@ function CtTable({ list, selected, onPick }: { list: PrevisionCT[]; selected: st
             aria-label={`Prévisions du CT ${p.ct}`}
           >
             <td data-glyph>
-              <RowGlyph row={{ statut: p.statut, risque: false, sousConso: p.sous_consommation ?? false }} />
+              <RowGlyph
+                row={{ statut: p.statut, risque: false, sousConso: p.sous_consommation ?? false, configured: budgetSourceOf(p) === 'enveloppe' }}
+              />
             </td>
             <td>
               <CtLabel ct={p.ct} libelle={p.ct_libelle} />
             </td>
-            <td data-align="right">{fmtEur(p.budget)}</td>
+            <td data-align="right">
+              <BudgetCell
+                b={{
+                  source: budgetSourceOf(p) === 'enveloppe' ? 'enveloppe' : 'charge_max',
+                  enveloppe: p.enveloppe ?? null,
+                  pps: p.pps ?? 0,
+                  provisions: p.provisions ?? 0,
+                  budget: p.budget,
+                }}
+                showSource={mixed}
+              />
+            </td>
             <td data-align="right">{fmtEur(p.atterrissage_plan)}</td>
             <td data-align="right">{fmtEur(p.atterrissage_tendance)}</td>
             <td data-align="right">
@@ -147,6 +185,7 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
           asOfWeek={fc.as_of_week}
           budget={scope.budget}
           echeance={echeanceOf(scope)}
+          enveloppe={scope.enveloppe ?? null}
           height={320}
         />
       </ChartCard>
@@ -165,19 +204,31 @@ function Content({ result, ct, setCt }: { result: AnalyseResult; ct: string | nu
 
 function MethodNote({ fc }: { fc: Previsions }) {
   const e = echeanceOf(fc.global);
+  const env = enveloppesOf(fc);
+  const nbEnv = env?.nb_configures ?? 0;
   return (
     <>
       <p className="pil-note">
-        Budget (charge max) = plan de charge (Σ PPS) + provisions restantes ; les provisions sont une marge disponible, hors reste à faire et
-        atterrissage. Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en vigueur). Tendance = réalisé à
-        date + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
+        Budget d’un CT sans enveloppe (charge max reconstruite) = plan de charge (Σ PPS) + provisions restantes ; les provisions sont une marge
+        disponible, hors reste à faire et atterrissage. Atterrissage = réalisé à date + reste à faire du plan (chaque semaine selon la version en
+        vigueur). Tendance = réalisé à date + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
+      </p>
+      <p className="pil-note">
+        Enveloppes (Données › Enveloppes) : pour un CT configuré, le budget est le montant de son enveloppe et tout le prévisionnel porte sur sa
+        période (semaines de début et de fin incluses) : consommé = réalisé daté dans la période, atterrissage = consommé + plan restant de la
+        période, échéance = fin de l’enveloppe. Le réalisé et le plan hors période sont montrés à part ; les provisions restent une marge
+        disponible. Dépassement si l’atterrissage dépasse l’enveloppe ; sous-consommation si le non consommé à la fin de l’enveloppe dépasse les
+        seuils. Périmètre = somme des CT, chacun sur son budget et son échéance.{' '}
+        {env ? `${nbEnv} CT configuré${nbEnv > 1 ? 's' : ''} sur ${env.nb_ct}.` : ''}
       </p>
       {e && (
         <p className="pil-note">
-          Fin d’exercice au {fmtDate(e.date)} : le budget non consommé à cette date est perdu. Budget de l’exercice = PPS prévu jusqu’à la
-          semaine de l’échéance + provisions datées avant l’échéance ou sans date. Non consommé = budget de l’exercice − la plus basse des
-          projections plan et tendance à l’échéance (la pire) ; rythme nécessaire = reste à consommer ÷ semaines restantes. Sous-consommation
-          signalée au-delà des seuils réglables (Réglages › Fin d’exercice : % du budget de l’exercice et montant en €).
+          Fin d’exercice au {fmtDate(e.date)}
+          {nbEnv > 0 ? ' (CT sans enveloppe)' : ''} : le budget non consommé à cette date est perdu. Budget de
+          l’exercice = PPS prévu jusqu’à la semaine de l’échéance + provisions datées avant l’échéance ou sans date. Non consommé = budget de
+          l’exercice − la plus basse des projections plan et tendance à l’échéance (la pire) ; rythme nécessaire = reste à consommer ÷ semaines
+          restantes. Sous-consommation signalée au-delà des seuils réglables (Réglages › Fin d’exercice : % du budget de l’exercice et montant en
+          €).
         </p>
       )}
     </>
@@ -190,6 +241,8 @@ export default function PrevisionsPage() {
   const ct = search.get('ct');
   const r = a.result.data;
   const fc = r ? forecastOf(r) : null;
+  // CT configuré : l'horizon est la période de son enveloppe (DECISIONS n° 19).
+  const scopeEnv = ct ? fc?.par_ct.find((p) => p.ct === ct)?.enveloppe : null;
 
   const setCt = (next: string | null) =>
     setSearch(
@@ -221,7 +274,9 @@ export default function PrevisionsPage() {
           subtitle={
             r && (
               <>
-                {fc ? `Horizon : fin du plan · données arrêtées au ${fmtDate(fc.as_of)}` : 'Atterrissage budgétaire'}{' '}
+                {fc
+                  ? `Horizon : ${scopeEnv ? `enveloppe ${fmtPeriod(scopeEnv.date_debut, scopeEnv.date_fin)}` : 'fin du plan'} · données arrêtées au ${fmtDate(fc.as_of)}`
+                  : 'Atterrissage budgétaire'}{' '}
                 <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )

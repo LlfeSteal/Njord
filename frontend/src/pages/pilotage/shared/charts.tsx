@@ -1,6 +1,7 @@
 // Graphiques partagés des pages Pilotage : trajectoire cumulée (réalisé, projections, plan prévu, budget max,
 // fin d'exercice), charge hebdomadaire, légende et bulle au look du kit. Couleurs résolues depuis les tokens.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
+// CT avec enveloppe (DECISIONS n° 19) : repères « Début / Fin de l'enveloppe », une seule ligne « Enveloppe X ».
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
   Bar,
@@ -15,9 +16,19 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { Couverture, PrevisionPoint } from '../../../api/types';
+import type { Couverture, Enveloppe, PrevisionPoint } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
-import { extendToEcheance, fmtDayMonth, fmtEurShort, useTokenColors, weekOfDate, weekShort, type Echeance, type ForecastPoint } from './pilotage';
+import {
+  echeanceWords,
+  extendToEcheance,
+  fmtDayMonth,
+  fmtEurShort,
+  useTokenColors,
+  weekOfDate,
+  weekShort,
+  type Echeance,
+  type ForecastPoint,
+} from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -259,7 +270,7 @@ export interface ForecastChartProps {
   series: PrevisionPoint[];
   /** Semaine de l'arrêté des données (repère « Aujourd'hui »). */
   asOfWeek: string;
-  /** Budget max = charge max (Σ PPS + provisions) : seule ligne horizontale. */
+  /** Budget max = charge max (Σ PPS + provisions), ou montant de l’enveloppe d’un CT configuré : seule ligne horizontale. */
   budget: number;
   height?: number;
   /** Légende HTML sous le graphique (défaut : sauf en format compact). */
@@ -269,10 +280,15 @@ export interface ForecastChartProps {
    * de l'exercice (« X k€ non consommés », ou dépassement en rouge). Sans effet hors de l'horizon de la série.
    */
   echeance?: Echeance | null;
+  /**
+   * Enveloppe du CT (DECISIONS n° 19 ; défaut : celle de `echeance`) : `budget` est son montant, une seule ligne
+   * « Enveloppe X » (pas d'escalier), repères « Début de l'enveloppe » (s'il tombe dans l'axe) et « Fin de l'enveloppe ».
+   */
+  enveloppe?: Enveloppe | null;
 }
 
 /** Courbes cumulées en € : réalisé, projections plan et tendance, plan de charge prévu, budget max et fin d'exercice. */
-export function ForecastChart({ series: points, asOfWeek, budget, height = 260, legend, echeance }: ForecastChartProps) {
+export function ForecastChart({ series: points, asOfWeek, budget, height = 260, legend, echeance, enveloppe }: ForecastChartProps) {
   // Plan arrêté avant la fin d'exercice : semaines prolongées jusqu'à l'échéance (projections seules).
   const series = extendToEcheance(points, echeance);
   const c = useTokenColors(FORECAST_TOKENS);
@@ -299,12 +315,18 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
           : null
       : null;
   const eDate = echeance ? fmtDayMonth(echeance.date) : '';
+  const words = echeance ? echeanceWords(echeance) : null;
+  // CT configuré : début de l'enveloppe repéré quand sa semaine est dans l'axe.
+  const env = enveloppe ?? (echeance?.kind === 'enveloppe' ? echeance.enveloppe : null);
+  const sWeek = env ? weekOfDate(series, env.date_debut) : null;
+  const sIdx = sWeek ? series.findIndex((p) => p.week === sWeek) : -1;
+  const sDate = env ? fmtDayMonth(env.date_debut) : '';
   // Budget en escalier : budget de l'exercice jusqu'à la fin d'exercice, budget max ensuite. Le crochet s'appuie
   // ainsi sur la ligne tracée ; une seule ligne si l'échéance est hors horizon ou si les deux budgets sont égaux.
   const first = series[0]?.week;
   const last = series[n - 1]?.week;
   const step =
-    echeance && eWeek && first && last && eWeek !== last && echeance.budget > 0 && Math.abs(echeance.budget - budget) > 0.5
+    !env && echeance && eWeek && first && last && eWeek !== last && echeance.budget > 0 && Math.abs(echeance.budget - budget) > 0.5
       ? { year: echeance.date.slice(0, 4), exercice: echeance.budget }
       : null;
   const budgetLine = { stroke: c['--text-secondary'], strokeDasharray: '2 3', strokeWidth: 1.5, ifOverflow: 'extendDomain' as const };
@@ -318,19 +340,27 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
     fontSize: 11,
   });
 
-  /** Libellé « Fin d'exercice » : à droite du trait (à gauche près du bord droit), abaissé s'il touche « Aujourd'hui ». */
-  const echeanceLabel = (p: LabelViewBox) => {
+  /**
+   * Libellé d'un repère vertical (fin d'exercice ou de l'enveloppe, début de l'enveloppe) : à droite du trait
+   * (à gauche près du bord droit), abaissé s'il touche « Aujourd'hui » ou un autre repère (`avoid`).
+   */
+  const markerLabel = (idx: number, text: string, avoid = -1) => (p: LabelViewBox) => {
     const vb = p.viewBox ?? {};
     const x = vb.x ?? 0;
     const y = vb.y ?? 0;
-    const anchorEnd = eFrac > 0.75;
-    const sameSide = asIdx >= 0 && ((anchorEnd && asIdx < eIdx) || (!anchorEnd && asIdx > eIdx));
-    const dist = n > 1 && asIdx >= 0 ? Math.abs(eIdx - asIdx) / (n - 1) : 1;
-    const close = !compact && hasToday && dist < (sameSide ? 0.25 : 0.12);
+    const frac = n > 1 && idx >= 0 ? idx / (n - 1) : 0;
+    const anchorEnd = frac > 0.75;
+    const near = (other: number, withLabel: boolean) => {
+      if (other < 0 || n <= 1) return false;
+      const sameSide = (anchorEnd && other < idx) || (!anchorEnd && other > idx);
+      const dist = Math.abs(idx - other) / (n - 1);
+      return withLabel && dist < (sameSide ? 0.25 : 0.12);
+    };
+    const drop = (near(asIdx, !compact && hasToday) ? 12 : 0) + (near(avoid, true) ? 14 : 0);
     return (
       <text
         x={anchorEnd ? x - 4 : x + 4}
-        y={close ? y + 12 : y - 6}
+        y={drop > 0 ? y + drop : y - 6}
         textAnchor={anchorEnd ? 'end' : 'start'}
         fill={c['--text-secondary']}
         stroke={c['--card']}
@@ -338,10 +368,12 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
         paintOrder="stroke"
         fontSize={11}
       >
-        {compact ? eDate : `Fin d’exercice ${eDate}`}
+        {text}
       </text>
     );
   };
+  const echeanceLabel = markerLabel(eIdx, compact ? eDate : (words?.marker ?? `Fin d’exercice ${eDate}`));
+  const startLabel = markerLabel(sIdx, compact ? sDate : `Début de l’enveloppe ${sDate}`, eIdx);
 
   /** Crochet de mesure à l'échéance : trait entre la pire projection et le budget de l'exercice, embouts, montant. */
   const gapShape = (p: SegmentShapeProps) => {
@@ -368,16 +400,20 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
     );
   };
 
-  /** Mention de bulle : fin d'exercice (montant et budget de l'exercice) puis couverture par le plan. */
+  /** Mention de bulle : début de l'enveloppe, fin d'exercice ou de l'enveloppe (montant et budget), couverture par le plan. */
   const tooltipNote = (d: ForecastPoint) => {
     const cov = d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture);
+    if (env && d.week === sWeek && d.week !== eWeek) {
+      const st = `Début de l’enveloppe ${sDate} (${fmtEur(env.montant)})`;
+      return cov ? `${st} · ${cov}` : st;
+    }
     if (!echeance || d.week !== eWeek) return cov;
     const what = gap
       ? gap.kind === 'unspent'
         ? `${fmtEur(gap.amount)} non consommés`
         : `+${fmtEur(gap.amount)} de dépassement`
       : 'budget entièrement consommé';
-    const e = `Fin d’exercice ${eDate} : ${what} (budget de l’exercice ${fmtEur(echeance.budget)})`;
+    const e = `${words?.marker ?? `Fin d’exercice ${eDate}`} : ${what} (${words?.budget ?? 'budget de l’exercice'} ${fmtEur(echeance.budget)})`;
     return cov ? `${e} · ${cov}` : e;
   };
 
@@ -406,7 +442,10 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
                   { x: first, y: step.exercice },
                   { x: eWeek!, y: step.exercice },
                 ]}
-                label={budgetLabel(`${compact ? '' : `Budget ${step.year} `}${fmtEurShort(step.exercice)}`, 'insideBottomLeft')}
+                label={budgetLabel(
+                  `${compact ? '' : echeance?.kind === 'mixte' ? 'Budget à l’échéance ' : `Budget ${step.year} `}${fmtEurShort(step.exercice)}`,
+                  'insideBottomLeft',
+                )}
               />
               <ReferenceLine
                 {...budgetLine}
@@ -414,12 +453,16 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
                   { x: eWeek!, y: budget },
                   { x: last, y: budget },
                 ]}
-                label={budgetLabel(`${compact ? '' : 'Budget max '}${fmtEurShort(budget)}`, 'insideBottomRight')}
+                label={budgetLabel(`${compact ? '' : echeance?.kind === 'mixte' ? 'Budget ' : 'Budget max '}${fmtEurShort(budget)}`, 'insideBottomRight')}
               />
             </>
           ) : (
             budget > 0 && (
-              <ReferenceLine {...budgetLine} y={budget} label={budgetLabel(`${compact ? 'Budget' : 'Budget max'} ${fmtEurShort(budget)}`, 'insideBottomLeft')} />
+              <ReferenceLine
+                {...budgetLine}
+                y={budget}
+                label={budgetLabel(`${env ? 'Enveloppe' : compact ? 'Budget' : 'Budget max'} ${fmtEurShort(budget)}`, 'insideBottomLeft')}
+              />
             )
           )}
           {hasToday && (
@@ -429,6 +472,9 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
               strokeWidth={1}
               label={compact ? undefined : { value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
+          )}
+          {sWeek && sWeek !== eWeek && (
+            <ReferenceLine x={sWeek} stroke={c['--text-tertiary']} strokeDasharray="3 3" strokeWidth={1} label={startLabel} />
           )}
           {eWeek && <ReferenceLine x={eWeek} stroke={c['--text-tertiary']} strokeDasharray="3 3" strokeWidth={1} label={echeanceLabel} />}
           <Line dataKey="budget_cumul" type="monotone" stroke={c['--text-tertiary']} strokeDasharray="4 4" strokeWidth={1} dot={false} activeDot={false} isAnimationActive={false} />

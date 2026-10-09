@@ -9,6 +9,7 @@ import {
   Inspector,
   InspectorSection,
   KeyValue,
+  Link,
   Metric,
   Page,
   PageToolbar,
@@ -25,14 +26,17 @@ import {
 import { IconDownload } from '../../../ui/Icons';
 import { analyseApi } from '../../../api/client';
 import type { AnalyseResult, PrevisionStatut, Previsions } from '../../../api/types';
-import { fmtDate, fmtEur, fmtHours, fmtPct } from '../../../lib/format';
+import { fmtDate, fmtEur, fmtHours, fmtPct, fmtPeriod } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse, type UseAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote } from '../shared/ContextControl';
 import EcheanceMetric from '../shared/EcheanceMetric';
 import {
+  capitalize,
   cmp,
   echeanceOf,
+  echeanceWords,
+  enveloppesOf,
   fmtDayMonth,
   fmtEurShort,
   forecastOf,
@@ -45,20 +49,30 @@ import {
   sourceLabel,
   type Echeance,
 } from '../shared/pilotage';
-import { Consumption, CtLabel, Reste, RowGlyph } from './cells';
+import { BudgetCell, Consumption, CtLabel, Reste, RowGlyph } from './cells';
+import EnveloppesCard from './EnveloppesCard';
 import NatureBars from './NatureBars';
-import { mergeCtRows, sumOf, type CtRow } from './model';
+import { mergeCtRows, sumOf, type BudgetSource, type CtRow } from './model';
 import '../shared/pilotage.css';
 
-/** Infobulle de « Reste à l'échéance » : budget de l'exercice − projection retenue, à la date de fin d'exercice. */
+/** Infobulle de « Reste à l'échéance » : budget de l'exercice (ou enveloppe) − projection retenue, à l'échéance. */
 function resteTitle(e: Echeance | null | undefined): string | undefined {
   if (!e) return undefined;
   const low = e.source === 'tendance' ? e.projTendance : e.source === 'plan' ? e.projPlan : Math.min(e.projPlan, e.projTendance);
-  return `Au ${fmtDayMonth(e.date)} : budget de l’exercice ${fmtEur(e.budget)} − ${sourceLabel(e.source)} ${fmtEur(low)}`;
+  const w = echeanceWords(e);
+  return `${capitalize(w.when)} : ${w.budget} ${fmtEur(e.budget)} − ${sourceLabel(e.source)} ${fmtEur(low)}`;
 }
 
 type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'reste';
 type StatutFilter = 'all' | PrevisionStatut;
+type SourceFilter = 'all' | BudgetSource;
+
+const SOURCE_OPTIONS: { value: SourceFilter; label: string }[] = [
+  { value: 'all', label: 'Tous' },
+  { value: 'enveloppe', label: 'Enveloppe' },
+  { value: 'charge_max', label: 'Reconstruit' },
+];
+const SOURCE_LABEL: Record<BudgetSource, string> = { enveloppe: 'Enveloppe', charge_max: 'Reconstruit' };
 
 const STATUT_OPTIONS: { value: StatutFilter; label: string }[] = [
   { value: 'all', label: 'Tous' },
@@ -93,6 +107,10 @@ function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] 
   const g = result.budget.global;
   const alert = result.alertes.alerte_globale;
   const e = echeanceOf(fc?.global);
+  // Enveloppes (DECISIONS n° 19) : le budget total somme les enveloppes des CT configurés et la charge max des autres.
+  const env = enveloppesOf(fc);
+  const rebuilt = env && env.nb_configures > 0 ? Math.max(0, total - env.montant) : 0;
+  const todo = env ? env.nb_ct - env.nb_configures : 0;
   // Part sécurisée (ancienne carte) : portée par la sous-ligne du consommé, glyphe d'alerte compris.
   const secured = `dont ${fmtPct(g.pct_securite)} sécurisé${alert ? ` (non sécurisé ${fmtPct(g.pct_non_securise)} : au-delà du seuil)` : ''}`;
   return (
@@ -101,9 +119,13 @@ function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] 
         label="Budget total"
         value={fmtEur(total)}
         sub={
-          provisions > 0
-            ? `PDC ${fmtEurShort(pps)} + provisions ${fmtEurShort(provisions)}`
-            : `${rows.length} CT · plan de charge seul`
+          env && env.nb_configures > 0
+            ? todo > 0
+              ? `Enveloppes ${fmtEurShort(env.montant)} (${env.nb_configures} CT) + charge max ${fmtEurShort(rebuilt)} (${todo} CT à configurer)`
+              : `Enveloppes des ${env.nb_configures} CT`
+            : provisions > 0
+              ? `PDC ${fmtEurShort(pps)} + provisions ${fmtEurShort(provisions)}`
+              : `${rows.length} CT · plan de charge seul`
         }
       />
       <Metric
@@ -136,12 +158,15 @@ function BudgetTable({
   selected,
   onOpen,
   global,
+  mixed,
 }: {
   rows: CtRow[];
   selected: string | null;
   onOpen: (ct: string) => void;
-  /** Fin d'exercice du périmètre (enveloppe commune) : total de la colonne quand aucun CT n'est masqué. */
+  /** Échéance du périmètre (somme des CT) : total de la colonne quand aucun CT n'est masqué. */
   global: { e: Echeance; complete: boolean } | null;
+  /** Des CT ont une enveloppe et d'autres non : provenance affichée dans la colonne « Budget ». */
+  mixed: boolean;
 }) {
   const { sort, toggle } = useSort<SortKey>({ key: 'reste', dir: 'desc' });
   const sorted = useMemo(
@@ -161,11 +186,26 @@ function BudgetTable({
         <tr>
           <th data-glyph aria-label="Statut" />
           {th('ct', 'CT', false)}
-          {th('budget', 'Charge max')}
+          {th(
+            'budget',
+            'Budget',
+            true,
+            'Montant de l’enveloppe du CT (Données › Enveloppes), sinon charge max reconstruite (plan de charge + provisions)',
+          )}
           {th('consomme', 'Consommé')}
           {th('pct', 'Consommation')}
-          {th('atterrissage', 'Atterrissage', true, 'Atterrissage plan à la fin du plan (consommé + plan restant)')}
-          {th('reste', 'Reste à l’échéance', true, 'Budget de l’exercice non consommé à la fin d’exercice, selon la pire projection (plan ou tendance)')}
+          {th(
+            'atterrissage',
+            'Atterrissage',
+            true,
+            'Atterrissage plan (consommé + plan restant) à la fin du plan, ou à la fin de l’enveloppe pour un CT configuré',
+          )}
+          {th(
+            'reste',
+            'Reste à l’échéance',
+            true,
+            'Budget non consommé à l’échéance (fin d’exercice, ou fin de l’enveloppe pour un CT configuré), selon la pire projection (plan ou tendance)',
+          )}
         </tr>
       </thead>
       <tbody>
@@ -188,12 +228,14 @@ function BudgetTable({
             aria-label={`Détail du CT ${r.ct}`}
           >
             <td data-glyph>
-              <RowGlyph row={r} />
+              <RowGlyph row={{ ...r, configured: r.source === 'enveloppe' }} />
             </td>
             <td>
               <CtLabel ct={r.ct} libelle={r.libelle} />
             </td>
-            <td data-align="right">{fmtEur(r.budget)}</td>
+            <td data-align="right">
+              <BudgetCell b={r} showSource={mixed} />
+            </td>
             <td data-align="right">{fmtEur(r.consomme)}</td>
             <td data-align="right">
               <Consumption pct={r.pct} />
@@ -216,7 +258,7 @@ function BudgetTable({
               <Consumption pct={tConso != null && tBudget ? (tConso / tBudget) * 100 : null} />
             </td>
             <td data-align="right">{fmtEur(sumOf(rows, 'atterrissage'))}</td>
-            <td data-align="right" title="Enveloppe commune du périmètre : les CT se compensent (DECISIONS n° 17)">
+            <td data-align="right" title="Somme des CT, chacun à son échéance : les CT se compensent (DECISIONS n° 17, 19)">
               {global?.complete ? (
                 <Reste
                   value={global.e.nonConsomme > 0.5 ? global.e.nonConsomme : global.e.depassement}
@@ -275,19 +317,24 @@ function Classification({ row }: { row: CtRow }) {
   );
 }
 
-/** Fin d'exercice d'un CT (DECISIONS n° 17) : budget de l'exercice, projections, budget perdu, rythme. */
+/**
+ * Fin d'exercice d'un CT (DECISIONS n° 17), ou fin de son enveloppe s'il est configuré (n° 19) : budget de
+ * l'échéance, projections, budget perdu, rythme.
+ */
 function EcheanceSection({ e }: { e: Echeance }) {
   const unspent = e.nonConsomme > 0.5;
+  const env = e.kind === 'enveloppe';
   return (
-    <InspectorSection title={`Fin d’exercice · ${fmtDayMonth(e.date)}`}>
+    <InspectorSection title={`${env ? 'Fin de l’enveloppe' : 'Fin d’exercice'} · ${fmtDayMonth(e.date)}`}>
       <KeyValue
         items={[
           {
-            label: 'Budget de l’exercice',
+            label: env ? 'Enveloppe' : 'Budget de l’exercice',
             value: `${fmtEur(e.budget)}`,
             numeric: true,
           },
-          { label: 'dont PDC · provisions', value: `${fmtEurShort(e.pps)} · ${fmtEurShort(e.provisions)}`, numeric: true },
+          // Enveloppe : les provisions ne font pas partie du budget (marge disponible, section Enveloppe).
+          ...(env ? [] : [{ label: 'dont PDC · provisions', value: `${fmtEurShort(e.pps)} · ${fmtEurShort(e.provisions)}`, numeric: true }]),
           { label: e.source === 'plan' && unspent ? 'Projection plan (retenue)' : 'Projection plan', value: fmtEur(e.projPlan), numeric: true },
           {
             label: e.source === 'tendance' && unspent ? 'Projection tendance (retenue)' : 'Projection tendance',
@@ -326,6 +373,41 @@ function EcheanceSection({ e }: { e: Echeance }) {
   );
 }
 
+/**
+ * Enveloppe d'un CT configuré (DECISIONS n° 19) : période, montant, consommé de la période, ce qui en sort
+ * (réalisé et plan hors enveloppe), provisions = marge disponible, charge max reconstruite pour comparaison.
+ */
+function EnveloppeSection({ row }: { row: CtRow }) {
+  const env = row.enveloppe!;
+  const p = row.p;
+  const horsReel = p?.consomme_hors_enveloppe ?? 0;
+  const horsPlan = p?.plan_hors_enveloppe ?? 0;
+  return (
+    <InspectorSection title="Enveloppe">
+      <KeyValue
+        items={[
+          { label: 'Période', value: fmtPeriod(env.date_debut, env.date_fin), numeric: true },
+          { label: 'Montant', value: fmtEur(env.montant), numeric: true },
+          {
+            label: 'Consommé dans la période',
+            value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—',
+            numeric: true,
+          },
+          ...(horsReel > 0.5 ? [{ label: 'Réalisé hors enveloppe', value: fmtEur(horsReel), numeric: true }] : []),
+          ...(horsPlan > 0.5 ? [{ label: 'Plan hors enveloppe', value: fmtEur(horsPlan), numeric: true }] : []),
+          { label: 'Provisions (marge disponible)', value: fmtEur(row.provisions), numeric: true },
+          { label: 'Charge max reconstruite', value: fmtEur(row.chargeMax), numeric: true },
+        ]}
+      />
+      <p className="pil-note pil-inspector-note">
+        <Link to={`/enveloppes?ct=${encodeURIComponent(row.ct)}`} size="sm">
+          Modifier l’enveloppe
+        </Link>
+      </p>
+    </InspectorSection>
+  );
+}
+
 function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; onClose: () => void }) {
   const p = row.p;
   const glyph = rowGlyph(row.statut, row.risque, row.sousConso);
@@ -336,7 +418,11 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       onClose={onClose}
       title={row.ct}
       subtitle={row.libelle}
-      accessory={glyph ? <StatusGlyph kind={glyph.kind} tone={glyph.tone} label={rowReason(row.statut, row.risque, row.sousConso)} /> : undefined}
+      accessory={
+        glyph ? (
+          <StatusGlyph kind={glyph.kind} tone={glyph.tone} label={rowReason(row.statut, row.risque, row.sousConso, row.source === 'enveloppe')} />
+        ) : undefined
+      }
       footer={
         <Group gap={8} justify="end">
           <Button size="sm" to={`/ecarts?ct=${q}`}>
@@ -348,14 +434,30 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         </Group>
       }
     >
-      <InspectorSection title="Budget">
+      {row.source === 'enveloppe' && row.enveloppe ? (
+        <EnveloppeSection row={row} />
+      ) : (
+        <InspectorSection title="Budget">
+          <KeyValue
+            items={[
+              { label: 'Plan de charge (PPS)', value: fmtEur(row.pps), numeric: true },
+              { label: 'Provisions', value: fmtEur(row.provisions), numeric: true },
+              { label: 'Charge max', value: fmtEur(row.budget), numeric: true },
+              { label: 'Consommé', value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—', numeric: true },
+            ]}
+          />
+          <p className="pil-note pil-inspector-note">
+            Budget reconstruit (charge max) —{' '}
+            <Link to={`/enveloppes?ct=${q}`} size="sm">
+              configurer une enveloppe
+            </Link>
+          </p>
+        </InspectorSection>
+      )}
+      <InspectorSection title="Atterrissage">
         <KeyValue
           items={[
-            { label: 'Plan de charge (PPS)', value: fmtEur(row.pps), numeric: true },
-            { label: 'Provisions', value: fmtEur(row.provisions), numeric: true },
-            { label: 'Charge max', value: fmtEur(row.budget), numeric: true },
-            { label: 'Consommé', value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—', numeric: true },
-            { label: 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
+            { label: row.source === 'enveloppe' ? 'Reste à faire (période)' : 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
             { label: 'Atterrissage plan', value: p ? fmtEur(p.atterrissage_plan) : '—', numeric: true },
             { label: 'Tendance', value: p ? fmtEur(p.atterrissage_tendance) : '—', numeric: true },
             { label: 'Rythme hebdo', value: p ? `${fmtEur(p.rythme_hebdo)} / sem.` : '—', numeric: true },
@@ -366,7 +468,14 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       {row.echeance && <EcheanceSection e={row.echeance} />}
       {p && fc && p.series.length > 0 && (
         <InspectorSection title="Trajectoire">
-          <ForecastChart series={p.series} asOfWeek={fc.as_of_week} budget={p.budget} echeance={row.echeance} height={160} />
+          <ForecastChart
+            series={p.series}
+            asOfWeek={fc.as_of_week}
+            budget={p.budget}
+            echeance={row.echeance}
+            enveloppe={row.enveloppe}
+            height={160}
+          />
         </InspectorSection>
       )}
       <Classification row={row} />
@@ -408,6 +517,7 @@ export default function BudgetPage() {
   const [statut, setStatut] = useState<StatutFilter>('all');
   const [risqueOnly, setRisqueOnly] = useState(false);
   const [sousConsoOnly, setSousConsoOnly] = useState(false);
+  const [source, setSource] = useState<SourceFilter>('all');
 
   const r = a.result.data;
   const rows = useMemo(() => (r ? mergeCtRows(r) : []), [r]);
@@ -419,9 +529,12 @@ export default function BudgetPage() {
         (!nq || norm(x.ct).includes(nq) || norm(x.libelle).includes(nq)) &&
         (statut === 'all' || x.statut === statut) &&
         (!risqueOnly || x.risque) &&
-        (!sousConsoOnly || x.sousConso),
+        (!sousConsoOnly || x.sousConso) &&
+        (source === 'all' || x.source === source),
     );
-  }, [rows, q, statut, risqueOnly, sousConsoOnly]);
+  }, [rows, q, statut, risqueOnly, sousConsoOnly, source]);
+  const env = enveloppesOf(fc);
+  const mixed = rows.some((x) => x.source === 'enveloppe') && rows.some((x) => x.source === 'charge_max');
   const globalE = echeanceOf(fc?.global);
   const selected = ctParam ? rows.find((x) => x.ct === ctParam) : undefined;
 
@@ -440,8 +553,10 @@ export default function BudgetPage() {
     ...(statut !== 'all' ? [{ key: 'statut', label: `Prévision : ${STATUT_LABEL[statut]}`, onRemove: () => setStatut('all') }] : []),
     ...(risqueOnly ? [{ key: 'risque', label: 'CT à risque', onRemove: () => setRisqueOnly(false) }] : []),
     ...(sousConsoOnly ? [{ key: 'sous_conso', label: SOUS_CONSO_LABEL, onRemove: () => setSousConsoOnly(false) }] : []),
+    ...(source !== 'all' ? [{ key: 'source', label: `Budget : ${SOURCE_LABEL[source]}`, onRemove: () => setSource('all') }] : []),
   ];
   const resetFilters = () => {
+    setSource('all');
     setStatut('all');
     setRisqueOnly(false);
     setSousConsoOnly(false);
@@ -471,6 +586,7 @@ export default function BudgetPage() {
                   value={statut}
                   onChange={(v) => setStatut((v as StatutFilter | null) ?? 'all')}
                 />
+                <Select label="Budget" data={SOURCE_OPTIONS} value={source} onChange={(v) => setSource((v as SourceFilter | null) ?? 'all')} />
                 <Switch label="CT à risque seulement" checked={risqueOnly} onChange={setRisqueOnly} />
                 <Switch label="Sous-consommation seulement" checked={sousConsoOnly} onChange={setSousConsoOnly} />
               </FilterButton>
@@ -485,6 +601,18 @@ export default function BudgetPage() {
         {(result) => (
           <>
             <BudgetMetrics result={result} rows={rows} />
+            {fc && env && env.nb_configures > 0 ? (
+              <EnveloppesCard synthese={env} parCt={fc.par_ct} onOpen={setCt} />
+            ) : (
+              fc && (
+                <p className="pil-note">
+                  Aucune enveloppe saisie : le budget de chaque CT est sa charge max reconstruite (plan de charge + provisions).{' '}
+                  <Link to="/enveloppes" size="sm">
+                    Saisir les enveloppes
+                  </Link>
+                </p>
+              )
+            )}
             <NoProvisionNote result={result} />
             {result.budget.par_nature?.length > 0 && <NatureBars rows={result.budget.par_nature} />}
             <BudgetTable
@@ -492,6 +620,7 @@ export default function BudgetPage() {
               selected={ctParam}
               onOpen={(ct) => setCt(ct === ctParam ? null : ct)}
               global={globalE ? { e: globalE, complete: filtered.length === rows.length } : null}
+              mixed={mixed}
             />
           </>
         )}

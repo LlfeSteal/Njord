@@ -99,6 +99,19 @@ Le dossier [`test_data_demo/`](test_data_demo/) contient deux fichiers Excel ano
 
 L'onglet **Analyse** permet alors de comparer le prévu et le réalisé.
 
+Pour charger **toute** la démo en une commande, utilise [`test_data_demo/enveloppes/seed_demo.sh`](test_data_demo/enveloppes/). Il passe par l'API et importe, dans l'ordre :
+- les 6 versions de la timeline du plan de charge, avec leurs dates d'effet ;
+- le réalisé et les provisions ;
+- les enveloppes budgétaires par CT.
+
+Lance-le sur une base vide, backend démarré par `make dev-backend` :
+
+```
+test_data_demo/enveloppes/seed_demo.sh
+```
+
+Pour viser une autre adresse, préfixe la commande par `API=http://…/api`. L'option `--enveloppes-only` ne recharge que les enveloppes. Les scénarios sont décrits dans [`test_data_demo/enveloppes/README.md`](test_data_demo/enveloppes/README.md).
+
 ## Licence
 
 Njord est distribué sous licence [Apache 2.0](LICENSE). Voir aussi [NOTICE](NOTICE).

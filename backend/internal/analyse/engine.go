@@ -32,6 +32,9 @@ type Input struct {
 	// et ses lignes ; charge max d'un CT = Σ PPS + Σ provisions.
 	ProvisionVersion *domain.Version
 	Provisions       []domain.ProvisionLine
+	// Enveloppes saisies (DECISIONS n° 19), clé = CT (TrimSpace) : remplacent
+	// la charge max comme budget du CT, sur leur période.
+	Enveloppes map[string]domain.Enveloppe
 	// Période d'analyse en semaines ISO "2026-W36" ; "" = défaut (semaines communes).
 	WeekFrom, WeekTo string
 	IncludeInactive  bool

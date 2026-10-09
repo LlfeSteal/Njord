@@ -24,7 +24,7 @@ Application web d'analyse des imputations des collaborateurs : **Plan de charge*
 | `internal/enveloppe` | Enveloppes saisies par CT : `/enveloppes` (liste des CT connus, upsert, suppression ; DECISIONS n° 18) | agent Enveloppes |
 | `internal/analyse` | Moteur pur `Run(Input, Settings)` sur la **timeline du plan** (`BuildTimeline`, `timeline.go`, DECISIONS n° 13), repo lecture SQL, endpoints, exports | agent Analyse |
 
-Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `provision_lines`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
+Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `provision_lines`, `ct_enveloppes`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
 
 Tables : `versions` (plan, réalisé & provisions, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `provision_lines`, `ct_enveloppes` (une enveloppe par CT, saisie manuelle), `personnes` (clé `nom_normalise` = NOM + Prénom, unique), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
 

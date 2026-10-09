@@ -552,8 +552,12 @@ export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
 export interface PrevisionCT {
   ct: string;
   ct_libelle: string;
-  /** Charge max = pps + provisions : référence des écarts et du statut. */
+  /** Référence des écarts et du statut : montant de l'enveloppe (DECISIONS n° 19), sinon charge max. */
   budget: number;
+  /** Global : `mixte` si une partie seulement des CT a une enveloppe. */
+  budget_source: 'enveloppe' | 'charge_max' | 'mixte';
+  /** pps + provisions (reconstruction, gardée pour comparaison). */
+  charge_max: number;
   /** Σ PPS du plan (segments de la timeline). */
   pps: number;
   /** Σ provisions restantes. */
@@ -590,7 +594,34 @@ export interface PrevisionCT {
   semaines_echeance: number;
   /** non_consomme > seuils (% et €). */
   sous_consommation: boolean;
+  // Enveloppe (DECISIONS n° 19) : budget = montant, échéance = date_fin,
+  // budget_echeance = montant, prévisionnel restreint à [date_debut, date_fin].
+  /** null = CT non configuré (global : toujours null). */
+  enveloppe: Enveloppe | null;
+  /** PPS prévu hors des semaines de la période (+ PPS hors série). */
+  plan_hors_enveloppe: number;
+  /** € réalisés datés hors de la période (exclus du consommé). */
+  consomme_hors_enveloppe: number;
   series: PrevisionPoint[];
+}
+
+/** Plan de charge face aux enveloppes : lecture brute des CT configurés, chacun sur sa période. */
+export interface EnveloppesSynthese {
+  nb_ct: number;
+  nb_configures: number;
+  /** Σ montants des enveloppes. */
+  montant: number;
+  /** Σ atterrissage_plan des CT configurés. */
+  atterrissage: number;
+  /** atterrissage − montant (net : les CT se compensent). */
+  ecart: number;
+  /** Σ ecart_plan > 0 des CT configurés. */
+  depassement: number;
+  nb_depassement: number;
+  /** Σ non_consomme des CT configurés. */
+  non_consomme: number;
+  nb_sous_consommation: number;
+  plan_hors_enveloppe: number;
 }
 
 export interface Previsions {
@@ -598,6 +629,7 @@ export interface Previsions {
   as_of_week: string;
   global: PrevisionCT;
   par_ct: PrevisionCT[];
+  enveloppes: EnveloppesSynthese;
 }
 
 // ------------------------------------------------------------------ Anomalies (SPEC_analyse §7.8)

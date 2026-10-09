@@ -296,6 +296,7 @@ A row in anomaly gets `data-tone="warning|danger"`: background tinted 8 % of the
 - Sort header: the label, then a 12 px chevron (up / down) when sorted, a faint up-down chevron otherwise; `aria-sort` on the `<th>`.
 - Row states: `data-muted` (archived: secondary text), `data-strike` (purged: tertiary, struck through), `data-selected` (blue 14 %), `data-emphasis` (600, e.g. the active version or a total row).
 - Actions sit at the trailing end of the row as icon buttons, 4 px apart, like a macOS table cell.
+- **Provenance** (which imports carry a row, e.g. Enveloppes « Plan · Réalisé · Provisions »): neutral `Pill`s, 4 px apart, present sources only; never a Tag (it is not a status). A value still to be entered reads as secondary text in its own cell (« À configurer »), not as a colored status.
 
 ### Statuses and flags
 

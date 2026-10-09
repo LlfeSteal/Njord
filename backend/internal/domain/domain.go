@@ -259,6 +259,42 @@ type Personne struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// EnveloppeCT : un CT connu d'au moins une source (plan non purgé, réalisé
+// actif, provisions actives) ou déjà configuré, avec son enveloppe saisie
+// (DECISIONS n° 18). Enveloppe = nil tant que le CT n'est pas configuré.
+type EnveloppeCT struct {
+	CT        string           `json:"ct"`
+	CTLibelle string           `json:"ct_libelle"` // réalisé (préfixe CT retiré), sinon groupe des provisions, sinon groupe du plan
+	Sources   EnveloppeSources `json:"sources"`
+	Enveloppe *Enveloppe       `json:"enveloppe"`
+}
+
+// EnveloppeSources : présence du CT dans chaque source.
+type EnveloppeSources struct {
+	Plan       bool `json:"plan"`       // lignes non rejetées d'une version de plan non purgée
+	Realise    bool `json:"realise"`    // écritures du réalisé actif
+	Provisions bool `json:"provisions"` // lignes de la version de provisions active
+}
+
+// Enveloppe : période d'utilisation et montant alloués à un CT (saisie manuelle).
+type Enveloppe struct {
+	DateDebut   string    `json:"date_debut"` // YYYY-MM-DD
+	DateFin     string    `json:"date_fin"`   // YYYY-MM-DD, ≥ date_debut
+	Montant     float64   `json:"montant"`    // € ≥ 0
+	Commentaire string    `json:"commentaire"`
+	Operateur   string    `json:"operateur"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// EnveloppeInput : corps de PUT /enveloppes/:ct.
+type EnveloppeInput struct {
+	DateDebut   string   `json:"date_debut"`
+	DateFin     string   `json:"date_fin"`
+	Montant     *float64 `json:"montant"` // requis
+	Commentaire string   `json:"commentaire"`
+	Operateur   string   `json:"operateur"`
+}
+
 type Squad struct {
 	ID              string    `json:"id"`
 	NomCanonique    string    `json:"nom_canonique"`

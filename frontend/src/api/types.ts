@@ -179,6 +179,46 @@ export interface RealiseEntriesPage {
 export type Facets = Record<string, string[]>;
 
 // ---------------------------------------------------------------- Référentiels
+/** Présence d'un CT dans chaque source (DECISIONS n° 18). */
+export interface EnveloppeSources {
+  /** Lignes non rejetées d'une version de plan non purgée. */
+  plan: boolean;
+  /** Écritures du réalisé actif. */
+  realise: boolean;
+  /** Lignes de la version de provisions active. */
+  provisions: boolean;
+}
+
+/** Enveloppe budgétaire saisie pour un CT : période d'utilisation + montant. */
+export interface Enveloppe {
+  /** YYYY-MM-DD */
+  date_debut: string;
+  /** YYYY-MM-DD, ≥ date_debut */
+  date_fin: string;
+  /** € ≥ 0 */
+  montant: number;
+  commentaire: string;
+  operateur: string;
+  updated_at: string;
+}
+
+/** GET /enveloppes : CT connus (union des sources) ou déjà configurés ; `enveloppe` null = à configurer. */
+export interface EnveloppeCT {
+  ct: string;
+  ct_libelle: string;
+  sources: EnveloppeSources;
+  enveloppe: Enveloppe | null;
+}
+
+/** Corps de PUT /enveloppes/:ct. */
+export interface EnveloppeInput {
+  date_debut: string;
+  date_fin: string;
+  montant: number;
+  commentaire?: string;
+  operateur?: string;
+}
+
 /** Personne identifiée uniquement par NOM + Prénom. */
 export interface Personne {
   id: string;

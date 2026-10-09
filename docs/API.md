@@ -58,6 +58,18 @@ Filtres : `entite`, `activite`, `trigramme`, `tg`, `wp`, `categorie`, `type`, `l
 | PATCH | `/squads/:id` | `{nom_canonique?, entite_rattachee?, parent_id?}` | `Squad` |
 | POST | `/squads/:id/alias` | `{alias}` | `Squad` |
 
+## Enveloppes (`internal/enveloppe`, DECISIONS n° 18)
+
+`EnveloppeCT` = `{ct, ct_libelle, sources{plan, realise, provisions}, enveloppe}` ; `enveloppe` = `{date_debut, date_fin, montant, commentaire, operateur, updated_at}` ou `null` (CT à configurer). CT = union des lignes non rejetées des versions de plan non purgées, des écritures du réalisé actif, des lignes des provisions actives et des CT déjà configurés. Libellé : `tg_libelle` du réalisé (préfixe CT retiré), sinon dernier segment du groupe des provisions, sinon groupe du plan.
+
+| Méthode | Chemin | Entrée | Réponse |
+|---|---|---|---|
+| GET | `/enveloppes` | | `EnveloppeCT[]` trié par CT |
+| PUT | `/enveloppes/:ct` | `{date_debut, date_fin, montant, commentaire?, operateur?}` | `EnveloppeCT` (upsert). 400 `bad_request` : date absente ou invalide (YYYY-MM-DD), fin < début, montant absent, négatif ou non fini. 404 : CT inconnu des sources et non configuré |
+| DELETE | `/enveloppes/:ct` | | 204 ; 404 si le CT n'a pas d'enveloppe |
+
+Écritures journalisées (`action` = `update` / `delete`, `objet_type` = `enveloppe`, `objet_id` = CT, sans montant dans `details`).
+
 ## Analyse (`internal/analyse`)
 
 | Méthode | Chemin | Réponse |

@@ -10,6 +10,7 @@ export const qk = {
   provisionLines: (id: string, q: unknown) => ['provision-lines', id, q] as const,
   personnes: (q?: string) => ['personnes', q ?? ''] as const,
   squads: () => ['squads'] as const,
+  enveloppes: () => ['enveloppes'] as const,
   settings: () => ['settings'] as const,
   audit: (objetType?: string) => ['audit', objetType ?? ''] as const,
   analyseContext: () => ['analyse', 'context'] as const,

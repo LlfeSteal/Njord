@@ -6,6 +6,8 @@ import type {
   AnomalieSuivi,
   AnomalieSuiviInput,
   AuditEntry,
+  EnveloppeCT,
+  EnveloppeInput,
   Facets,
   ImportReport,
   ImportResult,
@@ -198,6 +200,13 @@ export const referentielApi = {
   updateSquad: (id: string, body: Partial<Pick<Squad, 'nom_canonique' | 'entite_rattachee' | 'parent_id'>>) =>
     patch<Squad>(`/squads/${id}`, body),
   addSquadAlias: (id: string, alias: string) => post<Squad>(`/squads/${id}/alias`, { alias }),
+};
+
+// ------------------------------------------------------------------ Enveloppes (DECISIONS n° 18)
+export const enveloppeApi = {
+  list: () => get<EnveloppeCT[]>('/enveloppes'),
+  save: (ct: string, body: EnveloppeInput) => put<EnveloppeCT>(`/enveloppes/${encodeURIComponent(ct)}`, body),
+  remove: (ct: string) => del<void>(`/enveloppes/${encodeURIComponent(ct)}`),
 };
 
 // ------------------------------------------------------------------ Paramètres & journal

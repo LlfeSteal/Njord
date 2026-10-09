@@ -68,6 +68,7 @@ export default function AppLayout() {
             { to: '/plan/timeline', label: 'Timeline du plan', icon: <IconTimeline size={16} /> },
             { to: '/realise', label: 'Réalisé', icon: <IconFileSpreadsheet size={16} /> },
             { to: '/provisions', label: 'Provisions', icon: <IconEuro size={16} /> },
+            { to: '/enveloppes', label: 'Enveloppes', icon: <IconEuro size={16} /> },
             { to: '/personnes', label: 'Personnes', icon: <IconUser size={16} /> },
             { to: '/squads', label: 'Squads', icon: <IconUsers size={16} /> },
           ],

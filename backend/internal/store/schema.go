@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS provision_lines (
 );
 CREATE INDEX IF NOT EXISTS provision_lines_version ON provision_lines(version_id);
 
+-- Enveloppes budgétaires saisies par CT (DECISIONS n° 18) : une par CT, aucun import ne les porte.
+CREATE TABLE IF NOT EXISTS ct_enveloppes (
+	ct          TEXT PRIMARY KEY,
+	date_debut  TEXT NOT NULL,              -- YYYY-MM-DD
+	date_fin    TEXT NOT NULL,              -- YYYY-MM-DD, ≥ date_debut
+	montant     REAL NOT NULL,              -- € ≥ 0
+	commentaire TEXT NOT NULL DEFAULT '',
+	operateur   TEXT NOT NULL DEFAULT '',
+	updated_at  TEXT NOT NULL               -- RFC3339
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
 	at         TEXT NOT NULL,

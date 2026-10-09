@@ -13,6 +13,7 @@ import (
 
 	"njord/internal/analyse"
 	"njord/internal/core"
+	"njord/internal/enveloppe"
 	"njord/internal/plan"
 	"njord/internal/provision"
 	"njord/internal/realise"
@@ -54,6 +55,7 @@ func NewRouter(st *store.Store) *gin.Engine {
 	referentiel.New(st).Register(api)
 	realise.New(st).Register(api)
 	provision.New(st).Register(api)
+	enveloppe.New(st).Register(api)
 	analyse.New(st).Register(api)
 	return r
 }

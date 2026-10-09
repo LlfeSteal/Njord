@@ -108,6 +108,28 @@ func (r *Repo) ProvisionLines(ctx context.Context, versionID string) ([]domain.P
 	return out, rows.Err()
 }
 
+// Enveloppes returns the envelopes entered per CT (DECISIONS n° 19), clé = CT
+// sans espaces de bord.
+func (r *Repo) Enveloppes(ctx context.Context) (map[string]domain.Enveloppe, error) {
+	rows, err := r.st.DB().QueryContext(ctx,
+		`SELECT ct, date_debut, date_fin, montant, commentaire, operateur, updated_at FROM ct_enveloppes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]domain.Enveloppe{}
+	for rows.Next() {
+		var ct, updated string
+		var e domain.Enveloppe
+		if err := rows.Scan(&ct, &e.DateDebut, &e.DateFin, &e.Montant, &e.Commentaire, &e.Operateur, &updated); err != nil {
+			return nil, err
+		}
+		e.UpdatedAt = store.ParseTime(updated)
+		out[strings.TrimSpace(ct)] = e
+	}
+	return out, rows.Err()
+}
+
 func nullStr(ns sql.NullString) *string {
 	if !ns.Valid || ns.String == "" {
 		return nil
@@ -229,7 +251,8 @@ func (r *Repo) LoadPlans(ctx context.Context, ref domain.Version) ([]PlanSource,
 }
 
 // LoadInput loads every engine input: the plan timeline known at planRef,
-// the réalisé version and the provision version (nil = aucune provision).
+// the réalisé version, the provision version (nil = aucune provision) and the
+// envelopes per CT.
 func (r *Repo) LoadInput(ctx context.Context, planRef, realise domain.Version, provision *domain.Version) (Input, error) {
 	in := Input{PlanRef: planRef, Realise: realise, ProvisionVersion: provision}
 	var err error
@@ -243,6 +266,9 @@ func (r *Repo) LoadInput(ctx context.Context, planRef, realise domain.Version, p
 		if in.Provisions, err = r.ProvisionLines(ctx, provision.ID); err != nil {
 			return in, err
 		}
+	}
+	if in.Enveloppes, err = r.Enveloppes(ctx); err != nil {
+		return in, err
 	}
 	if in.Personnes, err = r.Personnes(ctx); err != nil {
 		return in, err

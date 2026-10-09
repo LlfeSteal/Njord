@@ -509,14 +509,21 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			montant = p.EcartTendance
 			titre += " (tendance +" + fmtEur(montant) + ")"
 		}
-		budget := fmtEur(p.Budget)
-		if p.Provisions != 0 {
+		budget := "un budget de " + fmtEur(p.Budget)
+		switch {
+		case p.Enveloppe != nil:
+			// Budget = enveloppe du CT (DECISIONS n° 19), sur sa période.
+			budget = "une enveloppe de " + fmtEur(p.Budget) + " (" + fmtPeriode(p.Enveloppe) + ")"
+		case p.Provisions != 0:
 			// Budget = charge max (DECISIONS n° 16) : on en donne la composition.
 			budget += " (PDC " + fmtEur(p.PPS) + " + provisions " + fmtEur(p.Provisions) + ")"
 		}
-		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour un budget de " + budget +
+		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour " + budget +
 			" (tendance " + fmtEur(p.AtterrissageTendance) + ")"
-		if p.Budget == 0 {
+		if p.Enveloppe != nil && p.PlanHorsEnveloppe >= 0.5 {
+			detail += " · " + fmtEur(p.PlanHorsEnveloppe) + " planifiés hors enveloppe"
+		}
+		if p.Budget == 0 && p.Enveloppe == nil {
 			// CT présent au réalisé mais absent du plan et des provisions : dépense sans budget plutôt que « dépassement ».
 			titre = "Dépense hors budget · " + p.CT + " (" + fmtEur(p.Consomme) + ")"
 			detail = fmtEur(p.Consomme) + " dépensés sur un CT absent du plan de charge (aucun budget prévu)"
@@ -543,22 +550,39 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	return out
 }
 
+// fmtPeriode formats the period of an envelope: "01/01/2026 → 30/06/2026".
+func fmtPeriode(e *domain.Enveloppe) string {
+	f := func(d string) string {
+		if t, ok := ParseDate(d); ok {
+			return t.Format("02/01/2006")
+		}
+		return d
+	}
+	return f(e.DateDebut) + " → " + f(e.DateFin)
+}
+
 // sousConsoAnomalie: budget de l'exercice qui ne sera pas consommé à l'échéance
-// (DECISIONS n° 17), en plus d'une éventuelle anomalie de dépassement / vigilance.
+// (DECISIONS n° 17) ou de l'enveloppe à sa fin (n° 19), en plus d'une éventuelle
+// anomalie de dépassement / vigilance.
 func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 	echeance := p.Echeance
 	if t, ok := ParseDate(p.Echeance); ok {
 		echeance = t.Format("02/01/2006")
 	}
-	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(p.NonConsomme) + " non consommés au " + echeance
+	quand, budget := "au "+echeance, "Budget de l'exercice "+fmtEur(p.BudgetEcheance)
+	switch {
+	case p.Enveloppe != nil:
+		// Exercice propre au CT (DECISIONS n° 19) : budget = montant de l'enveloppe.
+		quand = "à la fin de l'enveloppe, le " + echeance
+		budget = "Enveloppe " + fmtEur(p.BudgetEcheance) + " (" + fmtPeriode(p.Enveloppe) + ")"
+	case p.ProvisionsEcheance != 0:
+		budget += " (PDC " + fmtEur(p.PPSEcheance) + " + provisions " + fmtEur(p.ProvisionsEcheance) + ")"
+	}
+	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(p.NonConsomme) + " non consommés " + quand
 	if pc := pct(p.NonConsomme, p.BudgetEcheance); pc != nil {
 		titre += " (" + strconv.FormatFloat(math.Round(*pc), 'f', 0, 64) + "\u00a0%)"
 	}
-	budget := fmtEur(p.BudgetEcheance)
-	if p.ProvisionsEcheance != 0 {
-		budget += " (PDC " + fmtEur(p.PPSEcheance) + " + provisions " + fmtEur(p.ProvisionsEcheance) + ")"
-	}
-	detail := "Budget de l'exercice " + budget + " ; projection plan " + fmtEur(p.ProjectionPlanEcheance) +
+	detail := budget + " ; projection plan " + fmtEur(p.ProjectionPlanEcheance) +
 		", tendance " + fmtEur(p.ProjectionTendanceEcheance) + " ; il faudrait " +
 		fmtEur(p.RythmeNecessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
 	return domain.Anomalie{

@@ -1,0 +1,4 @@
+/* Cellule « Budget » d'un CT sans enveloppe (DECISIONS n° 20) : texte secondaire, ni pastille ni montant. */
+.pil-budget--none {
+  color: var(--text-secondary);
+}

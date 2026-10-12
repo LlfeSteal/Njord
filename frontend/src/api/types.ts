@@ -66,7 +66,7 @@ export interface ImportResult {
 }
 
 // ---------------------------------------------------------------- Provisions (DECISIONS n° 16)
-/** Fonds disponibles non engagés. Charge max d'un CT = Σ PPS du plan + Σ provisions ; budget = Σ charge max. */
+/** Fonds disponibles non engagés (informatif : le budget est l'enveloppe, DECISIONS n° 20). */
 export interface ProvisionLine {
   id: number;
   version_id: string;

@@ -1,93 +1,109 @@
-// Pilotage « Vue d'ensemble » (/) : où en est le budget, ce qui est à traiter, comment l'année atterrit.
+// Pilotage « Vue d'ensemble » (/) : où en sont les enveloppes, ce qui est à traiter, comment chaque CT atterrit.
 import { useNavigate } from 'react-router-dom';
-import { Card, EmptyState, GroupedList, Link, ListRow, Metric, Page, PageToolbar, ProgressBar, StatusGlyph } from '../../../ui';
+import { Button, Card, EmptyState, GroupedList, Link, ListRow, Metric, Page, PageToolbar, ProgressBar, StatusGlyph } from '../../../ui';
 import type { AnalyseResult, PrevisionCT } from '../../../api/types';
 import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
-import { ForecastChart } from '../shared/charts';
+import { EnveloppeBars } from '../shared/EnveloppeBars';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
-import EcheanceMetric from '../shared/EcheanceMetric';
 import {
   anomalieGlyph,
   anomaliesATraiter,
   CATEGORIE_LABEL,
-  capitalize,
-  ecartTextTone,
-  echeanceOf,
-  echeanceWords,
   enveloppesOf,
   fmtEurShort,
-  fmtEurSigned,
-  fmtMonthYear,
   forecastOf,
   forecastSentence,
   graviteGlyph,
+  hasEnveloppe,
+  SOUS_CONSO_GLYPH,
 } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
-/** Avancement attendu à date (plan cumulé à l'arrêté ÷ budget total = charge max), en %. */
+/** Nombre de CT montrés dans la carte « Prévision » (les autres sur /previsions). */
+const BARS_LIMIT = 8;
+
+/** Avancement attendu à date (plan cumulé à l'arrêté ÷ Σ enveloppes), en %. */
 function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
   if (!p.budget) return undefined;
   const pt = p.series.find((s) => s.week === asOfWeek);
   return pt ? (pt.budget_cumul / p.budget) * 100 : undefined;
 }
 
-function BudgetMetrics({ result }: { result: AnalyseResult }) {
+/**
+ * Chiffres clés (DECISIONS n° 20) : consommé sur Σ enveloppes, enveloppes à risque d'être perdues, dépassement
+ * (lecture brute, sans compensation entre CT). Sans aucune enveloppe : état vide vers l'import du fichier CàT.
+ */
+function KeyFigures({ result }: { result: AnalyseResult }) {
   const fc = forecastOf(result);
   if (!fc)
     return (
       <div className="pil-metrics">
         <Metric label="Consommé" value="—" sub="Prévisions non disponibles" />
-        <Metric label="Atterrissage prévu" value="—" />
-        <Metric label="Non consommé à l’échéance" value="—" />
+        <Metric label="À risque d’être perdus" value="—" />
+        <Metric label="Dépassement" value="—" />
       </div>
     );
   const g = fc.global;
-  const pct = g.pct_consomme ?? (g.budget ? (g.consomme / g.budget) * 100 : 0);
-  const over = g.statut === 'depassement';
-  const tone = ecartTextTone(g) ?? (g.statut === 'ok' ? 'success' : undefined);
-  const e = echeanceOf(g);
-  // Budget = charge max = plan de charge + provisions restantes (DECISIONS n° 16), ou enveloppe des CT configurés (n° 19).
-  const prov = g.provisions ?? 0;
   const env = enveloppesOf(fc);
-  const budgetText =
-    env && env.nb_configures > 0
-      ? `sur ${fmtEur(g.budget)} de budget (dont ${fmtEurShort(env.montant)} d’enveloppes sur ${env.nb_configures} CT)`
-      : prov > 0
-        ? `sur ${fmtEur(g.budget)} de budget max (dont ${fmtEurShort(prov)} de provisions)`
-        : `sur ${fmtEur(g.budget)} de budget`;
-  return (
-    <div className="pil-metrics">
-      <Metric label="Consommé" value={fmtEur(g.consomme)} sub={`${budgetText} · ${fmtPct(pct)}`}>
-        <ProgressBar
-          value={pct}
-          marker={expectedPct(g, fc.as_of_week)}
-          tone={pct > 100 ? 'danger' : 'accent'}
-          label={`Budget consommé : ${fmtPct(pct)}`}
-        />
-      </Metric>
-      <Metric
-        label={g.fin_plan ? `Atterrissage fin du plan (${fmtMonthYear(g.fin_plan)})` : 'Atterrissage prévu'}
-        value={fmtEur(g.atterrissage_plan)}
-        tone={over ? 'danger' : undefined}
-        sub={
-          e
-            ? `${capitalize(echeanceWords(e).when)} : ${fmtEurShort(e.projPlan)} (plan) · ${fmtEurShort(e.projTendance)} (tendance)`
-            : `Tendance ${fmtEur(g.atterrissage_tendance)}`
+  if (!hasEnveloppe(g) || !env || env.nb_configures === 0)
+    return (
+      <EmptyState
+        title="Aucune enveloppe importée"
+        action={
+          <Button to="/enveloppes" variant="primary">
+            Importer le fichier CàT
+          </Button>
         }
-      />
-      {e ? (
-        <EcheanceMetric e={e} />
-      ) : (
-        // Backend sans fin d'exercice : ancien chiffre (écart de l'atterrissage au budget sur tout l'horizon).
+      >
+        Le budget d’un CT est son enveloppe : sans fichier CàT, aucun CT n’a de budget.
+      </EmptyState>
+    );
+  const budget = g.budget ?? env.montant;
+  const pct = g.pct_consomme ?? (budget ? (g.consomme / budget) * 100 : 0);
+  const hors = fc.hors_enveloppe;
+  const nbHors = hors?.nb_ct ?? env.nb_ct - env.nb_configures;
+  const risk = env.non_consomme > 0.5;
+  const over = env.depassement > 0.5;
+  return (
+    <>
+      <div className="pil-metrics">
         <Metric
-          label="Écart au budget"
-          value={fmtEurSigned(g.ecart_plan)}
-          tone={tone}
-          sub={g.budget ? `${fmtPct((g.ecart_plan / g.budget) * 100)} du budget` : undefined}
+          label="Consommé"
+          value={fmtEur(g.consomme)}
+          sub={`sur ${fmtEur(budget)} d’enveloppes (${env.nb_configures} CT) · ${fmtPct(pct)}`}
+        >
+          <ProgressBar
+            value={pct}
+            marker={expectedPct(g, fc.as_of_week)}
+            tone={pct > 100 ? 'danger' : 'accent'}
+            label={`Enveloppes consommées : ${fmtPct(pct)}`}
+          />
+        </Metric>
+        <Metric
+          label="À risque d’être perdus"
+          value={fmtEur(env.non_consomme)}
+          tone={risk ? 'warning' : undefined}
+          glyph={risk ? SOUS_CONSO_GLYPH : undefined}
+          sub={`${env.nb_sous_consommation} CT sous la zone cible`}
         />
+        <Metric
+          label="Dépassement"
+          value={fmtEur(env.depassement)}
+          tone={over ? 'danger' : undefined}
+          glyph={over ? { kind: 'danger', tone: 'danger' } : undefined}
+          sub={`${env.nb_depassement} CT au-dessus de leur enveloppe`}
+        />
+      </div>
+      {nbHors > 0 && (
+        <p className="pil-note">
+          <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
+            {nbHors} CT sans enveloppe
+          </Link>
+          {hors ? ` : ${fmtEurShort(hors.consomme)} consommés` : ''}
+        </p>
       )}
-    </div>
+    </>
   );
 }
 
@@ -139,27 +155,29 @@ function ToDo({ result }: { result: AnalyseResult }) {
   );
 }
 
+/** Carte « Prévision » : une barre par CT en % de son enveloppe, les plus à risque d'abord (DECISIONS n° 20). */
 function Forecast({ result }: { result: AnalyseResult }) {
+  const navigate = useNavigate();
   const fc = forecastOf(result);
+  if (fc && !hasEnveloppe(fc.global)) return null;
+  const nb = fc ? fc.par_ct.filter(hasEnveloppe).length : 0;
   return (
     <Card>
       <div className="pil-card-head">
         <h2 className="pil-card-head__title">Prévision</h2>
         {fc && (
           <Link to="/previsions" size="sm">
-            Détail des prévisions
+            {nb > BARS_LIMIT ? `Voir les ${nb} CT` : 'Détail des prévisions'}
           </Link>
         )}
       </div>
       {fc ? (
         <>
           <p className="pil-card-head__sub">{forecastSentence(fc.global)}</p>
-          <ForecastChart
-            series={fc.global.series}
-            asOfWeek={fc.as_of_week}
-            budget={fc.global.budget}
-            echeance={echeanceOf(fc.global)}
-            height={260}
+          <EnveloppeBars
+            previsions={fc.par_ct}
+            limit={BARS_LIMIT}
+            onSelect={(ct) => navigate(`/previsions?ct=${encodeURIComponent(ct)}`)}
           />
         </>
       ) : (
@@ -195,7 +213,7 @@ export default function OverviewPage() {
       <AnalyseGate analyse={a}>
         {(result) => (
           <>
-            <BudgetMetrics result={result} />
+            <KeyFigures result={result} />
             <ToDo result={result} />
             <Forecast result={result} />
           </>

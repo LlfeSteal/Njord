@@ -1,9 +1,10 @@
 // Cellules partagées des tableaux par CT (Budget, Prévisions) : une ligne, sans retour.
-import { Pill, ProgressBar, StatusGlyph } from '../../../ui';
+import { ProgressBar, StatusGlyph } from '../../../ui';
 import type { Enveloppe } from '../../../api/types';
 import { fmtEur, fmtPct, fmtPeriod } from '../../../lib/format';
 import { fmtEurSigned, rowGlyph, rowReason } from '../shared/pilotage';
-import type { BudgetSource, CtRow } from './model';
+import type { CtRow } from './model';
+import './budget.css';
 
 export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
   return (
@@ -14,40 +15,27 @@ export function CtLabel({ ct, libelle }: { ct: string; libelle?: string }) {
   );
 }
 
-/** Glyphe d'une ligne CT : octogone (dépassement, risque), triangle (vigilance), cercle « ! » (sous-consommation). */
-export function RowGlyph({
-  row,
-  size,
-}: {
-  row: Pick<CtRow, 'statut' | 'risque'> & { sousConso?: boolean; configured?: boolean };
-  size?: number;
-}) {
+/**
+ * Glyphe d'une ligne CT : octogone (dépassement, risque), triangle (vigilance), cercle « ! » (sous-consommation).
+ * Sans enveloppe : ni statut ni sous-consommation (DECISIONS n° 20), seul le risque de sécurisation reste.
+ */
+export function RowGlyph({ row, size }: { row: Pick<CtRow, 'statut' | 'risque'> & { sousConso?: boolean }; size?: number }) {
   const g = rowGlyph(row.statut, row.risque, row.sousConso);
   if (!g) return null;
-  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={rowReason(row.statut, row.risque, row.sousConso, row.configured)} />;
-}
-
-/** Infobulle de la source du budget : période et montant de l'enveloppe, ou détail de la charge max reconstruite. */
-function budgetSourceTitle(b: { source: BudgetSource; enveloppe: Enveloppe | null; pps: number; provisions: number; budget: number }): string {
-  if (b.source === 'enveloppe' && b.enveloppe)
-    return `Enveloppe ${fmtPeriod(b.enveloppe.date_debut, b.enveloppe.date_fin)} : ${fmtEur(b.enveloppe.montant)}`;
-  return `Charge max reconstruite : PDC ${fmtEur(b.pps)} + provisions ${fmtEur(b.provisions)} = ${fmtEur(b.budget)}`;
+  return <StatusGlyph kind={g.kind} tone={g.tone} size={size} label={rowReason(row.statut, row.risque, row.sousConso)} />;
 }
 
 /**
- * Cellule « Budget » (DECISIONS n° 19) : montant, précédé de sa provenance en pastille neutre (« Enveloppe » /
- * « Reconstruit ») quand le tableau mêle les deux sources (`showSource`). Une ligne ; détail en infobulle.
+ * Cellule « Budget » (DECISIONS n° 20) : montant de l'enveloppe, période en infobulle ; sans enveloppe,
+ * « Sans enveloppe » en texte secondaire (ni pastille, ni montant). Une ligne.
  */
-export function BudgetCell({
-  b,
-  showSource,
-}: {
-  b: { source: BudgetSource; enveloppe: Enveloppe | null; pps: number; provisions: number; budget: number };
-  showSource: boolean;
-}) {
+export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: number | null } }) {
+  if (b.budget == null) return <span className="pil-budget pil-budget--none">Sans enveloppe</span>;
   return (
-    <span className="pil-budget" title={budgetSourceTitle(b)}>
-      {showSource && <Pill>{b.source === 'enveloppe' ? 'Enveloppe' : 'Reconstruit'}</Pill>}
+    <span
+      className="pil-budget"
+      title={b.enveloppe ? `Enveloppe ${fmtPeriod(b.enveloppe.date_debut, b.enveloppe.date_fin)} : ${fmtEur(b.enveloppe.montant)}` : undefined}
+    >
       <span className="pil-budget__value">{fmtEur(b.budget)}</span>
     </span>
   );
@@ -55,9 +43,8 @@ export function BudgetCell({
 
 /**
  * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
- * Le signe porte l'information sans la couleur.
+ * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − projection retenue).
  */
-/** Reste à l'échéance ; `title` explique le calcul (budget de l'exercice − projection retenue). */
 export function Reste({ value, over, warn, title }: { value: number | null; over: boolean; warn: boolean; title?: string }) {
   if (value == null) return <>—</>;
   if (over)

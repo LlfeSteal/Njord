@@ -22,7 +22,7 @@ export function useCommitEnveloppes() {
     mutationFn: ({ file, importeur }: { file: File; importeur?: string }) => enveloppeApi.commit(file, importeur),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.enveloppes() });
-      // L'enveloppe remplace la charge max dans l'analyse (DECISIONS n° 19) : Budget et Prévisions à recalculer.
+      // L'enveloppe est le budget du CT dans l'analyse (DECISIONS n° 19, 20) : Budget et Prévisions à recalculer.
       void qc.invalidateQueries({ queryKey: ['analyse'] });
       void qc.invalidateQueries({ queryKey: ['audit'] });
     },

@@ -38,8 +38,8 @@ import {
   echeanceWords,
   enveloppesOf,
   fmtDayMonth,
-  fmtEurShort,
   forecastOf,
+  hasEnveloppe,
   rowGlyph,
   rowReason,
   rowTone,
@@ -55,7 +55,7 @@ import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type BudgetSource, type CtRow } from './model';
 import '../shared/pilotage.css';
 
-/** Infobulle de « Reste à l'échéance » : budget de l'exercice (ou enveloppe) − projection retenue, à l'échéance. */
+/** Infobulle de « Reste à l'échéance » : enveloppe − projection retenue, à la fin de l'enveloppe. */
 function resteTitle(e: Echeance | null | undefined): string | undefined {
   if (!e) return undefined;
   const low = e.source === 'tendance' ? e.projTendance : e.source === 'plan' ? e.projPlan : Math.min(e.projPlan, e.projTendance);
@@ -69,10 +69,10 @@ type SourceFilter = 'all' | BudgetSource;
 
 const SOURCE_OPTIONS: { value: SourceFilter; label: string }[] = [
   { value: 'all', label: 'Tous' },
-  { value: 'enveloppe', label: 'Enveloppe' },
-  { value: 'charge_max', label: 'Reconstruit' },
+  { value: 'enveloppe', label: 'Avec enveloppe' },
+  { value: 'aucun', label: 'Sans enveloppe' },
 ];
-const SOURCE_LABEL: Record<BudgetSource, string> = { enveloppe: 'Enveloppe', charge_max: 'Reconstruit' };
+const SOURCE_LABEL: Record<BudgetSource, string> = { enveloppe: 'Avec enveloppe', aucun: 'Sans enveloppe' };
 
 const STATUT_OPTIONS: { value: StatutFilter; label: string }[] = [
   { value: 'all', label: 'Tous' },
@@ -96,50 +96,46 @@ function download(href: string) {
 
 // ------------------------------------------------------------------ Chiffres clés
 
-function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] }) {
+function BudgetMetrics({ result }: { result: AnalyseResult }) {
   const fc = forecastOf(result);
-  // Budget = Σ charge max = plan de charge (Σ PPS) + provisions restantes (DECISIONS n° 16).
-  const total = fc?.global.budget ?? sumOf(rows, 'budget') ?? 0;
-  const pps = fc?.global.pps ?? sumOf(rows, 'pps') ?? 0;
-  const provisions = fc?.global.provisions ?? sumOf(rows, 'provisions') ?? 0;
-  const consomme = fc?.global.consomme ?? null;
-  const pct = consomme != null && total ? (consomme / total) * 100 : null;
+  // Budget = Σ enveloppes des CT qui en ont une (DECISIONS n° 20) ; le global est ce périmètre.
+  const env = enveloppesOf(fc);
+  const nbEnv = env?.nb_configures ?? 0;
+  const hors = fc?.hors_enveloppe;
+  const nbHors = hors?.nb_ct ?? (env ? env.nb_ct - env.nb_configures : 0);
+  const glob = fc && hasEnveloppe(fc.global) ? fc.global : null;
+  const total = glob?.budget ?? null;
+  const consomme = glob?.consomme ?? null;
+  const pct = glob ? (glob.pct_consomme ?? (total ? (glob.consomme / total) * 100 : null)) : null;
   const g = result.budget.global;
   const alert = result.alertes.alerte_globale;
-  const e = echeanceOf(fc?.global);
-  // Enveloppes (DECISIONS n° 19) : le budget total somme les enveloppes des CT configurés et la charge max des autres.
-  const env = enveloppesOf(fc);
-  const rebuilt = env && env.nb_configures > 0 ? Math.max(0, total - env.montant) : 0;
-  const todo = env ? env.nb_ct - env.nb_configures : 0;
-  // Part sécurisée (ancienne carte) : portée par la sous-ligne du consommé, glyphe d'alerte compris.
+  const e = echeanceOf(glob);
+  // Part sécurisée (tous les CT) : portée par la sous-ligne du consommé, glyphe d'alerte compris.
   const secured = `dont ${fmtPct(g.pct_securite)} sécurisé${alert ? ` (non sécurisé ${fmtPct(g.pct_non_securise)} : au-delà du seuil)` : ''}`;
   return (
     <div className="pil-metrics">
       <Metric
-        label="Budget total"
-        value={fmtEur(total)}
+        label="Enveloppes"
+        value={total != null ? fmtEur(total) : '—'}
         sub={
-          env && env.nb_configures > 0
-            ? todo > 0
-              ? `Enveloppes ${fmtEurShort(env.montant)} (${env.nb_configures} CT) + charge max ${fmtEurShort(rebuilt)} (${todo} CT sans enveloppe)`
-              : `Enveloppes des ${env.nb_configures} CT`
-            : provisions > 0
-              ? `PDC ${fmtEurShort(pps)} + provisions ${fmtEurShort(provisions)}`
-              : `${rows.length} CT · plan de charge seul`
+          nbEnv > 0
+            ? `${nbEnv} CT avec enveloppe${nbHors > 0 ? ` · ${nbHors} sans enveloppe` : ''}`
+            : fc
+              ? 'Aucune enveloppe importée'
+              : 'Prévisions non disponibles'
         }
       />
       <Metric
         label="Consommé"
         value={fmtEur(consomme)}
         glyph={e && alert ? { kind: 'warning', tone: 'warning' } : undefined}
-        sub={[pct != null ? `${fmtPct(pct)} du budget` : 'Prévisions non disponibles', e ? secured : null].filter(Boolean).join(' · ')}
+        sub={[pct != null ? `${fmtPct(pct)} des enveloppes` : 'Aucune enveloppe', e ? secured : null].filter(Boolean).join(' · ')}
       >
-        {pct != null && <ProgressBar value={pct} tone={pct > 100 ? 'danger' : 'accent'} label={`Budget consommé : ${fmtPct(pct)}`} />}
+        {pct != null && <ProgressBar value={pct} tone={pct > 100 ? 'danger' : 'accent'} label={`Enveloppes consommées : ${fmtPct(pct)}`} />}
       </Metric>
       {e ? (
-        <EcheanceMetric e={e} variant="budget" />
+        <EcheanceMetric e={e} />
       ) : (
-        // Backend sans fin d'exercice : ancienne carte.
         <Metric
           label="Part sécurisée"
           value={fmtPct(g.pct_securite)}
@@ -158,15 +154,12 @@ function BudgetTable({
   selected,
   onOpen,
   global,
-  mixed,
 }: {
   rows: CtRow[];
   selected: string | null;
   onOpen: (ct: string) => void;
-  /** Échéance du périmètre (somme des CT) : total de la colonne quand aucun CT n'est masqué. */
+  /** Échéance du périmètre (CT avec enveloppe) : total de la colonne quand aucun de ces CT n'est masqué. */
   global: { e: Echeance; complete: boolean } | null;
-  /** Des CT ont une enveloppe et d'autres non : provenance affichée dans la colonne « Budget ». */
-  mixed: boolean;
 }) {
   const { sort, toggle } = useSort<SortKey>({ key: 'reste', dir: 'desc' });
   const sorted = useMemo(
@@ -178,8 +171,10 @@ function BudgetTable({
       <span title={title}>{label}</span>
     </SortHeader>
   );
-  const tBudget = sumOf(rows, 'budget');
-  const tConso = sumOf(rows, 'consomme');
+  // Totaux sur les CT avec enveloppe seulement : un CT sans enveloppe n'a pas de budget (DECISIONS n° 20).
+  const envRows = rows.filter((x) => x.budget != null);
+  const tBudget = sumOf(envRows, 'budget');
+  const tConso = sumOf(envRows, 'consomme');
   return (
     <Table hover minWidth={820} caption="Budget par CT">
       <thead>
@@ -190,7 +185,7 @@ function BudgetTable({
             'budget',
             'Budget',
             true,
-            'Montant de l’enveloppe du CT (Données › Enveloppes), sinon charge max reconstruite (plan de charge + provisions)',
+            'Montant de l’enveloppe du CT (Données › Enveloppes) ; un CT sans enveloppe n’a pas de budget',
           )}
           {th('consomme', 'Consommé')}
           {th('pct', 'Consommation')}
@@ -198,13 +193,13 @@ function BudgetTable({
             'atterrissage',
             'Atterrissage',
             true,
-            'Atterrissage plan (consommé + plan restant) à la fin du plan, ou à la fin de l’enveloppe pour un CT avec enveloppe',
+            'Atterrissage plan (consommé + plan restant) à la fin de l’enveloppe ; sans enveloppe, à la fin du plan',
           )}
           {th(
             'reste',
             'Reste à l’échéance',
             true,
-            'Budget non consommé à l’échéance (fin d’exercice, ou fin de l’enveloppe pour un CT avec enveloppe), selon la pire projection (plan ou tendance)',
+            'Enveloppe non consommée à sa fin, selon la pire projection (plan ou tendance)',
           )}
         </tr>
       </thead>
@@ -220,7 +215,7 @@ function BudgetTable({
           <tr
             key={r.ct}
             data-clickable
-            data-tone={rowTone(r.statut, r.risque, r.sousConso)}
+            data-tone={r.budget != null ? rowTone(r.statut, r.risque, r.sousConso) : undefined}
             data-selected={r.ct === selected || undefined}
             tabIndex={0}
             onClick={() => onOpen(r.ct)}
@@ -228,13 +223,14 @@ function BudgetTable({
             aria-label={`Détail du CT ${r.ct}`}
           >
             <td data-glyph>
-              <RowGlyph row={{ ...r, configured: r.source === 'enveloppe' }} />
+              {/* Sans enveloppe : ni ton ni glyphe (STYLE, colonne Budget, DECISIONS n° 20). */}
+              {r.budget != null && <RowGlyph row={r} />}
             </td>
             <td>
               <CtLabel ct={r.ct} libelle={r.libelle} />
             </td>
             <td data-align="right">
-              <BudgetCell b={r} showSource={mixed} />
+              <BudgetCell b={r} />
             </td>
             <td data-align="right">{fmtEur(r.consomme)}</td>
             <td data-align="right">
@@ -247,18 +243,20 @@ function BudgetTable({
           </tr>
         ))}
       </tbody>
-      {sorted.length > 1 && (
+      {sorted.length > 1 && envRows.length > 0 && (
         <tfoot>
           <tr>
             <td data-glyph />
-            <td>Total · {rows.length} CT</td>
+            <td title="Totaux des CT avec enveloppe">
+              Total · {envRows.length} CT{envRows.length < rows.length ? ' avec enveloppe' : ''}
+            </td>
             <td data-align="right">{fmtEur(tBudget)}</td>
             <td data-align="right">{fmtEur(tConso)}</td>
             <td data-align="right">
               <Consumption pct={tConso != null && tBudget ? (tConso / tBudget) * 100 : null} />
             </td>
-            <td data-align="right">{fmtEur(sumOf(rows, 'atterrissage'))}</td>
-            <td data-align="right" title="Somme des CT, chacun à son échéance : les CT se compensent (DECISIONS n° 17, 19)">
+            <td data-align="right">{fmtEur(sumOf(envRows, 'atterrissage'))}</td>
+            <td data-align="right" title="Somme des CT avec enveloppe, chacun à la fin de son enveloppe : les CT se compensent (DECISIONS n° 19, 20)">
               {global?.complete ? (
                 <Reste
                   value={global.e.nonConsomme > 0.5 ? global.e.nonConsomme : global.e.depassement}
@@ -317,24 +315,13 @@ function Classification({ row }: { row: CtRow }) {
   );
 }
 
-/**
- * Fin d'exercice d'un CT (DECISIONS n° 17), ou fin de son enveloppe s'il est configuré (n° 19) : budget de
- * l'échéance, projections, budget perdu, rythme.
- */
+/** Fin de l'enveloppe d'un CT (DECISIONS n° 19, 20) : projections, enveloppe perdue ou dépassée, rythme. */
 function EcheanceSection({ e }: { e: Echeance }) {
   const unspent = e.nonConsomme > 0.5;
-  const env = e.kind === 'enveloppe';
   return (
-    <InspectorSection title={`${env ? 'Fin de l’enveloppe' : 'Fin d’exercice'} · ${fmtDayMonth(e.date)}`}>
+    <InspectorSection title={`Fin de l’enveloppe · ${fmtDayMonth(e.date)}`}>
       <KeyValue
         items={[
-          {
-            label: env ? 'Enveloppe' : 'Budget de l’exercice',
-            value: `${fmtEur(e.budget)}`,
-            numeric: true,
-          },
-          // Enveloppe : les provisions ne font pas partie du budget (marge disponible, section Enveloppe).
-          ...(env ? [] : [{ label: 'dont PDC · provisions', value: `${fmtEurShort(e.pps)} · ${fmtEurShort(e.provisions)}`, numeric: true }]),
           { label: e.source === 'plan' && unspent ? 'Projection plan (retenue)' : 'Projection plan', value: fmtEur(e.projPlan), numeric: true },
           {
             label: e.source === 'tendance' && unspent ? 'Projection tendance (retenue)' : 'Projection tendance',
@@ -374,8 +361,8 @@ function EcheanceSection({ e }: { e: Echeance }) {
 }
 
 /**
- * Enveloppe d'un CT configuré (DECISIONS n° 19) : période, montant, consommé de la période, ce qui en sort
- * (réalisé et plan hors enveloppe), provisions = marge disponible, charge max reconstruite pour comparaison.
+ * Enveloppe d'un CT (DECISIONS n° 19, 20) : période, montant, zone cible, consommé de la période, ce qui en sort
+ * (réalisé et plan hors enveloppe), provisions = marge disponible.
  */
 function EnveloppeSection({ row }: { row: CtRow }) {
   const env = row.enveloppe!;
@@ -388,6 +375,7 @@ function EnveloppeSection({ row }: { row: CtRow }) {
         items={[
           { label: 'Période', value: fmtPeriod(env.date_debut, env.date_fin), numeric: true },
           { label: 'Montant', value: fmtEur(env.montant), numeric: true },
+          ...(p?.cible_min != null ? [{ label: 'Zone cible', value: `${fmtEur(p.cible_min)} → ${fmtEur(env.montant)}`, numeric: true }] : []),
           {
             label: 'Consommé dans la période',
             value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—',
@@ -396,7 +384,6 @@ function EnveloppeSection({ row }: { row: CtRow }) {
           ...(horsReel > 0.5 ? [{ label: 'Réalisé hors enveloppe', value: fmtEur(horsReel), numeric: true }] : []),
           ...(horsPlan > 0.5 ? [{ label: 'Plan hors enveloppe', value: fmtEur(horsPlan), numeric: true }] : []),
           { label: 'Provisions (marge disponible)', value: fmtEur(row.provisions), numeric: true },
-          { label: 'Charge max reconstruite', value: fmtEur(row.chargeMax), numeric: true },
         ]}
       />
       <p className="pil-note pil-inspector-note">
@@ -412,6 +399,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
   const p = row.p;
   const glyph = rowGlyph(row.statut, row.risque, row.sousConso);
   const q = encodeURIComponent(row.ct);
+  const withEnv = row.budget != null;
   return (
     <Inspector
       opened
@@ -420,7 +408,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       subtitle={row.libelle}
       accessory={
         glyph ? (
-          <StatusGlyph kind={glyph.kind} tone={glyph.tone} label={rowReason(row.statut, row.risque, row.sousConso, row.source === 'enveloppe')} />
+          <StatusGlyph kind={glyph.kind} tone={glyph.tone} label={rowReason(row.statut, row.risque, row.sousConso)} />
         ) : undefined
       }
       footer={
@@ -434,22 +422,19 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         </Group>
       }
     >
-      {row.source === 'enveloppe' && row.enveloppe ? (
+      {withEnv && row.enveloppe ? (
         <EnveloppeSection row={row} />
       ) : (
-        <InspectorSection title="Budget">
+        <InspectorSection title="Sans enveloppe — aucun budget">
           <KeyValue
             items={[
-              { label: 'Plan de charge (PPS)', value: fmtEur(row.pps), numeric: true },
-              { label: 'Provisions', value: fmtEur(row.provisions), numeric: true },
-              { label: 'Charge max', value: fmtEur(row.budget), numeric: true },
-              { label: 'Consommé', value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—', numeric: true },
+              { label: 'Consommé', value: p ? fmtEur(p.consomme) : '—', numeric: true },
             ]}
           />
           <p className="pil-note pil-inspector-note">
-            Budget reconstruit (charge max) —{' '}
+            Absent du fichier CàT —{' '}
             <Link to={`/enveloppes?ct=${q}`} size="sm">
-              aucune enveloppe dans le fichier CàT
+              Voir les enveloppes
             </Link>
           </p>
         </InspectorSection>
@@ -457,7 +442,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       <InspectorSection title="Atterrissage">
         <KeyValue
           items={[
-            { label: row.source === 'enveloppe' ? 'Reste à faire (période)' : 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
+            { label: withEnv ? 'Reste à faire (période)' : 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
             { label: 'Atterrissage plan', value: p ? fmtEur(p.atterrissage_plan) : '—', numeric: true },
             { label: 'Tendance', value: p ? fmtEur(p.atterrissage_tendance) : '—', numeric: true },
             { label: 'Rythme hebdo', value: p ? `${fmtEur(p.rythme_hebdo)} / sem.` : '—', numeric: true },
@@ -466,16 +451,9 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         />
       </InspectorSection>
       {row.echeance && <EcheanceSection e={row.echeance} />}
-      {p && fc && p.series.length > 0 && (
-        <InspectorSection title="Trajectoire">
-          <ForecastChart
-            series={p.series}
-            asOfWeek={fc.as_of_week}
-            budget={p.budget}
-            echeance={row.echeance}
-            enveloppe={row.enveloppe}
-            height={160}
-          />
+      {p && fc && withEnv && p.series.length > 0 && (
+        <InspectorSection title="Trajectoire vers l’enveloppe">
+          <ForecastChart prevision={p} asOfWeek={fc.as_of_week} height={160} legend={false} />
         </InspectorSection>
       )}
       <Classification row={row} />
@@ -534,8 +512,8 @@ export default function BudgetPage() {
     );
   }, [rows, q, statut, risqueOnly, sousConsoOnly, source]);
   const env = enveloppesOf(fc);
-  const mixed = rows.some((x) => x.source === 'enveloppe') && rows.some((x) => x.source === 'charge_max');
   const globalE = echeanceOf(fc?.global);
+  const nbEnvRows = rows.filter((x) => x.budget != null).length;
   const selected = ctParam ? rows.find((x) => x.ct === ctParam) : undefined;
 
   const setCt = (ct: string | null) =>
@@ -600,13 +578,13 @@ export default function BudgetPage() {
       <AnalyseGate analyse={a}>
         {(result) => (
           <>
-            <BudgetMetrics result={result} rows={rows} />
+            <BudgetMetrics result={result} />
             {fc && env && env.nb_configures > 0 ? (
               <EnveloppesCard synthese={env} parCt={fc.par_ct} onOpen={setCt} />
             ) : (
               fc && (
                 <p className="pil-note">
-                  Aucune enveloppe importée : le budget de chaque CT est sa charge max reconstruite (plan de charge + provisions).{' '}
+                  Aucune enveloppe importée : aucun CT n’a de budget (consommé et atterrissages seuls).{' '}
                   <Link to="/enveloppes" size="sm">
                     Importer le fichier CàT
                   </Link>
@@ -619,8 +597,7 @@ export default function BudgetPage() {
               rows={filtered}
               selected={ctParam}
               onOpen={(ct) => setCt(ct === ctParam ? null : ct)}
-              global={globalE ? { e: globalE, complete: filtered.length === rows.length } : null}
-              mixed={mixed}
+              global={globalE ? { e: globalE, complete: filtered.filter((x) => x.budget != null).length === nbEnvRows } : null}
             />
           </>
         )}

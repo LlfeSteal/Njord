@@ -60,7 +60,7 @@ export default function ProvisionLineInspector({ line: l, onClose }: { line: Pro
       <InspectorSection title="Provision">
         <KeyValue items={depense} />
         <Text size="sm" tone="secondary" mt={8}>
-          Dates informatives : la provision s'ajoute à la charge max du CT quelle que soit sa date.
+          Provision informative (marge disponible du CT), quelle que soit sa date : elle ne fait pas partie du budget, qui est l'enveloppe.
         </Text>
       </InspectorSection>
       <InspectorSection title="Contrôle">

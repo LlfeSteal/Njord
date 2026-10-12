@@ -385,7 +385,7 @@
 
 
 /* ------------------------------------------------------------------ Enveloppes (DECISIONS n° 19) */
-/* Cellule « Budget » : provenance en pastille neutre (Enveloppe / Reconstruit) puis montant, sur une ligne. */
+/* Cellule « Budget » : montant de l’enveloppe, ou « Sans enveloppe » en secondaire, sur une ligne. */
 .pil-budget {
   display: inline-flex;
   align-items: center;
@@ -405,4 +405,192 @@
 /* Ligne d'action ou de contexte sous un KeyValue de l'inspecteur. */
 .pil-inspector-note {
   margin-top: 8px;
+}
+
+/* ------------------------------------------------------------------ Enveloppes : trajectoire et barres (DECISIONS n° 20) */
+/* Repère vertical de légende (tendance des barres par CT). */
+.pil-swatch[data-shape='tick'] {
+  width: 2px;
+  height: 12px;
+  border-radius: 1px;
+}
+
+/* Barre par CT : colonne libellé 220 px, piste, valeur ; une ligne de 28 px par CT, en % de son enveloppe. */
+.pil-envbars {
+  --pil-envbars-cols: 220px minmax(0, 1fr) 184px;
+}
+.pil-envbars__axis,
+.pil-envbars__row {
+  display: grid;
+  grid-template-columns: var(--pil-envbars-cols);
+  gap: 12px;
+  align-items: center;
+}
+.pil-envbars__axis {
+  padding: 0 8px 2px;
+}
+.pil-envbars__scale {
+  position: relative;
+  height: 14px;
+}
+.pil-envbars__tick-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pil-envbars__tick-label[data-edge='start'] {
+  transform: none;
+}
+.pil-envbars__tick-label[data-edge='end'] {
+  transform: translateX(-100%);
+}
+.pil-envbars__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pil-envbars__list > li > span {
+  display: flex;
+  width: 100%;
+}
+.pil-envbars__row {
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+  outline: none;
+}
+.pil-envbars__row[data-clickable] {
+  cursor: pointer;
+}
+.pil-envbars__row:hover {
+  background: var(--fill);
+}
+.pil-envbars__row:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.pil-envbars__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.pil-envbars__glyph {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+}
+.pil-envbars__code {
+  flex: none;
+  font-family: var(--font-mono);
+}
+.pil-envbars__libelle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+.pil-envbars__track {
+  position: relative;
+  height: 28px;
+}
+/* Zone cible [cible_min %, 100 %] : bande verte à 12 %, pleine hauteur (continue d'une ligne à l'autre). */
+.pil-envbars__zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.pil-envbars__ref {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-secondary);
+}
+/* Barre 14 px : consommé plein, puis atterrissage plan à 30 % (2 px de vide entre les deux), bout arrondi 4 px. */
+.pil-envbars__consomme,
+.pil-envbars__plan {
+  position: absolute;
+  top: 7px;
+  height: 14px;
+}
+.pil-envbars__consomme {
+  left: 0;
+  background: var(--blue);
+}
+.pil-envbars__plan {
+  left: var(--from);
+  width: calc(var(--to) - var(--from));
+  border-radius: 0 4px 4px 0;
+  background: color-mix(in srgb, var(--blue) 30%, transparent);
+}
+.pil-envbars__plan[data-gap] {
+  left: calc(var(--from) + 2px);
+  width: max(0px, calc(var(--to) - var(--from) - 2px));
+}
+.pil-envbars__consomme[data-end] {
+  border-radius: 0 4px 4px 0;
+}
+/* Au-delà de l'axe (150 %) : barre coupée par un chevron de 6 px, la valeur porte le vrai %. */
+.pil-envbars__consomme[data-clip],
+.pil-envbars__plan[data-clip] {
+  border-radius: 0;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
+}
+/* Tendance : repère 2 × 18 px à l'encre. */
+.pil-envbars__tendance {
+  position: absolute;
+  top: 5px;
+  width: 2px;
+  height: 18px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text);
+}
+.pil-envbars__value {
+  text-align: right;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pil-envbars__verdict {
+  margin-top: 4px;
+  font-weight: 600;
+}
+@media (max-width: 560px) {
+  .pil-envbars {
+    --pil-envbars-cols: minmax(0, 1fr) auto;
+  }
+  .pil-envbars__axis > span:first-child,
+  .pil-envbars__axis > span:last-child {
+    display: none;
+  }
+  .pil-envbars__axis .pil-envbars__scale {
+    grid-column: 1 / -1;
+  }
+  .pil-envbars__row {
+    height: auto;
+    padding: 4px 8px;
+    row-gap: 2px;
+  }
+  .pil-envbars__track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
 }

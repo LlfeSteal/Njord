@@ -1,34 +1,26 @@
-// Graphiques partagés des pages Pilotage : trajectoire cumulée (réalisé, projections, plan prévu, budget max,
-// fin d'exercice), charge hebdomadaire, légende et bulle au look du kit. Couleurs résolues depuis les tokens.
+// Graphiques partagés des pages Pilotage : trajectoire vers l'enveloppe (DECISIONS n° 20), charge hebdomadaire,
+// légende et bulle au look du kit. Couleurs résolues depuis les tokens. La barre par CT est dans EnveloppeBars.tsx.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
-// CT avec enveloppe (DECISIONS n° 19) : repères « Début / Fin de l'enveloppe », une seule ligne « Enveloppe X ».
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
   ComposedChart,
   Line,
   ReferenceArea,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip as RTooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import type { Couverture, Enveloppe, PrevisionPoint } from '../../../api/types';
+import type { Couverture, PrevisionCT, PrevisionPoint } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
-import {
-  echeanceWords,
-  extendToEcheance,
-  fmtDayMonth,
-  fmtEurShort,
-  useTokenColors,
-  weekOfDate,
-  weekShort,
-  type Echeance,
-  type ForecastPoint,
-} from './pilotage';
+import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
+import { fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -38,8 +30,8 @@ export interface ChartSeries {
   key: string;
   label: string;
   token: string;
-  /** Pastille : trait plein, tirets, carré (barres / aires / bandes) ou hachure (non couvert). */
-  shape?: 'line' | 'dash' | 'box' | 'hatch';
+  /** Pastille : trait plein, tirets, carré (barres / aires / bandes), hachure (non couvert) ou repère vertical. */
+  shape?: 'line' | 'dash' | 'box' | 'hatch' | 'tick';
   /** Opacité de la pastille (piste = 0,3). */
   opacity?: number;
 }
@@ -87,6 +79,7 @@ export function ChartTooltip<D = unknown>({
   format,
   title,
   note,
+  extra,
 }: {
   active?: boolean;
   payload?: readonly TooltipEntry[];
@@ -96,6 +89,8 @@ export function ChartTooltip<D = unknown>({
   title?: (datum: D) => ReactNode;
   /** Mention sous le titre (ex. semaine non couverte par le plan). */
   note?: (datum: D) => ReactNode;
+  /** Lignes ajoutées après les séries, sans pastille (ex. écart à l'enveloppe à la dernière semaine). */
+  extra?: (datum: D) => { label: string; value: string }[];
 }) {
   if (!active || !payload?.length) return null;
   const datum = payload[0].payload as D;
@@ -103,7 +98,8 @@ export function ChartTooltip<D = unknown>({
     .map((s) => ({ s, entry: payload.find((p) => p.dataKey === s.key) }))
     .filter(({ entry }) => entry && entry.value != null);
   const mention = note?.(datum);
-  if (rows.length === 0 && !mention) return null;
+  const more = extra?.(datum) ?? [];
+  if (rows.length === 0 && !mention && more.length === 0) return null;
   return (
     <div className="pil-tooltip">
       <div className="pil-tooltip__title">{title ? title(datum) : label}</div>
@@ -113,6 +109,12 @@ export function ChartTooltip<D = unknown>({
           <Swatch s={s} />
           {s.label}
           <span className="pil-tooltip__value">{format(Number(entry!.value))}</span>
+        </div>
+      ))}
+      {more.map((r) => (
+        <div key={r.label} className="pil-tooltip__row">
+          {r.label}
+          <span className="pil-tooltip__value">{r.value}</span>
         </div>
       ))}
     </div>
@@ -227,26 +229,21 @@ function uncoveredAreas(runs: UncoveredRun[], patternId: string) {
 /** Id de motif SVG unique par graphique (sans « : », mal toléré dans `url(#…)`). */
 const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 
-// ------------------------------------------------------------------ Trajectoire cumulée
-// Version épurée (2026-10-08) : 4 courbes au plus (réalisé, projection plan, tendance, plan de charge prévu),
-// une ligne de budget en escalier (budget de l'exercice jusqu'à la fin d'exercice, puis budget max = charge max,
-// DECISIONS n° 16-17) et, à la fin d'exercice, un crochet « X k€ non consommés » appuyé sur cette ligne. Les repères sont étiquetés dans le tracé ; la légende ne nomme que les courbes.
+// ------------------------------------------------------------------ Trajectoire vers l'enveloppe (DECISIONS n° 20)
+// Une question : l'enveloppe sera-t-elle consommée en entier, sans surconsommation ? Axe = période de l'enveloppe
+// (périmètre : union des périodes), zone cible [cible_min, enveloppe], ligne d'enveloppe, éventail plan ↔ tendance,
+// réalisé jusqu'à « Aujourd'hui » et point d'arrivée sur la projection plan, glyphé et libellé selon le statut.
 
 const FORECAST_SERIES: ChartSeries[] = [
   { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
   { key: 'plan_cumul', label: 'Projection plan', token: '--blue', shape: 'line', opacity: 0.5 },
-  { key: 'tendance_cumul', label: 'Tendance', token: '--orange', shape: 'dash' },
-  { key: 'budget_cumul', label: 'Plan de charge prévu', token: '--text-tertiary', shape: 'dash' },
+  { key: 'tendance_cumul', label: 'Tendance', token: '--blue', shape: 'dash' },
 ];
 
-const FORECAST_TOKENS = ['--blue', '--orange', '--text', '--text-tertiary', '--text-secondary', '--separator', '--card', '--risk-unspent', '--danger'] as const;
+/** Entrée de légende de la zone cible (pastille plus soutenue que la bande pour rester lisible). */
+const TARGET_SERIES: ChartSeries = { key: 'zone', label: 'Zone cible', token: '--success', opacity: 0.25 };
 
-interface SegmentShapeProps {
-  x1?: number;
-  y1?: number;
-  x2?: number;
-  y2?: number;
-}
+const FORECAST_TOKENS = ['--blue', '--success', '--text', '--text-secondary', '--separator', '--card'] as const;
 
 const AXIS = { axisLine: false, tickLine: false } as const;
 
@@ -262,209 +259,249 @@ function niceCeil(v: number): number {
 /** Sous cette hauteur (inspecteur), le graphique est compact : ni légende, ni hachure, ni libellé long. */
 const COMPACT_HEIGHT = 240;
 
-interface LabelViewBox {
+const DAY_MS = 86_400_000;
+
+/** Lundi (YYYY-MM-DD) de la semaine ISO d'une date, ou null si illisible. */
+function mondayOf(date: string): string | null {
+  const t = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(t)) return null;
+  const dow = (new Date(t).getUTCDay() + 6) % 7;
+  return new Date(t - dow * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Semaine ISO « YYYY-Www » du lundi `t` (ms UTC). */
+function isoWeekOf(t: number): string {
+  const thu = new Date(t + 3 * DAY_MS);
+  const y = thu.getUTCFullYear();
+  const w = Math.ceil(((thu.getTime() - Date.UTC(y, 0, 1)) / DAY_MS + 1) / 7);
+  return `${y}-W${String(w).padStart(2, '0')}`;
+}
+
+/** Point de la trajectoire : point du backend restreint à la période, éventail [bas, haut] entre les projections. */
+interface TrajPoint {
+  week: string;
+  debut: string;
+  couverture?: Couverture;
+  reel_cumul: number | null;
+  plan_cumul: number | null;
+  tendance_cumul: number | null;
+  fan: [number, number] | null;
+  /** Semaine ajoutée après la fin du plan, jusqu'à la fin de l'enveloppe (projections seules). */
+  extension?: boolean;
+}
+
+const fanOf = (plan: number | null, tend: number | null): [number, number] | null =>
+  plan == null || tend == null ? null : [Math.min(plan, tend), Math.max(plan, tend)];
+
+/**
+ * Série de la trajectoire : semaines dont le lundi est dans [semaine de date_debut, semaine de date_fin] pour un CT
+ * (toute la série pour le périmètre). Plan arrêté avant la fin de l'enveloppe : semaines prolongées jusqu'à elle,
+ * projections menées linéairement jusqu'aux atterrissages du backend.
+ */
+function trajectoryOf(p: PrevisionCT): TrajPoint[] {
+  const env = p.ct !== '' ? p.enveloppe : null;
+  const from = env ? mondayOf(env.date_debut) : null;
+  const to = env ? mondayOf(env.date_fin) : null;
+  const pts: TrajPoint[] = (p.series ?? [])
+    .filter((s) => !from || !to || (s.debut.slice(0, 10) >= from && s.debut.slice(0, 10) <= to))
+    .map((s) => ({
+      week: s.week,
+      debut: s.debut,
+      couverture: s.couverture,
+      reel_cumul: s.reel_cumul,
+      plan_cumul: s.plan_cumul,
+      tendance_cumul: s.tendance_cumul,
+      fan: fanOf(s.plan_cumul, s.tendance_cumul),
+    }));
+  const last = pts[pts.length - 1];
+  if (!to || !last) return pts;
+  const end = Date.parse(`${to}T00:00:00Z`);
+  const lastStart = Date.parse(`${last.debut.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(end) || Number.isNaN(lastStart) || end <= lastStart) return pts;
+  const k = Math.min(Math.round((end - lastStart) / (7 * DAY_MS)), 60);
+  const lerp = (a: number | null, b: number, i: number) => (a == null ? null : a + ((b - a) * i) / k);
+  const startPlan = last.plan_cumul ?? last.reel_cumul;
+  const startTend = last.tendance_cumul ?? last.reel_cumul;
+  for (let i = 1; i <= k; i++) {
+    const t = lastStart + i * 7 * DAY_MS;
+    const plan = lerp(startPlan, p.atterrissage_plan, i);
+    const tend = lerp(startTend, p.atterrissage_tendance, i);
+    pts.push({
+      week: isoWeekOf(t),
+      debut: new Date(t).toISOString().slice(0, 10),
+      reel_cumul: null,
+      plan_cumul: plan,
+      tendance_cumul: tend,
+      fan: fanOf(plan, tend),
+      extension: true,
+    });
+  }
+  return pts;
+}
+
+/** Statut du point d'arrivée : au-dessus de l'enveloppe, sous la zone cible, vigilance (dans la zone) ou dans la cible. */
+type LandingKind = 'over' | 'under' | 'vigilance' | 'in';
+
+const LANDING_GLYPH: Record<LandingKind, { kind: GlyphKind; tone: StatusTone }> = {
+  over: { kind: 'danger', tone: 'danger' },
+  under: { kind: 'attention', tone: 'attention' },
+  vigilance: { kind: 'warning', tone: 'warning' },
+  in: { kind: 'success', tone: 'success' },
+};
+
+/** Taille du glyphe du point d'arrivée (px) et rayon de son anneau couleur carte (2 px autour). */
+const LANDING_SIZE = 14;
+
+interface DotShapeProps {
+  cx?: number;
+  cy?: number;
+}
+
+interface AreaLabelProps {
   viewBox?: { x?: number; y?: number; width?: number; height?: number };
 }
 
 export interface ForecastChartProps {
-  series: PrevisionPoint[];
+  /** Prévision d'un CT avec enveloppe, ou du périmètre des enveloppes (`ct` = ''). Sans budget : rien n'est rendu. */
+  prevision: PrevisionCT;
   /** Semaine de l'arrêté des données (repère « Aujourd'hui »). */
   asOfWeek: string;
-  /** Budget max = charge max (Σ PPS + provisions), ou montant de l’enveloppe d’un CT configuré : seule ligne horizontale. */
-  budget: number;
   height?: number;
   /** Légende HTML sous le graphique (défaut : sauf en format compact). */
   legend?: boolean;
-  /**
-   * Fin d'exercice (`echeanceOf(prevision)`) : repère vertical et crochet entre la pire projection et le budget
-   * de l'exercice (« X k€ non consommés », ou dépassement en rouge). Sans effet hors de l'horizon de la série.
-   */
-  echeance?: Echeance | null;
-  /**
-   * Enveloppe du CT (DECISIONS n° 19 ; défaut : celle de `echeance`) : `budget` est son montant, une seule ligne
-   * « Enveloppe X » (pas d'escalier), repères « Début de l'enveloppe » (s'il tombe dans l'axe) et « Fin de l'enveloppe ».
-   */
-  enveloppe?: Enveloppe | null;
 }
 
-/** Courbes cumulées en € : réalisé, projections plan et tendance, plan de charge prévu, budget max et fin d'exercice. */
-export function ForecastChart({ series: points, asOfWeek, budget, height = 260, legend, echeance, enveloppe }: ForecastChartProps) {
-  // Plan arrêté avant la fin d'exercice : semaines prolongées jusqu'à l'échéance (projections seules).
-  const series = extendToEcheance(points, echeance);
+/** Trajectoire cumulée vers l'enveloppe : zone cible, enveloppe, réalisé, éventail plan ↔ tendance, point d'arrivée. */
+export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: ForecastChartProps) {
   const c = useTokenColors(FORECAST_TOKENS);
   const hatch = useTokenColors(HATCH_TOKENS);
   const patternId = usePatternId();
+  const budget = prevision.budget;
+  const series = budget == null ? [] : trajectoryOf(prevision);
+  if (budget == null || series.length === 0) return null;
+
   const compact = height < COMPACT_HEIGHT;
   const showLegend = legend ?? !compact;
   const tick = { fill: c['--text-secondary'], fontSize: 11 };
   const hasToday = series.some((p) => p.week === asOfWeek);
   const runs = compact ? [] : uncoveredRuns(series, 'point');
+  const cibleMin = prevision.cible_min;
+  const hasZone = cibleMin != null && budget - cibleMin > 0.5;
 
-  // Fin d'exercice : semaine de l'échéance, position relative (placement des libellés) et écart à mesurer.
-  const n = series.length;
-  const eWeek = echeance ? weekOfDate(series, echeance.date) : null;
-  const eIdx = eWeek ? series.findIndex((p) => p.week === eWeek) : -1;
-  const asIdx = series.findIndex((p) => p.week === asOfWeek);
-  const eFrac = n > 1 && eIdx >= 0 ? eIdx / (n - 1) : 0;
-  const gap =
-    echeance && eWeek
-      ? echeance.nonConsomme > 0.5
-        ? { kind: 'unspent' as const, low: echeance.worst, high: echeance.budget, amount: echeance.nonConsomme }
-        : echeance.depassement > 0.5
-          ? { kind: 'over' as const, low: echeance.budget, high: echeance.budget + echeance.depassement, amount: echeance.depassement }
-          : null
-      : null;
-  const eDate = echeance ? fmtDayMonth(echeance.date) : '';
-  const words = echeance ? echeanceWords(echeance) : null;
-  // CT configuré : début de l'enveloppe repéré quand sa semaine est dans l'axe.
-  const env = enveloppe ?? (echeance?.kind === 'enveloppe' ? echeance.enveloppe : null);
-  const sWeek = env ? weekOfDate(series, env.date_debut) : null;
-  const sIdx = sWeek ? series.findIndex((p) => p.week === sWeek) : -1;
-  const sDate = env ? fmtDayMonth(env.date_debut) : '';
-  // Budget en escalier : budget de l'exercice jusqu'à la fin d'exercice, budget max ensuite. Le crochet s'appuie
-  // ainsi sur la ligne tracée ; une seule ligne si l'échéance est hors horizon ou si les deux budgets sont égaux.
-  const first = series[0]?.week;
-  const last = series[n - 1]?.week;
-  const step =
-    !env && echeance && eWeek && first && last && eWeek !== last && echeance.budget > 0 && Math.abs(echeance.budget - budget) > 0.5
-      ? { year: echeance.date.slice(0, 4), exercice: echeance.budget }
-      : null;
-  const budgetLine = { stroke: c['--text-secondary'], strokeDasharray: '2 3', strokeWidth: 1.5, ifOverflow: 'extendDomain' as const };
-  // Échelle Y explicite : les segments de référence n'étendent pas le domaine (recharts), budgets et crochet compris.
-  const yMax = Math.max(budget, step?.exercice ?? 0, gap?.high ?? 0);
-  const yDomain: [number, (dataMax: number) => number] = [0, (dataMax: number) => niceCeil(Math.max(dataMax, yMax))];
-  const budgetLabel = (value: string, position: 'insideBottomLeft' | 'insideBottomRight') => ({
-    value,
-    position,
-    fill: c['--text-secondary'],
-    fontSize: 11,
-  });
+  // Point d'arrivée : dernière semaine, sur la projection plan (réalisé si l'enveloppe est terminée).
+  const last = series[series.length - 1];
+  const landing = last.plan_cumul ?? last.reel_cumul ?? prevision.atterrissage_plan;
+  const ecart = landing - budget;
+  const kind: LandingKind =
+    ecart > 0.5 ? 'over' : cibleMin != null && landing < cibleMin - 0.5 ? 'under' : prevision.statut === 'vigilance' ? 'vigilance' : 'in';
+  const landingText = compact
+    ? kind === 'over'
+      ? `+${fmtEurShort(ecart)}`
+      : kind === 'under'
+        ? `−${fmtEurShort(-ecart)}`
+        : fmtEurShort(landing)
+    : kind === 'over'
+      ? `+${fmtEurShort(ecart)} de dépassement`
+      : kind === 'under'
+        ? `${fmtEurShort(-ecart)} non consommés`
+        : kind === 'vigilance'
+          ? `${fmtEurShort(landing)} · dans la cible, vigilance`
+          : `${fmtEurShort(landing)} · dans la cible`;
+  const landingWords =
+    kind === 'over'
+      ? 'Au-dessus de l’enveloppe'
+      : kind === 'under'
+        ? 'Sous la zone cible'
+        : kind === 'vigilance'
+          ? 'Vigilance'
+          : 'Dans la zone cible';
 
-  /**
-   * Libellé d'un repère vertical (fin d'exercice ou de l'enveloppe, début de l'enveloppe) : à droite du trait
-   * (à gauche près du bord droit), abaissé s'il touche « Aujourd'hui » ou un autre repère (`avoid`).
-   */
-  const markerLabel = (idx: number, text: string, avoid = -1) => (p: LabelViewBox) => {
+  // Échelle Y explicite : 0 → plafond rond de max(enveloppe, projections, données).
+  let dataMax = Math.max(budget, landing, prevision.atterrissage_tendance);
+  for (const p of series) dataMax = Math.max(dataMax, p.reel_cumul ?? 0, p.plan_cumul ?? 0, p.tendance_cumul ?? 0);
+  const yMax = niceCeil(dataMax);
+  const halo = { stroke: c['--card'], strokeWidth: 3, paintOrder: 'stroke' } as const;
+
+  /** « Zone cible » dans la bande (en haut à gauche), sous elle si la bande est trop fine pour le texte. */
+  const zoneLabel = (p: AreaLabelProps) => {
     const vb = p.viewBox ?? {};
-    const x = vb.x ?? 0;
-    const y = vb.y ?? 0;
-    const frac = n > 1 && idx >= 0 ? idx / (n - 1) : 0;
-    const anchorEnd = frac > 0.75;
-    const near = (other: number, withLabel: boolean) => {
-      if (other < 0 || n <= 1) return false;
-      const sameSide = (anchorEnd && other < idx) || (!anchorEnd && other > idx);
-      const dist = Math.abs(idx - other) / (n - 1);
-      return withLabel && dist < (sameSide ? 0.25 : 0.12);
-    };
-    const drop = (near(asIdx, !compact && hasToday) ? 12 : 0) + (near(avoid, true) ? 14 : 0);
+    const x = (vb.x ?? 0) + 6;
+    const top = vb.y ?? 0;
+    const h = vb.height ?? 0;
+    const y = h >= 16 ? top + 13 : top + h + 13;
     return (
-      <text
-        x={anchorEnd ? x - 4 : x + 4}
-        y={drop > 0 ? y + drop : y - 6}
-        textAnchor={anchorEnd ? 'end' : 'start'}
-        fill={c['--text-secondary']}
-        stroke={c['--card']}
-        strokeWidth={3}
-        paintOrder="stroke"
-        fontSize={11}
-      >
-        {text}
+      <text x={x} y={y} fill={c['--text-secondary']} fontSize={11} {...halo}>
+        Zone cible
       </text>
     );
   };
-  const echeanceLabel = markerLabel(eIdx, compact ? eDate : (words?.marker ?? `Fin d’exercice ${eDate}`));
-  const startLabel = markerLabel(sIdx, compact ? sDate : `Début de l’enveloppe ${sDate}`, eIdx);
 
-  /** Crochet de mesure à l'échéance : trait entre la pire projection et le budget de l'exercice, embouts, montant. */
-  const gapShape = (p: SegmentShapeProps) => {
-    if (!gap) return <g />;
-    const x = p.x1 ?? 0;
-    const top = Math.min(p.y1 ?? 0, p.y2 ?? 0);
-    const bot = Math.max(p.y1 ?? 0, p.y2 ?? 0);
-    const color = gap.kind === 'unspent' ? c['--risk-unspent'] : c['--danger'];
-    const left = eFrac > 0.3;
-    const tx = left ? x - 9 : x + 9;
-    const mid = (top + bot) / 2;
-    const halo = { stroke: c['--card'], strokeWidth: 3, paintOrder: 'stroke' } as const;
+  /** Point d'arrivée : glyphe de statut sur anneau carte, libellé direct à l'encre (au-dessus, à gauche du point). */
+  const landingShape = (p: DotShapeProps) => {
+    const cx = p.cx ?? 0;
+    const cy = p.cy ?? 0;
+    const g = LANDING_GLYPH[kind];
+    const below = cy < 34;
     return (
       <g>
-        <line x1={x} x2={x} y1={top} y2={bot} stroke={color} strokeWidth={3} strokeLinecap="round" />
-        <line x1={x - 5} x2={x + 5} y1={top} y2={top} stroke={color} strokeWidth={2} strokeLinecap="round" />
-        <line x1={x - 5} x2={x + 5} y1={bot} y2={bot} stroke={color} strokeWidth={2} strokeLinecap="round" />
-        {!compact && (
-          <text x={tx} y={mid} dy="0.35em" textAnchor={left ? 'end' : 'start'} fill={c['--text']} fontSize={12} fontWeight={600} {...halo}>
-            {gap.kind === 'unspent' ? `${fmtEurShort(gap.amount)} non consommés` : `+${fmtEurShort(gap.amount)} de dépassement`}
-          </text>
-        )}
+        <circle cx={cx} cy={cy} r={LANDING_SIZE / 2 + 2} fill={c['--card']} />
+        <g transform={`translate(${cx - LANDING_SIZE / 2},${cy - LANDING_SIZE / 2})`}>
+          <StatusGlyph kind={g.kind} tone={g.tone} size={LANDING_SIZE} label={landingWords} />
+        </g>
+        <text
+          x={cx - LANDING_SIZE / 2 - 6}
+          y={below ? cy + LANDING_SIZE + 6 : cy - LANDING_SIZE / 2 - 4}
+          textAnchor="end"
+          fill={c['--text']}
+          fontSize={12}
+          fontWeight={600}
+          {...halo}
+        >
+          {landingText}
+        </text>
       </g>
     );
   };
 
-  /** Mention de bulle : début de l'enveloppe, fin d'exercice ou de l'enveloppe (montant et budget), couverture par le plan. */
-  const tooltipNote = (d: ForecastPoint) => {
-    const cov = d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture);
-    if (env && d.week === sWeek && d.week !== eWeek) {
-      const st = `Début de l’enveloppe ${sDate} (${fmtEur(env.montant)})`;
-      return cov ? `${st} · ${cov}` : st;
-    }
-    if (!echeance || d.week !== eWeek) return cov;
-    const what = gap
-      ? gap.kind === 'unspent'
-        ? `${fmtEur(gap.amount)} non consommés`
-        : `+${fmtEur(gap.amount)} de dépassement`
-      : 'budget entièrement consommé';
-    const e = `${words?.marker ?? `Fin d’exercice ${eDate}`} : ${what} (${words?.budget ?? 'budget de l’exercice'} ${fmtEur(echeance.budget)})`;
-    return cov ? `${e} · ${cov}` : e;
-  };
+  const tooltipNote = (d: TrajPoint) => (d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture));
+  const tooltipExtra = (d: TrajPoint) => (d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []);
+  const legendSeries = [...FORECAST_SERIES, ...(hasZone ? [TARGET_SERIES] : []), ...(runs.length > 0 ? [UNCOVERED_SERIES] : [])];
+  const lineProps = { type: 'monotone' as const, dot: false, connectNulls: false, isAnimationActive: false };
 
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={series} margin={{ top: 20, right: 8, bottom: 0, left: 0 }}>
+        <ComposedChart data={series} margin={{ top: 20, right: 12, bottom: 0, left: 0 }}>
           {hatchDefs(patternId, hatch['--gray'])}
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           {uncoveredAreas(runs, patternId)}
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
-          <YAxis {...AXIS} width={56} domain={yDomain} tickCount={5} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
+          <YAxis {...AXIS} width={56} domain={[0, yMax]} tickCount={5} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
           <RTooltip
             cursor={{ stroke: c['--separator'] }}
             wrapperStyle={{ outline: 'none' }}
             isAnimationActive={false}
             content={
-              <ChartTooltip<ForecastPoint> series={FORECAST_SERIES} format={(v) => fmtEur(v)} title={(d) => fmtWeek(d.week)} note={tooltipNote} />
+              <ChartTooltip<TrajPoint>
+                series={FORECAST_SERIES}
+                format={(v) => fmtEur(v)}
+                title={(d) => fmtWeek(d.week)}
+                note={tooltipNote}
+                extra={tooltipExtra}
+              />
             }
           />
-          {step ? (
-            <>
-              <ReferenceLine
-                {...budgetLine}
-                segment={[
-                  { x: first, y: step.exercice },
-                  { x: eWeek!, y: step.exercice },
-                ]}
-                label={budgetLabel(
-                  `${compact ? '' : echeance?.kind === 'mixte' ? 'Budget à l’échéance ' : `Budget ${step.year} `}${fmtEurShort(step.exercice)}`,
-                  'insideBottomLeft',
-                )}
-              />
-              <ReferenceLine
-                {...budgetLine}
-                segment={[
-                  { x: eWeek!, y: budget },
-                  { x: last, y: budget },
-                ]}
-                label={budgetLabel(`${compact ? '' : echeance?.kind === 'mixte' ? 'Budget ' : 'Budget max '}${fmtEurShort(budget)}`, 'insideBottomRight')}
-              />
-            </>
-          ) : (
-            budget > 0 && (
-              <ReferenceLine
-                {...budgetLine}
-                y={budget}
-                label={budgetLabel(`${env ? 'Enveloppe' : compact ? 'Budget' : 'Budget max'} ${fmtEurShort(budget)}`, 'insideBottomLeft')}
-              />
-            )
+          {hasZone && (
+            <ReferenceArea y1={cibleMin} y2={budget} fill={c['--success']} fillOpacity={0.12} ifOverflow="extendDomain" label={zoneLabel} />
           )}
+          <ReferenceLine
+            y={budget}
+            stroke={c['--text-secondary']}
+            strokeDasharray="2 3"
+            strokeWidth={1.5}
+            ifOverflow="extendDomain"
+            label={{ value: `Enveloppe ${fmtEurShort(budget)}`, position: 'insideBottomLeft', fill: c['--text-secondary'], fontSize: 11 }}
+          />
           {hasToday && (
             <ReferenceLine
               x={asOfWeek}
@@ -473,28 +510,14 @@ export function ForecastChart({ series: points, asOfWeek, budget, height = 260, 
               label={compact ? undefined : { value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
-          {sWeek && sWeek !== eWeek && (
-            <ReferenceLine x={sWeek} stroke={c['--text-tertiary']} strokeDasharray="3 3" strokeWidth={1} label={startLabel} />
-          )}
-          {eWeek && <ReferenceLine x={eWeek} stroke={c['--text-tertiary']} strokeDasharray="3 3" strokeWidth={1} label={echeanceLabel} />}
-          <Line dataKey="budget_cumul" type="monotone" stroke={c['--text-tertiary']} strokeDasharray="4 4" strokeWidth={1} dot={false} activeDot={false} isAnimationActive={false} />
-          <Line dataKey="plan_cumul" type="monotone" stroke={c['--blue']} strokeOpacity={0.5} strokeWidth={2} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
-          <Line dataKey="tendance_cumul" type="monotone" stroke={c['--orange']} strokeDasharray="4 3" strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
-          <Line dataKey="reel_cumul" type="monotone" stroke={c['--blue']} strokeWidth={2} dot={false} activeDot={{ r: 3 }} connectNulls={false} isAnimationActive={false} />
-          {gap && eWeek && (
-            <ReferenceLine
-              isFront
-              ifOverflow="extendDomain"
-              segment={[
-                { x: eWeek, y: gap.low },
-                { x: eWeek, y: gap.high },
-              ]}
-              shape={gapShape}
-            />
-          )}
+          <Area dataKey="fan" type="monotone" stroke="none" fill={c['--blue']} fillOpacity={0.15} activeDot={false} connectNulls={false} isAnimationActive={false} />
+          <Line dataKey="plan_cumul" {...lineProps} stroke={c['--blue']} strokeOpacity={0.5} strokeWidth={2} activeDot={{ r: 3 }} />
+          <Line dataKey="tendance_cumul" {...lineProps} stroke={c['--blue']} strokeDasharray="4 3" strokeWidth={1.5} activeDot={{ r: 3 }} />
+          <Line dataKey="reel_cumul" {...lineProps} stroke={c['--blue']} strokeWidth={2} activeDot={{ r: 3 }} />
+          <ReferenceDot x={last.week} y={landing} r={4} ifOverflow="extendDomain" shape={landingShape} />
         </ComposedChart>
       </ResponsiveContainer>
-      {showLegend && <ChartLegend series={runs.length > 0 ? [...FORECAST_SERIES, UNCOVERED_SERIES] : FORECAST_SERIES} />}
+      {showLegend && <ChartLegend series={legendSeries} />}
     </div>
   );
 }

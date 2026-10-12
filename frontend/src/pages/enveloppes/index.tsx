@@ -40,7 +40,7 @@ export default function EnveloppesPage() {
   const openCt = sp.get('ct');
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(norm(search.trim()), 200);
-  // ?filtre=sans_enveloppe (lien « k CT sans enveloppe » de la page Budget) : filtre initial.
+  // ?filtre=sans_enveloppe (liens « k CT sans enveloppe » de la Vue d'ensemble, du Budget et des Prévisions) : filtre initial.
   const [filter, setFilter] = useState<EnvFilter>(() =>
     sp.get('filtre') === 'sans_enveloppe' ? 'without' : sp.get('filtre') === 'avec_enveloppe' ? 'with' : 'all',
   );
@@ -258,7 +258,7 @@ function GroupRow({ group: g, open, onToggle }: { group: EnveloppeGroup; open: b
             {g.label}
           </span>
           {g.code && <span className="env-code">{g.code}</span>}
-          {g.kind === 'hors_fichier' && <span className="env-muted">budget reconstruit</span>}
+          {g.kind === 'hors_fichier' && <span className="env-muted">aucun budget</span>}
           <span className="env-muted env-group__count">{n} CT</span>
         </div>
       </td>

@@ -74,8 +74,8 @@ function EnveloppeDetail({ row }: { row: EnveloppeCT }) {
           />
         ) : (
           <p className="env-help">
-            Sans enveloppe : ce CT est absent du dernier fichier CàT importé. Son budget est la charge max reconstruite (plan de
-            charge + provisions).
+            Sans enveloppe : ce CT est absent du dernier fichier CàT importé. Il n'a aucun budget : ni statut, ni écart, ni
+            sous-consommation ; seuls son consommé et ses atterrissages sont suivis (Budget et Prévisions).
           </p>
         )}
       </InspectorSection>
@@ -89,8 +89,8 @@ function EnveloppeDetail({ row }: { row: EnveloppeCT }) {
       </InspectorSection>
       {e && (
         <p className="env-help">
-          L'enveloppe remplace la charge max reconstruite comme budget du CT sur sa période (Budget et Prévisions). Pour la modifier,
-          importez un nouveau fichier CàT.
+          L'enveloppe est le budget du CT sur sa période (Budget et Prévisions). Pour la modifier, importez un nouveau fichier
+          CàT.
         </p>
       )}
     </>

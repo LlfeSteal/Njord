@@ -1,6 +1,6 @@
-// Analyse budgétaire (page Budget) : budget et réalisé par nature de coût, barres sur une échelle commune —
-// piste = budget (plan de charge, puis provisions restantes en teinte pâle), remplissage = réalisé,
-// dépassement en rouge avec glyphe (DECISIONS n° 10, 16).
+// Analyse par nature (page Budget) : dépense prévue et réalisé par nature de coût, barres sur une échelle commune —
+// piste = prévu (plan de charge, puis provisions restantes en teinte pâle), remplissage = réalisé, au-delà du prévu
+// en rouge avec glyphe (DECISIONS n° 10, 16). Le prévu n'est pas un budget (n° 20) : le budget est l'enveloppe.
 import type { CSSProperties } from 'react';
 import { Card, StatusGlyph, Tooltip } from '../../../ui';
 import type { BudgetNature } from '../../../api/types';
@@ -10,8 +10,8 @@ import { fmtEurShort } from '../shared/pilotage';
 
 const pctOf = (v: number, scale: number) => `${scale > 0 ? (Math.max(0, v) / scale) * 100 : 0}%`;
 
-/** Budget d'une nature = PPS + provisions (repli si le serveur ne renvoie pas encore `budget`). */
-const budgetOf = (n: BudgetNature) => n.budget ?? n.pps + (n.provisions ?? 0);
+/** Prévu d'une nature = PPS + provisions (repli si le serveur ne renvoie pas encore `prevu`). */
+const prevuOf = (n: BudgetNature) => n.prevu ?? n.pps + (n.provisions ?? 0);
 const provisionsOf = (n: BudgetNature) => Math.max(0, n.provisions ?? 0);
 
 const LEGEND: ChartSeries[] = [
@@ -21,44 +21,44 @@ const LEGEND: ChartSeries[] = [
 ];
 
 function Detail({ n }: { n: BudgetNature }) {
-  const budget = budgetOf(n);
+  const prevu = prevuOf(n);
   const prov = provisionsOf(n);
-  const reste = budget - n.realise;
+  const reste = prevu - n.realise;
   return (
     <>
       <strong>{n.libelle}</strong>
       <br />
-      {prov > 0 ? `PDC ${fmtEur(n.pps)} + provisions ${fmtEur(prov)} = budget ${fmtEur(budget)}` : `Budget ${fmtEur(budget)}`}
+      {prov > 0 ? `PDC ${fmtEur(n.pps)} + provisions ${fmtEur(prov)} = prévu ${fmtEur(prevu)}` : `Prévu ${fmtEur(prevu)}`}
       <br />
-      Réalisé {fmtEur(n.realise)} · {reste < 0 ? `Dépassement ${fmtEur(-reste)}` : `Reste ${fmtEur(reste)}`}
+      Réalisé {fmtEur(n.realise)} · {reste < 0 ? `Au-delà du prévu ${fmtEur(-reste)}` : `Reste ${fmtEur(reste)}`}
     </>
   );
 }
 
 export default function NatureBars({ rows }: { rows: BudgetNature[] }) {
-  const scale = Math.max(0, ...rows.flatMap((n) => [budgetOf(n), n.realise]));
-  const budget = rows.reduce((s, n) => s + budgetOf(n), 0);
+  const scale = Math.max(0, ...rows.flatMap((n) => [prevuOf(n), n.realise]));
+  const prevu = rows.reduce((s, n) => s + prevuOf(n), 0);
   const prov = rows.reduce((s, n) => s + provisionsOf(n), 0);
   const reel = rows.reduce((s, n) => s + n.realise, 0);
   return (
     <Card>
       <div className="pil-card-head">
-        <h2 className="pil-card-head__title">Analyse budgétaire</h2>
+        <h2 className="pil-card-head__title">Analyse par nature</h2>
       </div>
       <p className="pil-card-head__sub">
-        Budget {fmtEur(budget)}
+        Prévu (plan + provisions) {fmtEur(prevu)}
         {prov > 0 && ` (dont ${fmtEurShort(prov)} de provisions)`} · Réalisé {fmtEur(reel)}
-        {budget > 0 && ` · ${fmtPct((reel / budget) * 100)} consommé`}
+        {prevu > 0 && ` · ${fmtPct((reel / prevu) * 100)} du prévu`}
       </p>
       <ul className="pil-nature">
         {rows.map((n) => {
-          const b = budgetOf(n);
+          const b = prevuOf(n);
           const p = provisionsOf(n);
           const over = n.realise > b;
           const pct = n.pct_consomme ?? (b > 0 ? (n.realise / b) * 100 : null);
-          const label = `${n.libelle} : réalisé ${fmtEur(n.realise)} sur ${fmtEur(b)} de budget${
+          const label = `${n.libelle} : réalisé ${fmtEur(n.realise)} sur ${fmtEur(b)} prévus${
             p > 0 ? ` dont ${fmtEur(p)} de provisions` : ''
-          }${pct != null ? ` (${fmtPct(pct)})` : ''}${over ? ', dépassement' : ''}`;
+          }${pct != null ? ` (${fmtPct(pct)})` : ''}${over ? ', au-delà du prévu' : ''}`;
           return (
             <li key={n.nature}>
               <Tooltip label={<Detail n={n} />} placement="top">
@@ -79,7 +79,7 @@ export default function NatureBars({ rows }: { rows: BudgetNature[] }) {
                     {fmtEurShort(n.realise)} <span className="pil-nature__of">/ {fmtEurShort(b)}</span>
                   </span>
                   <span className="pil-nature__pct" data-tone={over ? 'danger' : undefined}>
-                    {over && <StatusGlyph kind="danger" tone="danger" size={12} label="Dépassement" />}
+                    {over && <StatusGlyph kind="danger" tone="danger" size={12} label="Au-delà du prévu" />}
                     {pct != null ? fmtPct(Math.round(pct)) : '—'}
                   </span>
                 </div>

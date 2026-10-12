@@ -1,42 +1,40 @@
 // Ligne CT du pilotage budgétaire : fusion de la synthèse budget (classification, MO, risque)
 // et des prévisions (consommé, atterrissage, statut), par code CT. Partagé avec /previsions.
-// Budget d'un CT = montant de son enveloppe s'il en a une (DECISIONS n° 19), sinon charge max reconstruite
-// = Σ PPS du plan + provisions restantes (DECISIONS n° 16).
+// Budget d'un CT = montant de son enveloppe importée, rien d'autre (DECISIONS n° 20) : sans enveloppe, budget,
+// %, écart, statut et reste sont null (« Sans enveloppe »).
 import type { AnalyseResult, BudgetCT, Enveloppe, PrevisionCT, PrevisionStatut } from '../../../api/types';
-import { budgetSourceOf, chargeMaxOf, echeanceOf, forecastOf, type Echeance } from '../shared/pilotage';
+import { echeanceOf, forecastOf, hasEnveloppe, type Echeance } from '../shared/pilotage';
 
-/** Source du budget d'une ligne CT : enveloppe saisie ou charge max reconstruite. */
-export type BudgetSource = 'enveloppe' | 'charge_max';
+/** Source du budget d'une ligne CT : enveloppe importée, ou aucun budget. */
+export type BudgetSource = PrevisionCT['budget_source'];
 
 export interface CtRow {
   ct: string;
   libelle: string;
   /** Σ PPS du plan de charge (segments de la timeline). */
   pps: number;
-  /** Provisions restantes du CT. */
+  /** Provisions restantes du CT (informatives : marge disponible). */
   provisions: number;
-  /** Budget : montant de l'enveloppe, sinon charge max ; référence du % consommé et de l'écart. */
-  budget: number;
+  /** Budget = montant de l'enveloppe ; null sans enveloppe. Référence du % consommé et de l'écart. */
+  budget: number | null;
   source: BudgetSource;
-  /** Charge max reconstruite = pps + provisions (= budget sans enveloppe ; comparaison sinon). */
-  chargeMax: number;
-  /** Enveloppe du CT (null = à configurer, ou prévisions absentes). */
+  /** Enveloppe du CT (null = sans enveloppe, ou prévisions absentes). */
   enveloppe: Enveloppe | null;
   consomme: number | null;
-  /** % du budget consommé (0..100+). */
+  /** % de l'enveloppe consommé (0..100+) ; null sans enveloppe. */
   pct: number | null;
   atterrissage: number | null;
   tendance: number | null;
   ecart: number | null;
   statut: PrevisionStatut | null;
   risque: boolean;
-  /** Fin d'exercice (DECISIONS n° 17), null sans prévision ou avec un backend antérieur. */
+  /** Fin de l'enveloppe, null sans enveloppe ou sans prévision. */
   echeance: Echeance | null;
   /** Non consommé au-delà des seuils (indicateur séparé du statut). */
   sousConso: boolean;
   /**
-   * « Reste à l'échéance » : non consommé (> 0) ou dépassement à l'échéance ; repli sur l'écart d'atterrissage
-   * (tout l'horizon) s'il n'y a pas de fin d'exercice. Montant du risque, toujours ≥ 0 : sert au tri.
+   * « Reste à l'échéance » : non consommé (> 0) ou dépassement à la fin de l'enveloppe ; null sans enveloppe.
+   * Montant du risque, toujours ≥ 0 : sert au tri.
    */
   reste: number | null;
   /** Le reste est un dépassement (affiché « + » en rouge). */
@@ -49,15 +47,13 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
   const fc = forecastOf(result);
   const byCt = new Map<string, CtRow>();
   for (const b of result.budget.par_ct) {
-    const chargeMax = b.charge_max ?? b.pps_plan + (b.provisions ?? 0);
     byCt.set(b.ct, {
       ct: b.ct,
       libelle: b.ct_libelle,
       pps: b.pps_plan,
       provisions: b.provisions ?? 0,
-      budget: chargeMax,
-      source: 'charge_max',
-      chargeMax,
+      budget: null,
+      source: 'aucun',
       enveloppe: null,
       consomme: null,
       pct: null,
@@ -79,9 +75,8 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       libelle: p.ct_libelle,
       pps: p.pps ?? 0,
       provisions: p.provisions ?? 0,
-      budget: p.budget,
-      source: 'charge_max',
-      chargeMax: chargeMaxOf(p),
+      budget: null,
+      source: 'aucun',
       enveloppe: null,
       consomme: null,
       pct: null,
@@ -95,25 +90,25 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       reste: null,
       resteOver: false,
     };
+    const env = hasEnveloppe(p);
     const e = echeanceOf(p);
-    const r = resteOf(e, p.ecart_plan);
+    const r = resteOf(e);
     byCt.set(p.ct, {
       ...row,
       libelle: row.libelle || p.ct_libelle,
       pps: p.pps ?? row.pps,
       provisions: p.provisions ?? row.provisions,
-      budget: p.budget,
-      source: budgetSourceOf(p) === 'enveloppe' ? 'enveloppe' : 'charge_max',
-      chargeMax: chargeMaxOf(p),
-      enveloppe: p.enveloppe ?? null,
+      budget: env ? p.budget : null,
+      source: env ? 'enveloppe' : 'aucun',
+      enveloppe: env ? (p.enveloppe ?? null) : null,
       consomme: p.consomme,
-      pct: p.pct_consomme ?? (p.budget ? (p.consomme / p.budget) * 100 : null),
+      pct: env ? (p.pct_consomme ?? (p.budget ? (p.consomme / p.budget) * 100 : null)) : null,
       atterrissage: p.atterrissage_plan,
       tendance: p.atterrissage_tendance,
-      ecart: p.ecart_plan,
-      statut: p.statut,
+      ecart: env ? p.ecart_plan : null,
+      statut: env ? p.statut : null,
       echeance: e,
-      sousConso: e?.sousConso ?? false,
+      sousConso: env && (e?.sousConso ?? false),
       reste: r.value,
       resteOver: r.over,
       p,
@@ -122,18 +117,12 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
   return [...byCt.values()];
 }
 
-/**
- * Reste à l'échéance : non consommé s'il y en a, sinon dépassement à l'échéance ; sans fin d'exercice
- * (backend antérieur), écart d'atterrissage sur tout l'horizon s'il est positif.
- */
-export function resteOf(e: Echeance | null, ecartPlan: number | null): { value: number | null; over: boolean } {
-  if (e) {
-    if (e.nonConsomme > 0.5) return { value: e.nonConsomme, over: false };
-    if (e.depassement > 0.5) return { value: e.depassement, over: true };
-    return { value: 0, over: false };
-  }
-  if (ecartPlan != null && ecartPlan > 0) return { value: ecartPlan, over: true };
-  return { value: ecartPlan == null ? null : 0, over: false };
+/** Reste à l'échéance : non consommé s'il y en a, sinon dépassement à la fin de l'enveloppe ; null sans enveloppe. */
+export function resteOf(e: Echeance | null): { value: number | null; over: boolean } {
+  if (!e) return { value: null, over: false };
+  if (e.nonConsomme > 0.5) return { value: e.nonConsomme, over: false };
+  if (e.depassement > 0.5) return { value: e.depassement, over: true };
+  return { value: 0, over: false };
 }
 
 /** Somme d'un champ numérique, null si aucune valeur. */

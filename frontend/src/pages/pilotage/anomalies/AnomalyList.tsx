@@ -7,7 +7,7 @@ import { isSousConsoAnomalie, SOUS_CONSO_GLYPH, SOUS_CONSO_LABEL } from '../shar
 import { CATEGORIE_LABEL, GRAVITE_GLYPH, GRAVITE_LABEL, subline } from './meta';
 
 /**
- * Glyphe d'une anomalie : flag pour un écart, cercle « ! » pour une sous-consommation (risque de perte du budget,
+ * Glyphe d'une anomalie : flag pour un écart, cercle « ! » pour une sous-consommation (risque de perte de l'enveloppe,
  * comme sur les lignes CT de Budget et Prévisions), sinon gravité.
  */
 export function AnomalyGlyph({ a, size }: { a: Anomalie; size?: number }) {

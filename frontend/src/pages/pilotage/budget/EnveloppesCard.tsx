@@ -33,7 +33,7 @@ const SERIES: Record<Kind, ChartSeries> = {
 };
 
 /** Sur-imputation (écart > 0) d'abord ; sinon sous-consommation signalée ; sinon écart dans les seuils (gris). */
-const kindOf = (p: PrevisionCT): Kind => (p.ecart_plan > 0.5 ? 'over' : p.sous_consommation ? 'under' : 'tolerance');
+const kindOf = (p: PrevisionCT): Kind => ((p.ecart_plan ?? 0) > 0.5 ? 'over' : p.sous_consommation ? 'under' : 'tolerance');
 
 /** Chemin d'une barre horizontale, bout de donnée arrondi (4 px), carrée côté zéro. */
 function barPath(left: number, top: number, w: number, h: number, roundRight: boolean): string {
@@ -128,13 +128,14 @@ export interface EnveloppesCardProps {
 
 export default function EnveloppesCard({ synthese, parCt, onOpen }: EnveloppesCardProps) {
   const c = useTokenColors(TOKENS);
-  const configured = parCt.filter((p) => p.enveloppe);
+  const configured = parCt.filter((p) => p.enveloppe && p.ecart_plan != null);
+  const ecartOf = (p: PrevisionCT) => p.ecart_plan ?? 0;
   // Les plus gros écarts en valeur absolue, puis triés par écart (dépassements en haut, non consommés en bas).
   const shown: Datum[] = [...configured]
-    .sort((a, b) => Math.abs(b.ecart_plan) - Math.abs(a.ecart_plan))
+    .sort((a, b) => Math.abs(ecartOf(b)) - Math.abs(ecartOf(a)))
     .slice(0, MAX_BARS)
-    .sort((a, b) => b.ecart_plan - a.ecart_plan || a.ct.localeCompare(b.ct))
-    .map((p) => ({ ct: p.ct, libelle: p.ct_libelle, ecart: p.ecart_plan, kind: kindOf(p), p }));
+    .sort((a, b) => ecartOf(b) - ecartOf(a) || a.ct.localeCompare(b.ct))
+    .map((p) => ({ ct: p.ct, libelle: p.ct_libelle, ecart: ecartOf(p), kind: kindOf(p), p }));
   const kinds = (['over', 'under', 'tolerance'] as const).filter((k) => shown.some((d) => d.kind === k));
   const min = Math.min(0, ...shown.map((d) => d.ecart));
   const max = Math.max(0, ...shown.map((d) => d.ecart));

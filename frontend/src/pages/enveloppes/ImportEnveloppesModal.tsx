@@ -187,7 +187,7 @@ export default function ImportEnveloppesModal({ opened, onClose }: { opened: boo
         ) : (
           <Banner tone="warning" title="Toutes les enveloppes seront remplacées">
             Les {nEnveloppes(nb)} de ce fichier remplacent toutes les enveloppes actuelles ; les CT absents du fichier perdent la
-            leur et repassent sur leur budget reconstruit (charge max).
+            leur et n'ont plus de budget.
           </Banner>
         )}
         <BlockingError error={commit.error} title="Échec de l'import" />

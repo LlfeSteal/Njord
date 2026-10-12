@@ -53,9 +53,9 @@
   --statut-purgee: var(--text-tertiary);
   --series-planned: color-mix(in srgb, var(--blue) 30%, transparent);
   --series-actual: var(--blue);
-  /* Provisions restantes (DECISIONS n° 16) : bande pâle entre le total du plan et le budget max. */
+  /* Provisions restantes (DECISIONS n° 16, 20) : part pâle des provisions dans la dépense prévue par nature. */
   --series-provision: color-mix(in srgb, var(--teal) 16%, transparent);
-  /* Budget non consommé à la fin de l'exercice (DECISIONS n° 17) : vermillon, entre --warning et --danger,
+  /* Enveloppe non consommée à sa fin (DECISIONS n° 17 ; inutilisé depuis le n° 20) : vermillon, entre --warning et --danger,
      distinct de l'orange de la série « Tendance » (ΔE OKLab 18 en vision normale, 17 en deutéranopie). */
   --risk-unspent: #d9480f;
   --budget-secured: var(--green);

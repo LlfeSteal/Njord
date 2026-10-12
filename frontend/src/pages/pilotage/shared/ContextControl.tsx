@@ -56,7 +56,7 @@ export default function ContextControl({ analyse }: ContextControlProps) {
     () => versionOptions(ctx?.realise_versions ?? [], ctx?.default_realise_id ?? null, 'Version active', describeRealise),
     [ctx],
   );
-  // Provisions facultatives : sans version active, le défaut revient à « aucune » (budget = plan seul).
+  // Provisions facultatives : sans version active, le défaut revient à « aucune » (provisions informatives, DECISIONS n° 20).
   const provisionList = useMemo(() => (ctx?.provision_versions ?? []).filter((v) => v.statut !== 'purgee'), [ctx]);
   const provOpts = useMemo(
     () =>
@@ -259,14 +259,14 @@ export function UncoveredNote({ result, short = false }: { result: AnalyseResult
 }
 
 /**
- * Mention discrète quand l'analyse n'a retenu aucune version de provisions (`meta.provision_version` nul) :
- * le budget se limite alors au plan de charge (DECISIONS n° 16). Rien sinon.
+ * Mention discrète quand l'analyse n'a retenu aucune version de provisions (`meta.provision_version` nul) : les
+ * provisions sont informatives (marge disponible, dépense prévue par nature), jamais un budget (DECISIONS n° 20).
  */
 export function NoProvisionNote({ result }: { result: AnalyseResult | undefined }) {
   if (!result || result.meta.provision_version) return null;
   return (
     <p className="pil-note">
-      Aucune provision importée : charge max reconstruite = plan de charge seul.{' '}
+      Aucune provision importée : la dépense prévue par nature se limite au plan de charge.{' '}
       <Link to="/provisions" size="sm">
         Importer des provisions
       </Link>

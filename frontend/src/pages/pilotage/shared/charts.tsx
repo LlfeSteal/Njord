@@ -1,4 +1,5 @@
-// Graphiques partagés des pages Pilotage : trajectoire vers l'enveloppe (DECISIONS n° 20), charge hebdomadaire,
+// Graphiques partagés des pages Pilotage : trajectoire vers l'enveloppe et Σ enveloppes de la vue d'ensemble
+// (DECISIONS n° 20), charge hebdomadaire,
 // légende et bulle au look du kit. Couleurs résolues depuis les tokens. La barre par CT est dans EnveloppeBars.tsx.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
 import { useId, type CSSProperties, type ReactNode } from 'react';
@@ -17,7 +18,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { Couverture, PrevisionCT, PrevisionPoint } from '../../../api/types';
+import type { Couverture, PrevisionCT, PrevisionPoint, Previsions } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
 import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
 import { fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
@@ -529,6 +530,131 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
         </ComposedChart>
       </ResponsiveContainer>
       {showLegend && <ChartLegend series={legendSeries} />}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ Vue d'ensemble : Σ enveloppes (DECISIONS n° 20)
+// Σ des enveloppes actives chaque semaine (lissée), face à la consommation cumulée du périmètre des enveloppes :
+// réalisé jusqu'à « Aujourd'hui », puis projection du plan de charge en pointillé.
+
+const OVERVIEW_SERIES: ChartSeries[] = [
+  { key: 'env', label: 'Σ enveloppes actives', token: '--text-secondary', shape: 'line' },
+  { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
+  { key: 'plan_cumul', label: 'Plan de charge (projection)', token: '--blue', shape: 'dash' },
+];
+
+const OVERVIEW_TOKENS = ['--blue', '--success', '--text-secondary', '--separator'] as const;
+
+/** Lissage gaussien (σ en semaines, fenêtre ±3σ) : adoucit les marches à l'ouverture / fermeture d'une enveloppe. */
+function smooth(values: number[], sigma = 2): number[] {
+  const r = Math.ceil(3 * sigma);
+  const w = Array.from({ length: 2 * r + 1 }, (_, i) => Math.exp(-((i - r) ** 2) / (2 * sigma * sigma)));
+  const top = Math.max(0, ...values);
+  return values.map((_, i) => {
+    let num = 0;
+    let den = 0;
+    for (let k = -r; k <= r; k++) {
+      const v = values[i + k];
+      if (v == null) continue;
+      num += v * w[k + r];
+      den += w[k + r];
+    }
+    return den > 0 ? Math.min(top, Math.max(0, num / den)) : 0;
+  });
+}
+
+interface OverviewPoint {
+  week: string;
+  /** Σ brute des enveloppes actives (bulle) et sa version lissée (tracé). */
+  envRaw: number;
+  env: number;
+  reel_cumul: number | null;
+  plan_cumul: number | null;
+}
+
+/** Vue d'ensemble : Σ enveloppes actives (lissée) face au réalisé cumulé, puis au plan de charge projeté. */
+export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsions: Previsions; height?: number }) {
+  const c = useTokenColors(OVERVIEW_TOKENS);
+  const envs = previsions.par_ct.flatMap((p) => (p.enveloppe ? [p.enveloppe] : []));
+  const series = previsions.global.series ?? [];
+  if (envs.length === 0 || series.length === 0) return null;
+
+  // Semaine [lundi, dimanche] : une enveloppe est active si sa période la chevauche.
+  const raw = series.map((s) => {
+    const mon = s.debut.slice(0, 10);
+    const sun = new Date(Date.parse(`${mon}T00:00:00Z`) + 6 * DAY_MS).toISOString().slice(0, 10);
+    return envs.reduce((sum, e) => (e.date_debut <= sun && e.date_fin >= mon ? sum + e.montant : sum), 0);
+  });
+  const lisse = smooth(raw);
+  const data: OverviewPoint[] = series.map((s, i) => ({
+    week: s.week,
+    envRaw: raw[i],
+    env: lisse[i],
+    reel_cumul: s.reel_cumul,
+    plan_cumul: s.plan_cumul,
+  }));
+  const peak = Math.max(...raw);
+  let dataMax = peak;
+  for (const d of data) dataMax = Math.max(dataMax, d.reel_cumul ?? 0, d.plan_cumul ?? 0);
+  const tick = { fill: c['--text-secondary'], fontSize: 11 };
+  const hasToday = data.some((d) => d.week === previsions.as_of_week);
+  const lineProps = { type: 'monotone' as const, dot: false, connectNulls: false, isAnimationActive: false };
+  const peakIdx = raw.indexOf(peak);
+  const peakLabel = (p: { x?: number; y?: number; index?: number }) =>
+    p.index === peakIdx ? (
+      <text x={(p.x ?? 0) + 6} y={(p.y ?? 0) - 8} fill={c['--text-secondary']} fontSize={11}>
+        Σ enveloppes {fmtEurShort(peak)}
+      </text>
+    ) : (
+      <g />
+    );
+
+  return (
+    <div>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ top: 20, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke={c['--separator']} />
+          <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
+          <YAxis {...AXIS} width={56} domain={[0, niceCeil(dataMax)]} tickCount={5} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
+          <RTooltip
+            cursor={{ stroke: c['--separator'] }}
+            wrapperStyle={{ outline: 'none' }}
+            isAnimationActive={false}
+            content={
+              <ChartTooltip<OverviewPoint>
+                series={OVERVIEW_SERIES.filter((s) => s.key !== 'env')}
+                format={(v) => fmtEur(v)}
+                title={(d) => fmtWeek(d.week)}
+                extra={(d) => [{ label: 'Σ enveloppes actives', value: fmtEur(d.envRaw) }]}
+              />
+            }
+          />
+          <Area
+            dataKey="env"
+            type="monotone"
+            stroke={c['--text-secondary']}
+            strokeWidth={2}
+            fill={c['--success']}
+            fillOpacity={0.1}
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+            label={peakLabel}
+          />
+          {hasToday && (
+            <ReferenceLine
+              x={previsions.as_of_week}
+              stroke={c['--text-secondary']}
+              strokeWidth={1}
+              label={{ value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
+            />
+          )}
+          <Line dataKey="plan_cumul" {...lineProps} stroke={c['--blue']} strokeDasharray="4 3" strokeWidth={2} activeDot={{ r: 3 }} />
+          <Line dataKey="reel_cumul" {...lineProps} stroke={c['--blue']} strokeWidth={2} activeDot={{ r: 3 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+      <ChartLegend series={OVERVIEW_SERIES} />
     </div>
   );
 }

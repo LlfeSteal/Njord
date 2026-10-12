@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, GroupedList, Link, ListRow, Metric, Page, PageToolbar, ProgressBar, StatusGlyph } from '../../../ui';
 import type { AnalyseResult, PrevisionCT } from '../../../api/types';
 import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
-import { EnveloppeBars } from '../shared/EnveloppeBars';
+import { EnveloppesOverviewChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
 import {
@@ -19,9 +19,6 @@ import {
   SOUS_CONSO_GLYPH,
 } from '../shared/pilotage';
 import '../shared/pilotage.css';
-
-/** Nombre de CT montrés dans la carte « Prévision » (les autres sur /previsions). */
-const BARS_LIMIT = 8;
 
 /** Avancement attendu à date (plan cumulé à l'arrêté ÷ Σ enveloppes), en %. */
 function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
@@ -155,30 +152,24 @@ function ToDo({ result }: { result: AnalyseResult }) {
   );
 }
 
-/** Carte « Prévision » : une barre par CT en % de son enveloppe, les plus à risque d'abord (DECISIONS n° 20). */
+/** Carte « Prévision » : Σ enveloppes actives face au réalisé cumulé puis au plan de charge projeté (DECISIONS n° 20). */
 function Forecast({ result }: { result: AnalyseResult }) {
-  const navigate = useNavigate();
   const fc = forecastOf(result);
   if (fc && !hasEnveloppe(fc.global)) return null;
-  const nb = fc ? fc.par_ct.filter(hasEnveloppe).length : 0;
   return (
     <Card>
       <div className="pil-card-head">
         <h2 className="pil-card-head__title">Prévision</h2>
         {fc && (
           <Link to="/previsions" size="sm">
-            {nb > BARS_LIMIT ? `Voir les ${nb} CT` : 'Détail des prévisions'}
+            Détail des prévisions
           </Link>
         )}
       </div>
       {fc ? (
         <>
           <p className="pil-card-head__sub">{forecastSentence(fc.global)}</p>
-          <EnveloppeBars
-            previsions={fc.par_ct}
-            limit={BARS_LIMIT}
-            onSelect={(ct) => navigate(`/previsions?ct=${encodeURIComponent(ct)}`)}
-          />
+          <EnveloppesOverviewChart previsions={fc} />
         </>
       ) : (
         <EmptyState title="Prévisions non disponibles">

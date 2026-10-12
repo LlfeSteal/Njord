@@ -108,23 +108,21 @@ func (r *Repo) ProvisionLines(ctx context.Context, versionID string) ([]domain.P
 	return out, rows.Err()
 }
 
-// Enveloppes returns the envelopes entered per CT (DECISIONS n° 19), clé = CT
-// sans espaces de bord.
+// Enveloppes returns the envelopes imported from the « CàT par CT » file
+// (DECISIONS n° 18, 19), clé = CT sans espaces de bord.
 func (r *Repo) Enveloppes(ctx context.Context) (map[string]domain.Enveloppe, error) {
-	rows, err := r.st.DB().QueryContext(ctx,
-		`SELECT ct, date_debut, date_fin, montant, commentaire, operateur, updated_at FROM ct_enveloppes`)
+	rows, err := r.st.DB().QueryContext(ctx, `SELECT ct, date_debut, date_fin, montant FROM enveloppes`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]domain.Enveloppe{}
 	for rows.Next() {
-		var ct, updated string
+		var ct string
 		var e domain.Enveloppe
-		if err := rows.Scan(&ct, &e.DateDebut, &e.DateFin, &e.Montant, &e.Commentaire, &e.Operateur, &updated); err != nil {
+		if err := rows.Scan(&ct, &e.DateDebut, &e.DateFin, &e.Montant); err != nil {
 			return nil, err
 		}
-		e.UpdatedAt = store.ParseTime(updated)
 		out[strings.TrimSpace(ct)] = e
 	}
 	return out, rows.Err()

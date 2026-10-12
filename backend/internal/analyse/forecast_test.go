@@ -626,9 +626,9 @@ func TestFcEcheanceSeuils(t *testing.T) {
 	}
 }
 
-// fcEnv: une enveloppe saisie (DECISIONS n° 19).
+// fcEnv: une enveloppe importée (DECISIONS n° 18, 19).
 func fcEnv(debut, fin string, montant float64) domain.Enveloppe {
-	return domain.Enveloppe{DateDebut: debut, DateFin: fin, Montant: montant, Operateur: "test"}
+	return domain.Enveloppe{DateDebut: debut, DateFin: fin, Montant: montant}
 }
 
 // fcPoint returns the point of week w of a series.

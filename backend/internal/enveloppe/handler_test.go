@@ -1,8 +1,11 @@
 package enveloppe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -43,16 +46,40 @@ func (e *env) exec(q string, args ...any) {
 	}
 }
 
-func (e *env) do(method, path, body string, header ...string) *httptest.ResponseRecorder {
+func (e *env) do(method, path string) *httptest.ResponseRecorder {
 	e.t.Helper()
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	for i := 0; i+1 < len(header); i += 2 {
-		req.Header.Set(header[i], header[i+1])
+	rec := httptest.NewRecorder()
+	e.r.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
+	return rec
+}
+
+// upload posts a multipart form; data = nil → no file field.
+func (e *env) upload(path, filename string, data []byte, fields map[string]string) *httptest.ResponseRecorder {
+	e.t.Helper()
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	if data != nil {
+		fw, _ := w.CreateFormFile("file", filename)
+		fw.Write(data)
 	}
+	for k, v := range fields {
+		w.WriteField(k, v)
+	}
+	w.Close()
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
 	rec := httptest.NewRecorder()
 	e.r.ServeHTTP(rec, req)
 	return rec
+}
+
+func (e *env) count(q string) int {
+	e.t.Helper()
+	var n int
+	if err := e.st.DB().QueryRow(q).Scan(&n); err != nil {
+		e.t.Fatalf("%s: %v", q, err)
+	}
+	return n
 }
 
 func decode[T any](t *testing.T, rec *httptest.ResponseRecorder, status int) T {
@@ -124,10 +151,52 @@ func byCT(list []domain.EnveloppeCT) map[string]domain.EnveloppeCT {
 	return m
 }
 
+func ctsOf(list []domain.EnveloppeCT) string {
+	cts := []string{}
+	for _, x := range list {
+		cts = append(cts, x.CT)
+	}
+	return strings.Join(cts, ",")
+}
+
+type apiError struct{ Code, Message string }
+
+func errCode(t *testing.T, rec *httptest.ResponseRecorder, status int) string {
+	t.Helper()
+	var r struct{ Error apiError }
+	json.Unmarshal(rec.Body.Bytes(), &r)
+	if rec.Code != status || r.Error.Message == "" {
+		t.Fatalf("status %d attendu %d: %s", rec.Code, status, rec.Body.String())
+	}
+	return r.Error.Code
+}
+
+// fileA : K1 hors catégorie, catégorie Y20000 (C3, N1), catégorie Y10000 (Z0), A1 sans période.
+func fileA(t *testing.T) []byte {
+	return buildXLSX(t, "Activité sans archive", withBanner(
+		row("K1", "Hors catégorie", 46023, 46387, 100),          // 4 : warn
+		categ("Y20000", "Catégorie Z"),                          // 5
+		row("C3", "Ct C3", 46023, 46387, 3000),                  // 6
+		row("N1", "Seulement dans le fichier", 46023, 46387, 0), // 7
+		categ("Y10000", "Catégorie A"),                          // 8
+		row("Z0", "Ct Z0", "2026-02-01", "2026-06-30", 1200.5),  // 9
+		row("A1", "Ct A1", nil, nil, 0),                         // 10 : drop
+	))
+}
+
+// fileB : Z0 seul dans sa catégorie, C3 désormais hors catégorie.
+func fileB(t *testing.T) []byte {
+	return buildXLSX(t, "Activité sans archive", withBanner(
+		row("C3", "Ct C3", 46023, 46387, 3500),
+		categ("Y10000", "Catégorie A"),
+		row("Z0", "Ct Z0", 46023, 46387, 900),
+	))
+}
+
 func TestListEmpty(t *testing.T) {
 	e := newEnv(t)
-	rec := e.do("GET", "/api/enveloppes", "")
-	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != "[]" {
+	rec := e.do("GET", "/api/enveloppes")
+	if rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"import":null,"cts":[]}` {
 		t.Fatalf("liste vide: %d %s", rec.Code, rec.Body.String())
 	}
 }
@@ -135,13 +204,9 @@ func TestListEmpty(t *testing.T) {
 func TestListUnionSourcesLabels(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
-	list := decode[[]domain.EnveloppeCT](t, e.do("GET", "/api/enveloppes", ""), 200)
-	cts := []string{}
-	for _, x := range list {
-		cts = append(cts, x.CT)
-	}
-	if strings.Join(cts, ",") != "A1,B2,C3,Q7,Z0" {
-		t.Fatalf("CT (union triée, purgée/archivée/rejetées exclues): %v", cts)
+	l := decode[domain.EnveloppesListe](t, e.do("GET", "/api/enveloppes"), 200)
+	if l.Import != nil || ctsOf(l.CTs) != "A1,B2,C3,Q7,Z0" {
+		t.Fatalf("CT (union triée, purgée/archivée/rejetées exclues): %v %+v", ctsOf(l.CTs), l.Import)
 	}
 	want := map[string]struct {
 		lib string
@@ -153,152 +218,138 @@ func TestListUnionSourcesLabels(t *testing.T) {
 		"Q7": {"", domain.EnveloppeSources{Provisions: true}},
 		"Z0": {"Plan Z0", domain.EnveloppeSources{Plan: true}},
 	}
-	for _, x := range list {
+	for _, x := range l.CTs {
 		w := want[x.CT]
-		if x.CTLibelle != w.lib || x.Sources != w.src || x.Enveloppe != nil {
+		if x.CTLibelle != w.lib || x.Sources != w.src || x.Enveloppe != nil || x.Categorie != "" {
 			t.Errorf("%s: %+v, attendu libellé %q sources %+v", x.CT, x, w.lib, w.src)
 		}
 	}
 }
 
-func TestPutValidation(t *testing.T) {
+func TestPreviewWritesNothing(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
-	for _, body := range []string{
-		``,
-		`{`,
-		`{"date_fin":"2026-12-31","montant":10}`,
-		`{"date_debut":"2026-01-01","montant":10}`,
-		`{"date_debut":"2026-13-01","date_fin":"2026-12-31","montant":10}`,
-		`{"date_debut":"01/01/2026","date_fin":"2026-12-31","montant":10}`,
-		`{"date_debut":"2026-12-31","date_fin":"2026-01-01","montant":10}`,
-		`{"date_debut":"2026-01-01","date_fin":"2026-12-31"}`,
-		`{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":null}`,
-		`{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":-1}`,
-		`{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":"10"}`,
-	} {
-		rec := e.do("PUT", "/api/enveloppes/A1", body)
-		var r struct{ Error apiError }
-		json.Unmarshal(rec.Body.Bytes(), &r)
-		if rec.Code != 400 || r.Error.Code != "bad_request" || r.Error.Message == "" {
-			t.Errorf("%s → %d %s", body, rec.Code, rec.Body.String())
-		}
+	rep := decode[domain.ImportReport](t, e.upload("/api/enveloppes/import/preview", "cat.xlsx", fileA(t), nil), 200)
+	if rep.Kind != domain.KindEnveloppe || rep.Filename != "cat.xlsx" || rep.SourceFormat != SourceFormat ||
+		rep.SheetName != "Activité sans archive" || rep.HeaderRow != 3 || rep.Total != 5 || rep.OK != 3 || rep.Warn != 1 || rep.Drop != 1 ||
+		rep.PeriodeDebut != "2026-01-01" || rep.PeriodeFin != "2026-12-31" || rep.MontantTotalEur == nil || *rep.MontantTotalEur != 4300.5 ||
+		rep.ActiveVersion != nil || rep.MotifsCount[motifPeriode] != 1 || rep.MotifsCount[motifHorsCateg] != 1 || len(rep.Issues) != 2 {
+		t.Fatalf("bilan: %+v", rep)
 	}
-	var n int
-	e.st.DB().QueryRow(`SELECT COUNT(*) FROM ct_enveloppes`).Scan(&n)
-	if n != 0 {
-		t.Fatalf("rien ne doit être écrit: %d", n)
+	if n := e.count(`SELECT COUNT(*) FROM enveloppes`) + e.count(`SELECT COUNT(*) FROM enveloppes_import`) + e.count(`SELECT COUNT(*) FROM audit_log`); n != 0 {
+		t.Fatalf("l'aperçu ne doit rien écrire: %d", n)
 	}
 }
 
-type apiError struct{ Code, Message string }
-
-func TestPutUnknownCT(t *testing.T) {
+func TestImportThenReimport(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
-	for _, ct := range []string{"XX", "P9", "AR", "D4", "PA"} {
-		rec := e.do("PUT", "/api/enveloppes/"+ct, `{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":10}`)
-		if rec.Code != 404 || !strings.Contains(rec.Body.String(), "not_found") {
-			t.Errorf("%s: %d %s", ct, rec.Code, rec.Body.String())
-		}
-	}
-	var n int
-	e.st.DB().QueryRow(`SELECT COUNT(*) FROM ct_enveloppes`).Scan(&n)
-	if n != 0 {
-		t.Fatalf("rien ne doit être écrit: %d", n)
-	}
-	e.st.DB().QueryRow(`SELECT COUNT(*) FROM audit_log`).Scan(&n)
-	if n != 0 {
-		t.Fatalf("rien ne doit être journalisé: %d", n)
-	}
-}
-
-func TestPutUpsertThenUpdate(t *testing.T) {
-	e := newEnv(t)
-	e.seed()
-	got := decode[domain.EnveloppeCT](t, e.do("PUT", "/api/enveloppes/A1",
-		`{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":120000.5,"commentaire":"  Budget voté  ","operateur":"alice"}`), 200)
-	env := got.Enveloppe
-	if got.CT != "A1" || got.CTLibelle != "Réalisé A1" || !got.Sources.Plan || !got.Sources.Realise || !got.Sources.Provisions || env == nil ||
-		env.DateDebut != "2026-01-01" || env.DateFin != "2026-12-31" || env.Montant != 120000.5 ||
-		env.Commentaire != "Budget voté" || env.Operateur != "alice" || !env.UpdatedAt.Equal(e.now) {
-		t.Fatalf("création: %+v %+v", got, env)
+	rep := decode[domain.ImportReport](t, e.upload("/api/enveloppes/import", "cat A.xlsx", fileA(t), map[string]string{"importeur": "alice"}), 200)
+	if rep.Kind != domain.KindEnveloppe || rep.OK != 3 || rep.Warn != 1 || rep.Drop != 1 {
+		t.Fatalf("bilan: %+v", rep)
 	}
 
-	// Mise à jour : même ligne, opérateur par l'en-tête, période d'un jour, montant nul.
+	l := decode[domain.EnveloppesListe](t, e.do("GET", "/api/enveloppes"), 200)
+	// Catégorie Y10000 (Z0), Y20000 (C3, N1), hors catégorie (K1), hors fichier (A1, B2, Q7).
+	if got := ctsOf(l.CTs); got != "Z0,C3,N1,K1,A1,B2,Q7" {
+		t.Fatalf("ordre: %s", got)
+	}
+	if imp := l.Import; imp == nil || imp.Filename != "cat A.xlsx" || imp.Operateur != "alice" || imp.NbEnveloppes != 4 || !imp.ImporteLe.Equal(e.now) {
+		t.Fatalf("import: %+v", l.Import)
+	}
+	m := byCT(l.CTs)
+	if z := m["Z0"]; z.Categorie != "Y10000" || z.CategorieLibelle != "Catégorie A" || z.CTLibelle != "Plan Z0" || !z.Sources.Plan ||
+		z.Enveloppe == nil || *z.Enveloppe != (domain.Enveloppe{DateDebut: "2026-02-01", DateFin: "2026-06-30", Montant: 1200.5}) {
+		t.Errorf("Z0: %+v %+v", z, z.Enveloppe)
+	}
+	if n := m["N1"]; n.Categorie != "Y20000" || n.Sources != (domain.EnveloppeSources{}) || n.CTLibelle != "" || n.Enveloppe == nil || n.Enveloppe.Montant != 0 {
+		t.Errorf("N1 (fichier seul): %+v", n)
+	}
+	if k := m["K1"]; k.Categorie != "" || k.Enveloppe == nil || k.Enveloppe.Montant != 100 {
+		t.Errorf("K1 (hors catégorie): %+v", k)
+	}
+	if a := m["A1"]; a.Enveloppe != nil || a.Categorie != "" || a.CTLibelle != "Réalisé A1" {
+		t.Errorf("A1 (rejeté → hors fichier): %+v", a)
+	}
+
+	// Ré-import : tout est remplacé ; N1 et K1 disparaissent (aucune source), C3 passe hors catégorie.
 	e.now = e.now.Add(time.Hour)
-	got = decode[domain.EnveloppeCT](t, e.do("PUT", "/api/enveloppes/A1",
-		`{"date_debut":"2027-03-01","date_fin":"2027-03-01","montant":0}`, "X-User", "bob"), 200)
-	env = got.Enveloppe
-	if env == nil || env.DateDebut != "2027-03-01" || env.DateFin != "2027-03-01" || env.Montant != 0 ||
-		env.Commentaire != "" || env.Operateur != "bob" || !env.UpdatedAt.Equal(e.now) {
-		t.Fatalf("mise à jour: %+v", env)
+	decode[domain.ImportReport](t, e.upload("/api/enveloppes/import", "cat B.xlsx", fileB(t), nil), 200)
+	l = decode[domain.EnveloppesListe](t, e.do("GET", "/api/enveloppes"), 200)
+	if got := ctsOf(l.CTs); got != "Z0,C3,A1,B2,Q7" {
+		t.Fatalf("ordre après ré-import: %s", got)
 	}
-	var n int
-	var stored string
-	e.st.DB().QueryRow(`SELECT COUNT(*), MAX(updated_at) FROM ct_enveloppes`).Scan(&n, &stored)
-	if n != 1 || stored != "2026-10-09T10:00:00Z" {
-		t.Fatalf("une enveloppe par CT: %d %s", n, stored)
+	m = byCT(l.CTs)
+	if c := m["C3"]; c.Categorie != "" || c.CategorieLibelle != "" || c.Enveloppe == nil || c.Enveloppe.Montant != 3500 {
+		t.Errorf("C3: %+v", c)
+	}
+	if z := m["Z0"]; z.Enveloppe == nil || z.Enveloppe.Montant != 900 || z.Enveloppe.DateDebut != "2026-01-01" {
+		t.Errorf("Z0: %+v", z)
+	}
+	if imp := l.Import; imp == nil || imp.Filename != "cat B.xlsx" || imp.Operateur != "local" || imp.NbEnveloppes != 2 || !imp.ImporteLe.Equal(e.now) {
+		t.Fatalf("import: %+v", l.Import)
+	}
+	if n := e.count(`SELECT COUNT(*) FROM enveloppes`); n != 2 {
+		t.Fatalf("enveloppes: %d", n)
 	}
 
-	list := byCT(decode[[]domain.EnveloppeCT](t, e.do("GET", "/api/enveloppes", ""), 200))
-	if list["A1"].Enveloppe == nil || list["A1"].Enveloppe.Operateur != "bob" || list["B2"].Enveloppe != nil {
-		t.Fatalf("liste après saisie: %+v", list)
-	}
-
-	// Journal : sans montant.
 	audit, err := e.st.ListAudit(context.Background(), "enveloppe", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(audit) != 2 || audit[0].Action != "update" || audit[0].ObjetID != "A1" || audit[0].Operateur != "bob" ||
-		audit[1].Operateur != "alice" || audit[0].Details != "" || audit[1].Details != "" {
+	if len(audit) != 2 || audit[0].Action != "import" || audit[0].ObjetID != "cat B.xlsx" || audit[0].Details != "2 enveloppes" ||
+		audit[0].Operateur != "local" || audit[1].ObjetID != "cat A.xlsx" || audit[1].Details != "4 enveloppes" || audit[1].Operateur != "alice" {
 		t.Fatalf("journal: %+v", audit)
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestImportWithoutValidRows(t *testing.T) {
 	e := newEnv(t)
-	e.seed()
-	if rec := e.do("DELETE", "/api/enveloppes/A1", ""); rec.Code != 404 {
-		t.Fatalf("suppression sans enveloppe: %d", rec.Code)
+	decode[domain.ImportReport](t, e.upload("/api/enveloppes/import", "a.xlsx", fileA(t), nil), 200)
+	bad := buildXLSX(t, "Activité sans archive", withBanner(
+		categ("Y10000", "Catégorie A"),
+		row("Z0", "Ct Z0", nil, nil, 0),
+		row("Z1", "Ct Z1", 46387, 46023, 10),
+	))
+	rep := decode[domain.ImportReport](t, e.upload("/api/enveloppes/import/preview", "bad.xlsx", bad, nil), 200)
+	if rep.Total != 2 || rep.Drop != 2 || rep.OK != 0 || rep.PeriodeDebut != "" || *rep.MontantTotalEur != 0 {
+		t.Fatalf("aperçu: %+v", rep)
 	}
-	decode[domain.EnveloppeCT](t, e.do("PUT", "/api/enveloppes/A1", `{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":10}`), 200)
-	if rec := e.do("DELETE", "/api/enveloppes/A1?operateur=carol", ""); rec.Code != 204 {
-		t.Fatalf("suppression: %d %s", rec.Code, rec.Body.String())
+	if c := errCode(t, e.upload("/api/enveloppes/import", "bad.xlsx", bad, nil), 422); c != CodeNoEnveloppe {
+		t.Fatalf("code: %s", c)
 	}
-	if rec := e.do("DELETE", "/api/enveloppes/A1", ""); rec.Code != 404 {
-		t.Fatalf("seconde suppression: %d", rec.Code)
-	}
-	list := byCT(decode[[]domain.EnveloppeCT](t, e.do("GET", "/api/enveloppes", ""), 200))
-	if a1, ok := list["A1"]; !ok || a1.Enveloppe != nil {
-		t.Fatalf("A1 reste listé, à configurer: %+v", a1)
-	}
-	audit, _ := e.st.ListAudit(context.Background(), "enveloppe", 0)
-	if len(audit) != 2 || audit[0].Action != "delete" || audit[0].ObjetID != "A1" || audit[0].Operateur != "carol" || audit[0].Details != "" {
-		t.Fatalf("journal: %+v", audit)
+	// Les enveloppes précédentes sont conservées.
+	l := decode[domain.EnveloppesListe](t, e.do("GET", "/api/enveloppes"), 200)
+	if l.Import == nil || l.Import.Filename != "a.xlsx" || e.count(`SELECT COUNT(*) FROM enveloppes`) != 4 || e.count(`SELECT COUNT(*) FROM audit_log`) != 1 {
+		t.Fatalf("état après refus: %+v", l.Import)
 	}
 }
 
-func TestConfiguredCTStaysListed(t *testing.T) {
+func TestImportErrors(t *testing.T) {
 	e := newEnv(t)
-	e.seed()
-	decode[domain.EnveloppeCT](t, e.do("PUT", "/api/enveloppes/Q7", `{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":5000}`), 200)
+	for _, path := range []string{"/api/enveloppes/import/preview", "/api/enveloppes/import"} {
+		if c := errCode(t, e.upload(path, "", nil, nil), 400); c != "bad_request" {
+			t.Errorf("%s sans fichier: %s", path, c)
+		}
+		if c := errCode(t, e.upload(path, "x.xlsx", []byte("pas un xlsx"), nil), 422); c != CodeFileInvalid {
+			t.Errorf("%s illisible: %s", path, c)
+		}
+		other := buildXLSX(t, "Feuil1", [][]any{{"Nom", "Date de début Contrôles de mouvement", "Montant"}, {"A1", 46023, 1}})
+		if c := errCode(t, e.upload(path, "x.xlsx", other, nil), 422); c != CodeHeaderInvalid {
+			t.Errorf("%s en-tête: %s", path, c)
+		}
+	}
+	if n := e.count(`SELECT COUNT(*) FROM enveloppes_import`) + e.count(`SELECT COUNT(*) FROM audit_log`); n != 0 {
+		t.Fatalf("rien ne doit être écrit: %d", n)
+	}
+}
 
-	// Q7 disparaît des sources (provisions archivées) : il reste listé, sans source.
-	e.exec(`UPDATE versions SET statut = 'archivee' WHERE id = 'prov1'`)
-	list := byCT(decode[[]domain.EnveloppeCT](t, e.do("GET", "/api/enveloppes", ""), 200))
-	q7, ok := list["Q7"]
-	if !ok || q7.Sources != (domain.EnveloppeSources{}) || q7.Enveloppe == nil || q7.Enveloppe.Montant != 5000 || q7.CTLibelle != "" {
-		t.Fatalf("Q7 configuré: %+v", q7)
-	}
-	// Libellés sans les provisions : B2 retombe sur le plan.
-	if list["B2"].CTLibelle != "Plan B2" || list["B2"].Sources.Provisions {
-		t.Fatalf("B2: %+v", list["B2"])
-	}
-	// Toujours modifiable.
-	got := decode[domain.EnveloppeCT](t, e.do("PUT", "/api/enveloppes/Q7", `{"date_debut":"2026-01-01","date_fin":"2026-12-31","montant":6000}`), 200)
-	if got.Enveloppe == nil || got.Enveloppe.Montant != 6000 {
-		t.Fatalf("Q7 modifié: %+v", got)
+// Les anciennes routes de saisie n'existent plus.
+func TestNoManualEntry(t *testing.T) {
+	e := newEnv(t)
+	for _, m := range []string{"PUT", "DELETE"} {
+		if rec := e.do(m, "/api/enveloppes/A1"); rec.Code != 404 {
+			t.Errorf("%s: %d", m, rec.Code)
+		}
 	}
 }

@@ -3,6 +3,7 @@ package enveloppe
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 
@@ -16,6 +17,8 @@ type ctInfo struct {
 	realise   string // libellé TG du réalisé, préfixe CT retiré
 	prov      string // dernier segment du groupe des provisions
 	plan      string // groupe du plan
+	categorie string // code de la catégorie du fichier
+	categLib  string // Descriptif de la catégorie
 	enveloppe *domain.Enveloppe
 }
 
@@ -41,12 +44,14 @@ const (
 	qProvision = `SELECT p.ct, p.groupe FROM provision_lines p JOIN versions v ON v.id = p.version_id
 		WHERE v.kind = 'provision' AND v.statut = 'active' AND p.statut_parsing <> 'drop'
 		ORDER BY p.row_num, p.id`
-	qEnveloppes = `SELECT ct, date_debut, date_fin, montant, commentaire, operateur, updated_at FROM ct_enveloppes`
+	qEnveloppes = `SELECT ct, categorie, categorie_libelle, date_debut, date_fin, montant FROM enveloppes`
+	qImport     = `SELECT filename, importe_le, operateur, nb_enveloppes FROM enveloppes_import WHERE id = 1`
 )
 
-// listCTs returns every known CT (union of the sources and of the configured
-// envelopes) with its label and envelope, sorted by CT. Never nil.
-func listCTs(ctx context.Context, ex store.Execer) ([]domain.EnveloppeCT, error) {
+// listCTs returns the last import and every known CT (union of the sources and
+// of the imported envelopes) with its label, category and envelope; CTs never nil.
+func listCTs(ctx context.Context, ex store.Execer) (domain.EnveloppesListe, error) {
+	var liste domain.EnveloppesListe
 	cts := map[string]*ctInfo{}
 	info := func(ct string) *ctInfo {
 		i := cts[ct]
@@ -80,7 +85,7 @@ func listCTs(ctx context.Context, ex store.Execer) ([]domain.EnveloppeCT, error)
 			i.plan = strings.TrimSpace(groupe)
 		}
 	}); err != nil {
-		return nil, err
+		return liste, err
 	}
 	if err := scan(qRealise, func(i *ctInfo, ct, lib string) {
 		i.sources.Realise = true
@@ -88,7 +93,7 @@ func listCTs(ctx context.Context, ex store.Execer) ([]domain.EnveloppeCT, error)
 			i.realise = ctLabel(ct, lib)
 		}
 	}); err != nil {
-		return nil, err
+		return liste, err
 	}
 	if err := scan(qProvision, func(i *ctInfo, _, groupe string) {
 		i.sources.Provisions = true
@@ -96,18 +101,44 @@ func listCTs(ctx context.Context, ex store.Execer) ([]domain.EnveloppeCT, error)
 			i.prov = lastSegment(groupe)
 		}
 	}); err != nil {
-		return nil, err
+		return liste, err
 	}
 	if err := loadEnveloppes(ctx, ex, info); err != nil {
-		return nil, err
+		return liste, err
+	}
+
+	imp, err := loadImport(ctx, ex)
+	if err != nil {
+		return liste, err
 	}
 
 	out := make([]domain.EnveloppeCT, 0, len(cts))
 	for ct, i := range cts {
-		out = append(out, domain.EnveloppeCT{CT: ct, CTLibelle: i.libelle(), Sources: i.sources, Enveloppe: i.enveloppe})
+		out = append(out, domain.EnveloppeCT{CT: ct, CTLibelle: i.libelle(), Categorie: i.categorie,
+			CategorieLibelle: i.categLib, Sources: i.sources, Enveloppe: i.enveloppe})
 	}
-	sort.Slice(out, func(a, b int) bool { return out[a].CT < out[b].CT })
-	return out, nil
+	// Par code de catégorie puis CT ; hors catégorie (enveloppe sans
+	// catégorie) puis hors fichier (sans enveloppe) en dernier.
+	rank := func(x domain.EnveloppeCT) int {
+		switch {
+		case x.Enveloppe == nil:
+			return 2
+		case x.Categorie == "":
+			return 1
+		}
+		return 0
+	}
+	sort.Slice(out, func(a, b int) bool {
+		x, y := out[a], out[b]
+		if rx, ry := rank(x), rank(y); rx != ry {
+			return rx < ry
+		}
+		if x.Categorie != y.Categorie {
+			return x.Categorie < y.Categorie
+		}
+		return x.CT < y.CT
+	})
+	return domain.EnveloppesListe{Import: imp, CTs: out}, nil
 }
 
 func loadEnveloppes(ctx context.Context, ex store.Execer, info func(ct string) *ctInfo) error {
@@ -117,54 +148,30 @@ func loadEnveloppes(ctx context.Context, ex store.Execer, info func(ct string) *
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var ct, updated string
+		var ct, categ, categLib string
 		var e domain.Enveloppe
-		if err := rows.Scan(&ct, &e.DateDebut, &e.DateFin, &e.Montant, &e.Commentaire, &e.Operateur, &updated); err != nil {
+		if err := rows.Scan(&ct, &categ, &categLib, &e.DateDebut, &e.DateFin, &e.Montant); err != nil {
 			return err
 		}
-		e.UpdatedAt = store.ParseTime(updated)
-		info(ct).enveloppe = &e
+		i := info(strings.TrimSpace(ct))
+		i.categorie, i.categLib, i.enveloppe = categ, categLib, &e
 	}
 	return rows.Err()
 }
 
-// getCT returns the EnveloppeCT of ct, store.ErrNotFound when unknown.
-func getCT(ctx context.Context, ex store.Execer, ct string) (domain.EnveloppeCT, error) {
-	all, err := listCTs(ctx, ex)
+// loadImport returns the last import, nil when no file was ever imported.
+func loadImport(ctx context.Context, ex store.Execer) (*domain.EnveloppesImport, error) {
+	var imp domain.EnveloppesImport
+	var at string
+	err := ex.QueryRowContext(ctx, qImport).Scan(&imp.Filename, &at, &imp.Operateur, &imp.NbEnveloppes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		return domain.EnveloppeCT{}, err
+		return nil, err
 	}
-	k := sort.Search(len(all), func(i int) bool { return all[i].CT >= ct })
-	if k == len(all) || all[k].CT != ct {
-		return domain.EnveloppeCT{}, store.ErrNotFound
-	}
-	return all[k], nil
-}
-
-// upsertEnveloppe writes the envelope of ct (one per CT).
-func upsertEnveloppe(ctx context.Context, tx *sql.Tx, ct string, e domain.Enveloppe, updatedAt string) error {
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO ct_enveloppes(ct, date_debut, date_fin, montant, commentaire, operateur, updated_at) VALUES (?,?,?,?,?,?,?)
-		ON CONFLICT(ct) DO UPDATE SET date_debut = excluded.date_debut, date_fin = excluded.date_fin, montant = excluded.montant,
-			commentaire = excluded.commentaire, operateur = excluded.operateur, updated_at = excluded.updated_at`,
-		ct, e.DateDebut, e.DateFin, e.Montant, e.Commentaire, e.Operateur, updatedAt)
-	return err
-}
-
-// deleteEnveloppe deletes the envelope of ct, store.ErrNotFound when it has none.
-func deleteEnveloppe(ctx context.Context, tx *sql.Tx, ct string) error {
-	res, err := tx.ExecContext(ctx, `DELETE FROM ct_enveloppes WHERE ct = ?`, ct)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return store.ErrNotFound
-	}
-	return nil
+	imp.ImporteLe = store.ParseTime(at)
+	return &imp, nil
 }
 
 // ctLabel retire le code en tête du libellé TG du réalisé (« Y99F900011 - Réserve… » → « Réserve… ») ;

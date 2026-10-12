@@ -571,14 +571,13 @@ func TestHandlerAnalyseEnveloppes(t *testing.T) {
 	if p := findCT(t, sans.Previsions, "Y99F90001"); p.BudgetSource != "charge_max" || p.Enveloppe != nil || p.Budget != 1000 {
 		t.Fatalf("sans enveloppe : %+v", p)
 	}
-	e.exec(`INSERT INTO ct_enveloppes(ct, date_debut, date_fin, montant, commentaire, operateur, updated_at) VALUES (?,?,?,?,?,?,?)`,
-		"Y99F90001", "2026-09-01", "2026-12-31", 5000, "Budget socle", "jdupont", "2026-10-09T08:00:00Z")
+	e.exec(`INSERT INTO enveloppes(ct, categorie, categorie_libelle, date_debut, date_fin, montant) VALUES (?,?,?,?,?,?)`,
+		"Y99F90001", "Y99F90000", "Socle", "2026-09-01", "2026-12-31", 5000)
 	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
 	pv := res.Previsions
 	p := findCT(t, pv, "Y99F90001")
 	if p.BudgetSource != "enveloppe" || p.Budget != 5000 || p.ChargeMax != 1000 || p.Enveloppe == nil ||
-		p.Enveloppe.Commentaire != "Budget socle" || p.Enveloppe.Operateur != "jdupont" || p.Enveloppe.DateFin != "2026-12-31" ||
-		!p.Enveloppe.UpdatedAt.Equal(time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)) || p.Echeance != "2026-12-31" || p.BudgetEcheance != 5000 {
+		p.Enveloppe.DateDebut != "2026-09-01" || p.Enveloppe.DateFin != "2026-12-31" || p.Echeance != "2026-12-31" || p.BudgetEcheance != 5000 {
 		t.Errorf("Y99F90001 : %+v", p)
 	}
 	if pv.Global.BudgetSource != "mixte" || pv.Global.Budget != sans.Previsions.Global.Budget+4000 ||

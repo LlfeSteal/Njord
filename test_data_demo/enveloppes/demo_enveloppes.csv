@@ -1,14 +1,29 @@
-categorie;categorie_libelle;ct;libelle;date_debut;date_fin;montant
-Y99F91000;Socle produit & plateforme (démo);Y99F90001;Alpha Core Team;2026-01-01;2026-12-31;108000
-Y99F91000;Socle produit & plateforme (démo);Y99F90002;Platform Cloud;2026-01-01;2026-09-30;15000
-Y99F91000;Socle produit & plateforme (démo);Y99F90003;Data Stack - management de la donnée;2026-01-01;2026-12-31;100000
-Y99F91000;Socle produit & plateforme (démo);Y99F90006;Squad Development Experience;2026-01-01;2026-12-31;130000
-Y99F92000;Ingénierie & architecture (démo);Y99F90007;Intégration système & MBSE;2026-09-01;2026-11-30;72000
-Y99F92000;Ingénierie & architecture (démo);Y99F90008;Comité d'Architecture;2026-01-01;2026-12-31;50000
-Y99F92000;Ingénierie & architecture (démo);Y99F90701;Pilote IA générative;2027-01-01;2027-03-31;4000
-Y99F93000;Services transverses (démo);Y99F90601;Squad Académie & Montée en compétence;2026-01-01;2026-12-31;31000
-Y99F93000;Services transverses (démo);Y99F90602;Support exploitation 24/7;2026-01-01;2026-12-31;38000
-Y99F94000;Réserves, achats & transformation (démo);Y99F900012;Provisions pour aléas;2026-01-01;2026-12-31;79000
-Y99F94000;Réserves, achats & transformation (démo);Y99F900013;Prestations externes (A NE PAS UTILISER);;;0
-Y99F94000;Réserves, achats & transformation (démo);Y99F900014;Achats non stockables;2026-01-01;2026-12-31;0
-Y99F94000;Réserves, achats & transformation (démo);Y99F900015;Fonds de transformation;2027-01-01;2027-12-31;40000
+niveau;code;descriptif;date_debut;date_fin;prevision_solde;cout_encouru;cout_previsionnel
+0;Y99F91000;Programme Démo — Plateforme;;;;;
+1;Y99F90001;Alpha Core Team;2026-01-01;2026-12-31;;38308.4;108000
+1;Y99F90002;Platform Cloud;2026-01-01;2026-09-30;;6874.83;15000
+1;Y99F90003;Data Stack - management de la donnée;2026-01-01;2026-12-31;;18796.85;100000
+1;Y99F90004;Squad UI Experience;2026-01-01;2026-12-31;;32755.1;70000
+0;Y99F92000;Programme Démo — Data & IA;;;;;
+1;Y99F90005;Engineering Experience;2026-01-01;2026-12-31;;13520.44;60000
+1;Y99F90006;Squad Development Experience;2026-01-01;2026-12-31;;23895.66;130000
+1;Y99F90701;Pilote IA générative;2027-01-01;2027-03-31;;0;4000
+0;Y99F93000;Programme Démo — Pilotage & Transverse;;;;;
+1;Y99F90007;Intégration système & MBSE;2026-09-01;2026-11-30;;11492.41;72000
+1;Y99F90008;Comité d'Architecture;2026-01-01;2026-12-31;;22898.85;50000
+1;Y99F90009;Cellule Transverse Qualité;2026-01-01;2026-12-31;;33612.09;80000
+1;Y99F900010;Recette & amélioration continue;2026-01-01;2026-12-31;;11100.93;30000
+0;Y99F94000;Programmes hors périmètre;;;;;
+1;Y99F90601;Squad Académie & Montée en compétence;2026-01-01;2026-12-31;;8139.6;31000
+1;Y99F90602;Support exploitation 24/7;2026-01-01;2026-12-31;;9694.4;38000
+0;Y99F95000;Réserve de capacité & aléas;;;;;
+1;Y99F900011;Réserve de capacité Site Loire;2026-01-01;2026-12-31;;109678.98;200000
+1;Y99F900012;Provisions pour aléas;2026-01-01;2026-12-31;;16966.48;79000
+1;Y99F900015;Fonds de transformation;2027-01-01;2027-12-31;;0;40000
+0;Y99F96000;Prestations & achats hors programme;;;;;
+1;Y99F900013;Prestations externes;2026-01-01;2026-12-31;;11427.55;30000
+1;Y99F900014;Achats non stockables;2026-01-01;2026-12-31;;367.96;0
+1;Y99F900016;Ancien marché de prestations (A NE PAS UTILISER);;;;;0
+0;Y99F97000;Déplacements & missions;;;;;
+1;Y99F900021;Missions PI Planning;2026-01-01;2026-12-31;;6399.86;25000
+1;Y99F900022;Missions Sprint Planning;2026-01-01;2026-12-31;;18428.92;20000

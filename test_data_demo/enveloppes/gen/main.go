@@ -1,4 +1,4 @@
-// gen écrit le classeur de démo des enveloppes par CT (demo_cat.xlsx) au format
+// gen écrit le classeur de démo des enveloppes par CT (test_data_demo/demo_enveloppes.xlsx, à côté des autres fichiers de démo) au format
 // exact de l'export Planisware « CàT par CT » (DECISIONS n° 18), à partir de
 // demo_enveloppes.csv, une ligne du CSV par ligne de la feuille :
 //
@@ -20,7 +20,7 @@
 //
 //	cd backend && go run ../test_data_demo/enveloppes/gen/main.go
 //
-// Options : -csv, -out (défaut : dossier parent de ce fichier source), -date
+// Options : -csv (défaut : test_data_demo/enveloppes/), -out (défaut : test_data_demo/), -date
 // (date d'extraction jj/mm/aa, cellule A1) et -user (login, cellule G1).
 package main
 
@@ -74,7 +74,7 @@ func main() {
 	_, src, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filepath.Dir(src))
 	csvPath := flag.String("csv", filepath.Join(dir, "demo_enveloppes.csv"), "CSV source")
-	outPath := flag.String("out", filepath.Join(dir, "demo_cat.xlsx"), "classeur écrit")
+	outPath := flag.String("out", filepath.Join(filepath.Dir(dir), "demo_enveloppes.xlsx"), "classeur écrit")
 	date := flag.String("date", "05/10/26", "date d'extraction (jj/mm/aa), cellule A1")
 	user := flag.String("user", "demo.njord", "login de l'utilisateur, cellule G1")
 	flag.Parse()
@@ -87,7 +87,7 @@ func main() {
 	if err != nil {
 		fail(fmt.Errorf("-date %q : attendu jj/mm/aa", *date))
 	}
-	data, err := classeur(lignes, *date, "Utilisateur "+*user, extraction.Add(10*time.Hour + 35*time.Minute + 36*time.Second))
+	data, err := classeur(lignes, *date, "Utilisateur "+*user, extraction.Add(10*time.Hour+35*time.Minute+36*time.Second))
 	if err != nil {
 		fail(err)
 	}

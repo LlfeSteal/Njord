@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Charge toute la démo Njord par l'API : timeline du plan de charge (6 versions),
-# réalisé, provisions, puis les enveloppes par CT (demo_cat.xlsx, format « CàT par CT »).
+# réalisé, provisions, puis les enveloppes par CT (demo_enveloppes.xlsx, format « CàT par CT »).
 # Voir test_data_demo/enveloppes/README.md.
 set -euo pipefail
 
@@ -10,7 +10,7 @@ IMPORTEUR="seed-demo"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO="$(cd "$HERE/.." && pwd)"
-CAT="$HERE/demo_cat.xlsx"
+CAT="$DEMO/demo_enveloppes.xlsx"
 
 usage() {
 	cat <<EOF
@@ -22,7 +22,7 @@ http://localhost:8080/api ; actuel : $API).
   (sans option)       base vide attendue : importe les 6 versions du plan de charge
                       (timeline, avec leurs dates d'effet), le réalisé, les
                       provisions, puis importe les enveloppes par CT.
-  --enveloppes-only   importe seulement les enveloppes de demo_cat.xlsx
+  --enveloppes-only   importe seulement les enveloppes de demo_enveloppes.xlsx
                       (POST /enveloppes/import, rejouable : chaque import
                       remplace toutes les enveloppes).
   --help              affiche cette aide.

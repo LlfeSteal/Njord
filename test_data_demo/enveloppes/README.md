@@ -1,4 +1,4 @@
-# Jeu de démo — Enveloppes par CT (`demo_cat.xlsx`)
+# Jeu de démo — Enveloppes par CT (`../demo_enveloppes.xlsx`)
 
 Ce jeu sert à recetter les décisions n° 18 et n° 19 de `docs/DECISIONS.md` :
 - une **enveloppe** = budget d'un CT sur sa propre période (date de début, date de fin, montant) ;
@@ -7,7 +7,7 @@ Ce jeu sert à recetter les décisions n° 18 et n° 19 de `docs/DECISIONS.md` :
 - **sous-imputation** = sous-consommation à la date de fin (non consommé > 10 % **et** > 5 000 €) ;
 - le PPS planifié hors période est affiché à part (« plan hors enveloppe »), comme le réalisé hors période (« réalisé hors enveloppe »).
 
-Les enveloppes ne se saisissent pas : elles sont **importées** depuis l'export xlsx « CàT par CT » (`POST /api/enveloppes/import`, aperçu par `POST /api/enveloppes/import/preview`). Chaque import remplace toutes les enveloppes. Le classeur de démo `demo_cat.xlsx` est généré à partir de `demo_enveloppes.csv` (voir plus bas).
+Les enveloppes ne se saisissent pas : elles sont **importées** depuis l'export xlsx « CàT par CT » (`POST /api/enveloppes/import`, aperçu par `POST /api/enveloppes/import/preview`). Chaque import remplace toutes les enveloppes. Le classeur de démo `../demo_enveloppes.xlsx` est généré à partir de `demo_enveloppes.csv` (voir plus bas).
 
 Il s'appuie sur toute la démo : la timeline du plan de charge (`../timeline/`, étapes 1 à 6), le réalisé (`../demo_realise.xlsx`, as_of = 03/10/2026, S40) et les provisions (`../demo_provision.xlsx`). Les enveloppes s'importent **après** ces imports, pour que la page Enveloppes et l'analyse croisent les CT des sources.
 
@@ -15,7 +15,7 @@ Il s'appuie sur toute la démo : la timeline du plan de charge (`../timeline/`, 
 
 ## Charger la démo
 
-`seed_demo.sh` charge tout par l'API, dans l'ordre : les 6 versions du plan avec leur date d'effet, le réalisé, les provisions, puis l'import de `demo_cat.xlsx` (un seul `curl -F file=@demo_cat.xlsx -F importeur=seed-demo` vers `/api/enveloppes/import`). Il ne dépend que de `bash`, `curl` et `python3`, et se lance depuis n'importe quel dossier.
+`seed_demo.sh` charge tout par l'API, dans l'ordre : les 6 versions du plan avec leur date d'effet, le réalisé, les provisions, puis l'import de `../demo_enveloppes.xlsx` (un seul `curl -F file=@demo_enveloppes.xlsx -F importeur=seed-demo` vers `/api/enveloppes/import`). Il ne dépend que de `bash`, `curl` et `python3`, et se lance depuis n'importe quel dossier.
 
 1. Démarre le backend sur une **base vide** :
    ```
@@ -30,7 +30,7 @@ Il s'appuie sur toute la démo : la timeline du plan de charge (`../timeline/`, 
 
 Options :
 - `API=http://localhost:8091/api test_data_demo/enveloppes/seed_demo.sh` : autre adresse (défaut `http://localhost:8080/api`).
-- `--enveloppes-only` : ne fait que l'import de `demo_cat.xlsx`, sur une base où les autres imports sont déjà faits. Rejouable : chaque import remplace toutes les enveloppes.
+- `--enveloppes-only` : ne fait que l'import de `../demo_enveloppes.xlsx`, sur une base où les autres imports sont déjà faits. Rejouable : chaque import remplace toutes les enveloppes.
 - `--help` : aide.
 
 Le script refuse de tourner si la base contient déjà une version de plan : les dates d'effet de la timeline se mélangeraient aux versions existantes. Il marque une pause d'une seconde après chaque import de plan. L'heure d'import (`importee_le`, à la seconde près) départage en effet les versions : correctif n° 3 face à n° 2, « plan connu au ». Deux imports dans la même seconde seraient ordonnés au hasard. Compte une dizaine de secondes en tout. Il s'arrête au premier appel en erreur et affiche la réponse de l'API. Tous les imports sont signés `seed-demo` (importeur).
@@ -41,9 +41,9 @@ Attendu après le chargement :
 - **Enveloppes** (page /enveloppes) : les 20 CT de la démo ont une enveloppe, groupés sous 7 catégories ; aucun « Hors catégorie » ni « Hors fichier » ;
 - **Prévisions** : budget global de source `enveloppe`.
 
-## Format « CàT par CT » (`demo_cat.xlsx`)
+## Format « CàT par CT » (`../demo_enveloppes.xlsx`)
 
-`demo_cat.xlsx` reproduit **au texte près** l'export Planisware réel (DECISIONS n° 18). Le générateur n'utilise pas de bibliothèque xlsx : il écrit lui-même chaque partie du classeur.
+`../demo_enveloppes.xlsx` reproduit **au texte près** l'export Planisware réel (DECISIONS n° 18). Le générateur n'utilise pas de bibliothèque xlsx : il écrit lui-même chaque partie du classeur.
 - **Archive** : les 12 parties de l'export, dans son ordre (`customXml/…`, `_rels/.rels`, `docProps/core.xml`, `xl/…`, `[Content_Types].xml` en dernier), Deflate, en-têtes zip version 2.0 sans descripteur ni extra. Pas de `docProps/app.xml`.
 - **Feuille** « Activité sans archive » : `dimension` A1:I10 (fixe, comme l'export), volet figé sous la ligne 3, largeurs de colonnes, styles `s=1…10` et espaces des cellules de l'export, balise `<pargeMargins>` (sic) comprise.
 - **Ligne 1** : `A1` date d'extraction **en texte** `jj/mm/aa` (05/10/26), `D1` « Tableau », `G1` « Utilisateur demo.njord » (fusions A1:C1, D1:F1, G1:I1). Pas de ligne 2.
@@ -75,11 +75,11 @@ Les libellés de catégorie reprennent les groupes des provisions et du plan de 
 - dates `AAAA-MM-JJ`, vides = ligne sans période ;
 - montants en euros, recopiés tels quels dans le classeur ; vides : catégorie = Σ de ses CT, CT : G = 0 et F = max(H − G, 0).
 
-Pour régénérer `demo_cat.xlsx` après une modification du CSV (bibliothèque standard Go seule) :
+Pour régénérer `../demo_enveloppes.xlsx` après une modification du CSV (bibliothèque standard Go seule) :
 ```
 cd backend && go run ../test_data_demo/enveloppes/gen/main.go
 ```
-Options : `-csv` (source), `-out` (classeur écrit), `-date` (date d'extraction, défaut `05/10/26`) et `-user` (login, défaut `demo.njord`). Par défaut, le CSV et le classeur sont lus et écrits dans `test_data_demo/enveloppes/`.
+Options : `-csv` (source), `-out` (classeur écrit), `-date` (date d'extraction, défaut `05/10/26`) et `-user` (login, défaut `demo.njord`). Par défaut, le CSV est lu dans `test_data_demo/enveloppes/` et le classeur écrit dans `test_data_demo/demo_enveloppes.xlsx`, à côté des autres fichiers de démo.
 
 ## Scénarios
 
@@ -121,4 +121,4 @@ Pour être **ok sans sous-consommation**, il faut donc AP ≤ 95 % de l'envelopp
 
 Sur 2026, Alpha Core Team (90001) et Provisions pour aléas (90012) ne peuvent pas l'être : leur tendance s'écarte de plus de 10 % du plan (au-dessus pour 90001, en dessous pour 90012). Le cas conforme est donc porté par 90601.
 
-Si le réalisé ou la timeline changent, refais les calculs avec `GET /api/analyse`, puis ajuste les montants du CSV, régénère `demo_cat.xlsx` et lance `--enveloppes-only`.
+Si le réalisé ou la timeline changent, refais les calculs avec `GET /api/analyse`, puis ajuste les montants du CSV, régénère `../demo_enveloppes.xlsx` et lance `--enveloppes-only`.

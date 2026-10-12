@@ -21,12 +21,12 @@ Application web d'analyse des imputations des collaborateurs : **Plan de charge*
 | `internal/referentiel` | Endpoints `/personnes`, `/squads` | agent Plan |
 | `internal/realise` | Parser réalisé, import, écritures, CSV, facets | agent Réalisé |
 | `internal/provision` | Parser de l'export « Dépenses prévues », import, lignes, CSV, facets (DECISIONS n° 16) | agent Provisions |
-| `internal/enveloppe` | Enveloppes saisies par CT : `/enveloppes` (liste des CT connus, upsert, suppression ; DECISIONS n° 18) | agent Enveloppes |
+| `internal/enveloppe` | Enveloppes par CT importées du fichier « CàT par CT » : `/enveloppes` (liste des CT connus, aperçu et import ; DECISIONS n° 18) | agent Enveloppes |
 | `internal/analyse` | Moteur pur `Run(Input, Settings)` sur la **timeline du plan** (`BuildTimeline`, `timeline.go`, DECISIONS n° 13), repo lecture SQL, endpoints, exports | agent Analyse |
 
-Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `provision_lines`, `ct_enveloppes`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
+Chaque module expose `func New(st *store.Store) *Handler` et `func (h *Handler) Register(g *gin.RouterGroup)` (déjà branchés dans `cmd/njord/main.go`). Les modules accèdent à leurs tables en SQL via `st.DB()` ; le **schéma est figé** (`store/schema.go`). L'analyse lit `plan_lines`, `realise_entries`, `provision_lines`, `enveloppes`, `personnes`, `squads` directement et n'écrit que dans `analyse_last_result` et `anomalie_suivi`.
 
-Tables : `versions` (plan, réalisé & provisions, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `provision_lines`, `ct_enveloppes` (une enveloppe par CT, saisie manuelle), `personnes` (clé `nom_normalise` = NOM + Prénom, unique), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
+Tables : `versions` (plan, réalisé & provisions, colonne `kind`, index unique « une active par kind »), `plan_lines`, `realise_entries`, `provision_lines`, `enveloppes` (une enveloppe par CT, instantané du dernier import « CàT par CT ») + `enveloppes_import` (dernier import), `personnes` (clé `nom_normalise` = NOM + Prénom, unique), `squads` (+`parent_id`), `squad_alias`, `audit_log`, `settings` (JSON), `analyse_last_result`.
 
 Purge = suppression des lignes + version passée en `purgee` (pierre tombale visible avec « afficher purgées ») ; référentiels jamais supprimés.
 
@@ -46,7 +46,7 @@ Navigation en barre latérale (`src/components/AppLayout.tsx`), routes dans `src
 | `/provisions` | Provisions : version **active** (sinon la plus récente), lignes par CT et total | `src/pages/provisions/` |
 | `/plan/:id`, `/realise/:id`, `/provisions/:id` | Version précise de l'historique | idem |
 | `/plan/versions`, `/realise/versions`, `/provisions/versions` | Gestion des versions (archivage, réactivation, purge) | idem + `src/components/VersionsPanel.tsx` |
-| `/enveloppes` | Enveloppes : période d'utilisation + montant par CT, édition dans l'inspecteur (`?ct=`) | `src/pages/enveloppes/` |
+| `/enveloppes` | Enveloppes : import du fichier « CàT par CT », CT groupés par catégorie, inspecteur en lecture seule (`?ct=`) | `src/pages/enveloppes/` |
 | `/personnes`, `/squads` | Référentiels | `src/pages/referentiels/` |
 | `/reglages/*` | Paramètres et journal | `src/pages/parametres/` |
 

@@ -153,15 +153,25 @@ CREATE TABLE IF NOT EXISTS provision_lines (
 );
 CREATE INDEX IF NOT EXISTS provision_lines_version ON provision_lines(version_id);
 
--- Enveloppes budgétaires saisies par CT (DECISIONS n° 18) : une par CT, aucun import ne les porte.
-CREATE TABLE IF NOT EXISTS ct_enveloppes (
-	ct          TEXT PRIMARY KEY,
-	date_debut  TEXT NOT NULL,              -- YYYY-MM-DD
-	date_fin    TEXT NOT NULL,              -- YYYY-MM-DD, ≥ date_debut
-	montant     REAL NOT NULL,              -- € ≥ 0
-	commentaire TEXT NOT NULL DEFAULT '',
-	operateur   TEXT NOT NULL DEFAULT '',
-	updated_at  TEXT NOT NULL               -- RFC3339
+-- Enveloppes budgétaires par CT (DECISIONS n° 18) : instantané du dernier import
+-- du fichier « CàT par CT » (colonne « Coût prévisionnel »), remplacé en bloc à
+-- chaque import. ct_enveloppes (saisie manuelle, jamais livrée) est abandonnée.
+DROP TABLE IF EXISTS ct_enveloppes;
+CREATE TABLE IF NOT EXISTS enveloppes (
+	ct                TEXT PRIMARY KEY,
+	categorie         TEXT NOT NULL DEFAULT '', -- code de la ligne de catégorie (…00) au-dessus, '' si aucune
+	categorie_libelle TEXT NOT NULL DEFAULT '', -- Descriptif de la ligne de catégorie
+	date_debut        TEXT NOT NULL,            -- YYYY-MM-DD
+	date_fin          TEXT NOT NULL,            -- YYYY-MM-DD, ≥ date_debut
+	montant           REAL NOT NULL             -- € ≥ 0
+);
+-- Dernier import des enveloppes (une seule ligne, id = 1).
+CREATE TABLE IF NOT EXISTS enveloppes_import (
+	id            INTEGER PRIMARY KEY CHECK (id = 1),
+	filename      TEXT NOT NULL,
+	importe_le    TEXT NOT NULL,            -- RFC3339
+	operateur     TEXT NOT NULL DEFAULT '',
+	nb_enveloppes INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (

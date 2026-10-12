@@ -6,8 +6,7 @@ import type {
   AnomalieSuivi,
   AnomalieSuiviInput,
   AuditEntry,
-  EnveloppeCT,
-  EnveloppeInput,
+  EnveloppesListe,
   Facets,
   ImportReport,
   ImportResult,
@@ -204,9 +203,18 @@ export const referentielApi = {
 
 // ------------------------------------------------------------------ Enveloppes (DECISIONS n° 18)
 export const enveloppeApi = {
-  list: () => get<EnveloppeCT[]>('/enveloppes'),
-  save: (ct: string, body: EnveloppeInput) => put<EnveloppeCT>(`/enveloppes/${encodeURIComponent(ct)}`, body),
-  remove: (ct: string) => del<void>(`/enveloppes/${encodeURIComponent(ct)}`),
+  list: () => get<EnveloppesListe>('/enveloppes'),
+  preview: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return post<ImportReport>('/enveloppes/import/preview', fd);
+  },
+  commit: (file: File, importeur?: string) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (importeur) fd.append('importeur', importeur);
+    return post<ImportReport>('/enveloppes/import', fd);
+  },
 };
 
 // ------------------------------------------------------------------ Paramètres & journal

@@ -35,7 +35,8 @@ export interface ParseIssue {
 }
 
 export interface ImportReport {
-  kind: Kind;
+  /** `enveloppe` : bilan de l'import « CàT par CT » (non versionné, DECISIONS n° 18). */
+  kind: Kind | 'enveloppe';
   intitule: string;
   filename: string;
   source_format: string;
@@ -189,7 +190,7 @@ export interface EnveloppeSources {
   provisions: boolean;
 }
 
-/** Enveloppe budgétaire saisie pour un CT : période d'utilisation + montant. */
+/** Enveloppe d'un CT, importée du fichier « CàT par CT » : période d'utilisation + montant (colonne « Coût prévisionnel »). */
 export interface Enveloppe {
   /** YYYY-MM-DD */
   date_debut: string;
@@ -197,26 +198,33 @@ export interface Enveloppe {
   date_fin: string;
   /** € ≥ 0 */
   montant: number;
-  commentaire: string;
-  operateur: string;
-  updated_at: string;
 }
 
-/** GET /enveloppes : CT connus (union des sources) ou déjà configurés ; `enveloppe` null = à configurer. */
+/** CT connu des sources ou du fichier ; `enveloppe` null = absent du fichier (« sans enveloppe »). */
 export interface EnveloppeCT {
   ct: string;
   ct_libelle: string;
+  /** Code de la ligne de catégorie (…00) au-dessus du CT dans le fichier ; '' hors catégorie ou hors fichier. */
+  categorie: string;
+  /** Descriptif de la ligne de catégorie. */
+  categorie_libelle: string;
   sources: EnveloppeSources;
   enveloppe: Enveloppe | null;
 }
 
-/** Corps de PUT /enveloppes/:ct. */
-export interface EnveloppeInput {
-  date_debut: string;
-  date_fin: string;
-  montant: number;
-  commentaire?: string;
-  operateur?: string;
+/** Dernier import du fichier des enveloppes. */
+export interface EnveloppesImport {
+  filename: string;
+  importe_le: string;
+  operateur: string;
+  nb_enveloppes: number;
+}
+
+/** GET /enveloppes : CT triés par code de catégorie puis CT, hors catégorie puis hors fichier en dernier. */
+export interface EnveloppesListe {
+  /** null tant qu'aucun fichier n'a été importé. */
+  import: EnveloppesImport | null;
+  cts: EnveloppeCT[];
 }
 
 /** Personne identifiée uniquement par NOM + Prénom. */

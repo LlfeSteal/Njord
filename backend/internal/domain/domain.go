@@ -14,6 +14,9 @@ const (
 	KindPlan      Kind = "plan"
 	KindRealise   Kind = "realise"
 	KindProvision Kind = "provision" // export « Dépenses prévues » (DECISIONS n° 16)
+	// KindEnveloppe ne sert qu'au bilan d'import (ImportReport.Kind) : les
+	// enveloppes ne sont pas versionnées (DECISIONS n° 18).
+	KindEnveloppe Kind = "enveloppe"
 )
 
 type VersionStatut string
@@ -260,13 +263,15 @@ type Personne struct {
 }
 
 // EnveloppeCT : un CT connu d'au moins une source (plan non purgé, réalisé
-// actif, provisions actives) ou déjà configuré, avec son enveloppe saisie
-// (DECISIONS n° 18). Enveloppe = nil tant que le CT n'est pas configuré.
+// actif, provisions actives) ou du dernier import « CàT par CT », avec son
+// enveloppe (DECISIONS n° 18). Enveloppe = nil si le CT est absent du fichier.
 type EnveloppeCT struct {
-	CT        string           `json:"ct"`
-	CTLibelle string           `json:"ct_libelle"` // réalisé (préfixe CT retiré), sinon groupe des provisions, sinon groupe du plan
-	Sources   EnveloppeSources `json:"sources"`
-	Enveloppe *Enveloppe       `json:"enveloppe"`
+	CT               string           `json:"ct"`
+	CTLibelle        string           `json:"ct_libelle"`        // réalisé (préfixe CT retiré), sinon groupe des provisions, sinon groupe du plan
+	Categorie        string           `json:"categorie"`         // code de la catégorie du fichier (…00), '' hors fichier ou hors catégorie
+	CategorieLibelle string           `json:"categorie_libelle"` // Descriptif de la ligne de catégorie
+	Sources          EnveloppeSources `json:"sources"`
+	Enveloppe        *Enveloppe       `json:"enveloppe"`
 }
 
 // EnveloppeSources : présence du CT dans chaque source.
@@ -276,23 +281,26 @@ type EnveloppeSources struct {
 	Provisions bool `json:"provisions"` // lignes de la version de provisions active
 }
 
-// Enveloppe : période d'utilisation et montant alloués à un CT (saisie manuelle).
+// Enveloppe : période d'utilisation et montant alloués à un CT (fichier
+// « CàT par CT » : dates de début / fin, colonne « Coût prévisionnel »).
 type Enveloppe struct {
-	DateDebut   string    `json:"date_debut"` // YYYY-MM-DD
-	DateFin     string    `json:"date_fin"`   // YYYY-MM-DD, ≥ date_debut
-	Montant     float64   `json:"montant"`    // € ≥ 0
-	Commentaire string    `json:"commentaire"`
-	Operateur   string    `json:"operateur"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	DateDebut string  `json:"date_debut"` // YYYY-MM-DD
+	DateFin   string  `json:"date_fin"`   // YYYY-MM-DD, ≥ date_debut
+	Montant   float64 `json:"montant"`    // € ≥ 0
 }
 
-// EnveloppeInput : corps de PUT /enveloppes/:ct.
-type EnveloppeInput struct {
-	DateDebut   string   `json:"date_debut"`
-	DateFin     string   `json:"date_fin"`
-	Montant     *float64 `json:"montant"` // requis
-	Commentaire string   `json:"commentaire"`
-	Operateur   string   `json:"operateur"`
+// EnveloppesImport : dernier import du fichier des enveloppes.
+type EnveloppesImport struct {
+	Filename     string    `json:"filename"`
+	ImporteLe    time.Time `json:"importe_le"`
+	Operateur    string    `json:"operateur"`
+	NbEnveloppes int       `json:"nb_enveloppes"`
+}
+
+// EnveloppesListe : réponse de GET /enveloppes.
+type EnveloppesListe struct {
+	Import *EnveloppesImport `json:"import"` // null tant qu'aucun fichier n'a été importé
+	CTs    []EnveloppeCT     `json:"cts"`    // triés par code de catégorie puis CT ; hors catégorie puis hors fichier en dernier
 }
 
 type Squad struct {

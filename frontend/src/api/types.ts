@@ -257,9 +257,7 @@ export interface Settings {
   purge_delai_jours: number;
   seuil_quantite_semaine_h: number;
   seuil_ecart_tg_eur: number;
-  /** Fin d'exercice (YYYY-MM-DD) ; '' = 31/12 de l'année de as_of (DECISIONS n° 17). */
-  fin_exercice: string;
-  /** Sous-consommation : non consommé > seuil_sous_conso_pct % du budget de l'exercice et > seuil_sous_conso_eur. */
+  /** Sous-consommation : non consommé > seuil_sous_conso_pct % de l'enveloppe et > seuil_sous_conso_eur (DECISIONS n° 20). */
   seuil_sous_conso_pct: number;
   seuil_sous_conso_eur: number;
   diviseur_hors_plan_h: number;
@@ -433,7 +431,7 @@ export interface KPIs {
   heures_non_couvertes: number;
 }
 
-/** Analyse budgétaire : budget (PPS + provisions) et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10, 16). */
+/** Analyse par nature : dépense prévue (PPS + provisions) et réalisé (Σ TOTAL EN €) d'une nature de coût (DECISIONS n° 10, 16). Le prévu n'est pas un budget (n° 20). */
 export interface BudgetNature {
   nature: 'provision' | 'mo' | 'capacite' | 'frais' | 'autres';
   libelle: string;
@@ -441,10 +439,10 @@ export interface BudgetNature {
   pps: number;
   /** Σ provisions importées, ventilées selon leur ligne de coût. */
   provisions: number;
-  /** pps + provisions ; Σ budget = previsions.global.budget. */
-  budget: number;
+  /** pps + provisions (dépense prévue). */
+  prevu: number;
   realise: number;
-  /** realise ÷ budget, 0..100+, null si budget nul. */
+  /** realise ÷ prevu, 0..100+, null si prévu nul. */
   pct_consomme: number | null;
 }
 
@@ -458,8 +456,6 @@ export interface BudgetCT {
   pps_plan: number;
   /** Σ provisions du CT. */
   provisions: number;
-  /** pps_plan + provisions (budget du CT). */
-  charge_max: number;
   heures_mo: number;
   cout_mo_eur: number;
   risque: boolean;
@@ -557,60 +553,71 @@ export interface PrevisionPoint {
 
 export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
 
+/**
+ * Prévision d'un CT (global : périmètre des CT avec enveloppe, `ct` = ''). Le budget est l'enveloppe du fichier,
+ * rien d'autre (DECISIONS n° 20) : sans enveloppe (`budget_source` = 'aucun'), tous les champs de budget sont null.
+ */
 export interface PrevisionCT {
   ct: string;
   ct_libelle: string;
-  /** Référence des écarts et du statut : montant de l'enveloppe (DECISIONS n° 19), sinon charge max. */
-  budget: number;
-  /** Global : `mixte` si une partie seulement des CT a une enveloppe. */
-  budget_source: 'enveloppe' | 'charge_max' | 'mixte';
-  /** pps + provisions (reconstruction, gardée pour comparaison). */
-  charge_max: number;
-  /** Σ PPS du plan (segments de la timeline). */
+  /** Montant de l'enveloppe (global : Σ enveloppes) ; null sans enveloppe. */
+  budget: number | null;
+  budget_source: 'enveloppe' | 'aucun';
+  /** Σ PPS du plan (segments de la timeline), info. */
   pps: number;
-  /** Σ provisions restantes. */
+  /** Σ provisions restantes, info. */
   provisions: number;
   consomme: number;
+  /** consomme ÷ budget, 0..100+ ; null sans budget ou budget nul. */
   pct_consomme: number | null;
   reste_a_faire: number;
   atterrissage_plan: number;
   atterrissage_tendance: number;
-  ecart_plan: number;
-  ecart_tendance: number;
+  /** atterrissage_plan − budget ; null sans budget. */
+  ecart_plan: number | null;
+  ecart_tendance: number | null;
   rythme_hebdo: number;
   semaines_restantes: number;
   fin_plan: string;
-  statut: PrevisionStatut;
-  // Fin d'exercice (DECISIONS n° 17) : budget perdu s'il n'est pas consommé à l'échéance.
-  /** Fin d'exercice retenue (YYYY-MM-DD). */
+  /** null sans budget. */
+  statut: PrevisionStatut | null;
+  // Échéance = fin de l'enveloppe (global : la plus tardive) ; vide / null sans enveloppe.
+  /** YYYY-MM-DD, '' sans enveloppe. */
   echeance: string;
-  /** pps_echeance + provisions_echeance. */
-  budget_echeance: number;
-  /** PPS prévu jusqu'à la semaine de l'échéance (+ PPS hors série). */
-  pps_echeance: number;
-  /** Provisions datées ≤ échéance (ou sans date). */
-  provisions_echeance: number;
-  /** Consommé + PPS prévu des semaines ]as_of, échéance]. */
+  /** = budget. */
+  budget_echeance: number | null;
+  /** Consommé + PPS prévu des semaines ]as_of, échéance] (0 sans enveloppe). */
   projection_plan_echeance: number;
-  /** Consommé + rythme × semaines ]as_of, échéance]. */
+  /** Consommé + rythme × semaines ]as_of, échéance] (0 sans enveloppe). */
   projection_tendance_echeance: number;
-  /** max(0, budget_echeance − min des deux projections) : budget qui risque d'être perdu. */
-  non_consomme: number;
+  /** max(0, budget − min des deux projections) : enveloppe qui risque d'être perdue ; null sans budget. */
+  non_consomme: number | null;
   non_consomme_source: 'plan' | 'tendance' | '';
-  /** € / semaine à dépenser pour tout consommer à l'échéance (0 si aucune semaine). */
-  rythme_necessaire: number;
+  /** € / semaine à dépenser pour tout consommer à l'échéance ; null sans budget, 0 si aucune semaine. */
+  rythme_necessaire: number | null;
   semaines_echeance: number;
-  /** non_consomme > seuils (% et €). */
+  /** non_consomme > seuils (% et €) ; false sans budget. */
   sous_consommation: boolean;
-  // Enveloppe (DECISIONS n° 19) : budget = montant, échéance = date_fin,
-  // budget_echeance = montant, prévisionnel restreint à [date_debut, date_fin].
-  /** null = CT non configuré (global : toujours null). */
+  /**
+   * Bas de la zone cible [cible_min, budget] : tout consommer sans surconsommer (DECISIONS n° 20).
+   * budget − max(seuil_sous_conso_pct % × budget, seuil_sous_conso_eur), plancher 0 ; null sans budget.
+   */
+  cible_min: number | null;
+  /** Enveloppe du CT (DECISIONS n° 19) : prévisionnel restreint à [date_debut, date_fin]. null sans enveloppe (global : toujours null). */
   enveloppe: Enveloppe | null;
   /** PPS prévu hors des semaines de la période (+ PPS hors série). */
   plan_hors_enveloppe: number;
   /** € réalisés datés hors de la période (exclus du consommé). */
   consomme_hors_enveloppe: number;
   series: PrevisionPoint[];
+}
+
+/** CT sans enveloppe : aucun budget, hors du global (DECISIONS n° 20). */
+export interface HorsEnveloppe {
+  nb_ct: number;
+  consomme: number;
+  atterrissage_plan: number;
+  atterrissage_tendance: number;
 }
 
 /** Plan de charge face aux enveloppes : lecture brute des CT configurés, chacun sur sa période. */
@@ -638,6 +645,7 @@ export interface Previsions {
   global: PrevisionCT;
   par_ct: PrevisionCT[];
   enveloppes: EnveloppesSynthese;
+  hors_enveloppe: HorsEnveloppe;
 }
 
 // ------------------------------------------------------------------ Anomalies (SPEC_analyse §7.8)

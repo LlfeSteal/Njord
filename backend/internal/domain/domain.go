@@ -323,9 +323,8 @@ type Settings struct {
 	PurgeDelaiJours       int     `json:"purge_delai_jours"`        // 30
 	SeuilQuantiteSemaineH float64 `json:"seuil_quantite_semaine_h"` // 200
 	SeuilEcartTGEur       float64 `json:"seuil_ecart_tg_eur"`       // 50 000
-	// Sous-consommation (DECISIONS n° 17) : budget à consommer avant la fin d'exercice.
-	FinExercice          string   `json:"fin_exercice"`          // YYYY-MM-DD ; "" = 31/12 de l'année de as_of
-	SeuilSousConsoPct    float64  `json:"seuil_sous_conso_pct"`  // 10 : non consommé > 10 % du budget de l'exercice…
+	// Sous-consommation (DECISIONS n° 17 et 20) : enveloppe à consommer avant sa fin.
+	SeuilSousConsoPct    float64  `json:"seuil_sous_conso_pct"`  // 10 : non consommé > 10 % de l'enveloppe…
 	SeuilSousConsoEur    float64  `json:"seuil_sous_conso_eur"`  // 5 000 : … et > 5 000 €
 	DiviseurHorsPlanH    float64  `json:"diviseur_hors_plan_h"`  // 12
 	SemainesVerrouillees []int    `json:"semaines_verrouillees"` // [51, 52] (numéros ISO, toute année)
@@ -531,7 +530,6 @@ type BudgetCT struct {
 	PctSecurite *float64 `json:"pct_securite"` // 0..100, null si dénominateur nul
 	PPSPlan     float64  `json:"pps_plan"`     // Σ PPS du plan sur ce CT
 	Provisions  float64  `json:"provisions"`   // Σ provisions du CT
-	ChargeMax   float64  `json:"charge_max"`   // pps_plan + provisions (budget du CT)
 	HeuresMO    float64  `json:"heures_mo"`    // Σ heures MO réalisées (info)
 	CoutMOEur   float64  `json:"cout_mo_eur"`  // Σ TOTAL EN € des lignes MO (info, hors budget)
 	Risque      bool     `json:"risque"`       // non_securise > seuil
@@ -551,16 +549,17 @@ type Budget struct {
 	ParNature []BudgetNature `json:"par_nature"` // analyse budgétaire, 5 lignes fixes (DECISIONS n° 10)
 }
 
-// BudgetNature : budget (PPS du plan + provisions importées) et réalisé
-// (Σ TOTAL EN €, avoirs compris) d'une nature de coût. Σ budget = previsions.global.budget.
+// BudgetNature : dépense prévue (PPS du plan + provisions importées) et réalisé
+// (Σ TOTAL EN €, avoirs compris) d'une nature de coût. Le prévu n'est pas un
+// budget : le budget vient des enveloppes (DECISIONS n° 20).
 type BudgetNature struct {
 	Nature      string   `json:"nature"`     // provision | mo | capacite | frais | autres
 	Libelle     string   `json:"libelle"`    // « Provision », « Main d'œuvre »…
 	PPS         float64  `json:"pps"`        // Σ PPS du plan
 	Provisions  float64  `json:"provisions"` // Σ provisions importées, ventilées selon leur ligne de coût
-	Budget      float64  `json:"budget"`     // pps + provisions
+	Prevu       float64  `json:"prevu"`      // pps + provisions
 	Realise     float64  `json:"realise"`
-	PctConsomme *float64 `json:"pct_consomme"` // realise ÷ budget, 0..100+, null si budget nul
+	PctConsomme *float64 `json:"pct_consomme"` // realise ÷ prevu, 0..100+, null si prévu nul
 }
 
 type AlerteCT struct {
@@ -620,41 +619,43 @@ type PrevisionPoint struct {
 	Couverture    Couverture `json:"couverture"`     // couverture de la semaine par la timeline du plan
 }
 
-// PrevisionCT is the landing forecast of one CT (or of the whole perimeter for Global, CT = "").
+// PrevisionCT is the landing forecast of one CT (or of the envelope perimeter
+// for Global, CT = ""). Le budget est l'enveloppe du fichier, rien d'autre
+// (DECISIONS n° 20) : sans enveloppe, tous les champs de budget sont null.
 type PrevisionCT struct {
-	CT                   string          `json:"ct"`
-	CTLibelle            string          `json:"ct_libelle"`
-	Budget               float64         `json:"budget"`                // référence des écarts et du statut : montant de l'enveloppe (DECISIONS n° 19), sinon charge max
-	BudgetSource         string          `json:"budget_source"`         // enveloppe | charge_max ; global : enveloppe | charge_max | mixte
-	ChargeMax            float64         `json:"charge_max"`            // pps + provisions (reconstruction, gardée pour comparaison)
-	PPS                  float64         `json:"pps"`                   // Σ PPS des lignes de plan (segments de la timeline)
-	Provisions           float64         `json:"provisions"`            // Σ provisions restantes (version de provisions retenue)
-	Consomme             float64         `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of ; avec enveloppe : dépenses datées dans sa période (+ non datées)
-	PctConsomme          *float64        `json:"pct_consomme"`          // 0..100, null si budget nul
-	ResteAFaire          float64         `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of
-	AtterrissagePlan     float64         `json:"atterrissage_plan"`     // consomme + reste_a_faire
-	AtterrissageTendance float64         `json:"atterrissage_tendance"` // consomme + rythme_hebdo × semaines_restantes
-	EcartPlan            float64         `json:"ecart_plan"`            // atterrissage_plan − budget
-	EcartTendance        float64         `json:"ecart_tendance"`        // atterrissage_tendance − budget
-	RythmeHebdo          float64         `json:"rythme_hebdo"`          // moyenne € des 4 dernières semaines réalisées
-	SemainesRestantes    int             `json:"semaines_restantes"`    // semaines après as_of jusqu'à fin_plan
-	FinPlan              string          `json:"fin_plan"`              // max date_fin des lignes du CT
-	Statut               PrevisionStatut `json:"statut"`
-	// Fin d'exercice (DECISIONS n° 17) : budget perdu s'il n'est pas consommé à l'échéance.
-	Echeance                   string  `json:"echeance"`                     // fin d'exercice retenue (YYYY-MM-DD)
-	BudgetEcheance             float64 `json:"budget_echeance"`              // pps_echeance + provisions_echeance
-	PPSEcheance                float64 `json:"pps_echeance"`                 // PPS prévu jusqu'à la semaine de l'échéance (+ PPS hors série)
-	ProvisionsEcheance         float64 `json:"provisions_echeance"`          // provisions datées ≤ échéance (ou sans date)
-	ProjectionPlanEcheance     float64 `json:"projection_plan_echeance"`     // consommé + PPS prévu des semaines ]as_of, échéance]
-	ProjectionTendanceEcheance float64 `json:"projection_tendance_echeance"` // consommé + rythme × semaines ]as_of, échéance]
-	NonConsomme                float64 `json:"non_consomme"`                 // max(0, budget_echeance − min des deux projections)
-	NonConsommeSource          string  `json:"non_consomme_source"`          // plan | tendance | "" (rien de non consommé)
-	RythmeNecessaire           float64 `json:"rythme_necessaire"`            // (budget_echeance − consommé) ÷ semaines_echeance ; 0 si aucune semaine
-	SemainesEcheance           int     `json:"semaines_echeance"`            // semaines après as_of jusqu'à l'échéance (incluse)
-	SousConsommation           bool    `json:"sous_consommation"`            // non_consomme > seuils (% et €)
-	// Enveloppe (DECISIONS n° 19) : avec enveloppe, budget = montant, échéance = date_fin,
-	// budget_echeance = montant et tout le prévisionnel porte sur [date_debut, date_fin].
-	Enveloppe             *Enveloppe       `json:"enveloppe"`               // nil = CT non configuré (global : toujours nil)
+	CT                   string           `json:"ct"`
+	CTLibelle            string           `json:"ct_libelle"`
+	Budget               *float64         `json:"budget"`                // montant de l'enveloppe (global : Σ enveloppes) ; null sans enveloppe
+	BudgetSource         string           `json:"budget_source"`         // enveloppe | aucun
+	PPS                  float64          `json:"pps"`                   // Σ PPS des lignes de plan (segments de la timeline), info
+	Provisions           float64          `json:"provisions"`            // Σ provisions restantes (version de provisions retenue), info
+	Consomme             float64          `json:"consomme"`              // Σ TOTAL EN € brut (MO comprise) jusqu'à as_of ; avec enveloppe : dépenses datées dans sa période (+ non datées)
+	PctConsomme          *float64         `json:"pct_consomme"`          // consomme ÷ budget, 0..100+ ; null sans budget ou budget nul
+	ResteAFaire          float64          `json:"reste_a_faire"`         // PPS des semaines postérieures à as_of (avec enveloppe : jusqu'à sa fin)
+	AtterrissagePlan     float64          `json:"atterrissage_plan"`     // consomme + reste_a_faire
+	AtterrissageTendance float64          `json:"atterrissage_tendance"` // consomme + rythme_hebdo × semaines_restantes
+	EcartPlan            *float64         `json:"ecart_plan"`            // atterrissage_plan − budget ; null sans budget
+	EcartTendance        *float64         `json:"ecart_tendance"`        // atterrissage_tendance − budget ; null sans budget
+	RythmeHebdo          float64          `json:"rythme_hebdo"`          // moyenne € des 4 dernières semaines réalisées
+	SemainesRestantes    int              `json:"semaines_restantes"`    // semaines après as_of jusqu'à fin_plan (avec enveloppe : jusqu'à sa fin)
+	FinPlan              string           `json:"fin_plan"`              // max date_fin des lignes du CT
+	Statut               *PrevisionStatut `json:"statut"`                // null sans budget
+	// Échéance = fin de l'enveloppe (global : la plus tardive) ; vides / null sans enveloppe.
+	Echeance                   string   `json:"echeance"`                     // YYYY-MM-DD, "" sans enveloppe
+	BudgetEcheance             *float64 `json:"budget_echeance"`              // = budget
+	ProjectionPlanEcheance     float64  `json:"projection_plan_echeance"`     // consommé + PPS prévu des semaines ]as_of, échéance] (0 sans enveloppe)
+	ProjectionTendanceEcheance float64  `json:"projection_tendance_echeance"` // consommé + rythme × semaines ]as_of, échéance] (0 sans enveloppe)
+	NonConsomme                *float64 `json:"non_consomme"`                 // max(0, budget − min des deux projections) ; null sans budget
+	NonConsommeSource          string   `json:"non_consomme_source"`          // plan | tendance | "" (rien de non consommé ou sans budget)
+	RythmeNecessaire           *float64 `json:"rythme_necessaire"`            // (budget − consommé) ÷ semaines_echeance ; null sans budget, 0 si aucune semaine
+	SemainesEcheance           int      `json:"semaines_echeance"`            // semaines après as_of jusqu'à l'échéance (incluse)
+	SousConsommation           bool     `json:"sous_consommation"`            // non_consomme > seuils (% et €) ; false sans budget
+	// Zone cible [cible_min, budget] : tout consommer sans surconsommer
+	// (DECISIONS n° 20). cible_min = budget − max(seuil_sous_conso_pct % × budget,
+	// seuil_sous_conso_eur), plancher 0 ; null sans budget.
+	CibleMin *float64 `json:"cible_min"`
+	// Enveloppe (DECISIONS n° 19) : tout le prévisionnel porte sur [date_debut, date_fin].
+	Enveloppe             *Enveloppe       `json:"enveloppe"`               // nil = CT sans enveloppe (global : toujours nil)
 	PlanHorsEnveloppe     float64          `json:"plan_hors_enveloppe"`     // PPS prévu hors des semaines de la période (+ PPS hors série)
 	ConsommeHorsEnveloppe float64          `json:"consomme_hors_enveloppe"` // € réalisés datés hors de la période (exclus du consommé)
 	Series                []PrevisionPoint `json:"series"`
@@ -671,11 +672,20 @@ const (
 )
 
 type Previsions struct {
-	AsOf       string             `json:"as_of"`      // dernière date de dépense du réalisé (YYYY-MM-DD), "" si aucune
-	AsOfWeek   string             `json:"as_of_week"` // semaine ISO de as_of
-	Global     PrevisionCT        `json:"global"`     // agrégat (CT = "")
-	ParCT      []PrevisionCT      `json:"par_ct"`     // tri : statut (dépassement d'abord) puis ecart_plan desc
-	Enveloppes EnveloppesSynthese `json:"enveloppes"` // plan de charge face aux enveloppes (DECISIONS n° 19)
+	AsOf          string             `json:"as_of"`          // dernière date de dépense du réalisé (YYYY-MM-DD), "" si aucune
+	AsOfWeek      string             `json:"as_of_week"`     // semaine ISO de as_of
+	Global        PrevisionCT        `json:"global"`         // agrégat des CT avec enveloppe (CT = ""), chacun sur sa période (DECISIONS n° 20)
+	ParCT         []PrevisionCT      `json:"par_ct"`         // tri : statut (dépassement d'abord) puis ecart_plan desc ; CT sans enveloppe en dernier (atterrissage desc)
+	Enveloppes    EnveloppesSynthese `json:"enveloppes"`     // plan de charge face aux enveloppes (DECISIONS n° 19)
+	HorsEnveloppe HorsEnveloppe      `json:"hors_enveloppe"` // CT sans enveloppe : hors du global, rien n'est caché
+}
+
+// HorsEnveloppe : CT de par_ct sans enveloppe (aucun budget, DECISIONS n° 20).
+type HorsEnveloppe struct {
+	NbCT                 int     `json:"nb_ct"`
+	Consomme             float64 `json:"consomme"`
+	AtterrissagePlan     float64 `json:"atterrissage_plan"`
+	AtterrissageTendance float64 `json:"atterrissage_tendance"`
 }
 
 // EnveloppesSynthese : lecture brute (sans compensation entre CT) des CT de

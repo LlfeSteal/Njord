@@ -121,7 +121,7 @@ function BudgetMetrics({ result, rows }: { result: AnalyseResult; rows: CtRow[] 
         sub={
           env && env.nb_configures > 0
             ? todo > 0
-              ? `Enveloppes ${fmtEurShort(env.montant)} (${env.nb_configures} CT) + charge max ${fmtEurShort(rebuilt)} (${todo} CT à configurer)`
+              ? `Enveloppes ${fmtEurShort(env.montant)} (${env.nb_configures} CT) + charge max ${fmtEurShort(rebuilt)} (${todo} CT sans enveloppe)`
               : `Enveloppes des ${env.nb_configures} CT`
             : provisions > 0
               ? `PDC ${fmtEurShort(pps)} + provisions ${fmtEurShort(provisions)}`
@@ -198,13 +198,13 @@ function BudgetTable({
             'atterrissage',
             'Atterrissage',
             true,
-            'Atterrissage plan (consommé + plan restant) à la fin du plan, ou à la fin de l’enveloppe pour un CT configuré',
+            'Atterrissage plan (consommé + plan restant) à la fin du plan, ou à la fin de l’enveloppe pour un CT avec enveloppe',
           )}
           {th(
             'reste',
             'Reste à l’échéance',
             true,
-            'Budget non consommé à l’échéance (fin d’exercice, ou fin de l’enveloppe pour un CT configuré), selon la pire projection (plan ou tendance)',
+            'Budget non consommé à l’échéance (fin d’exercice, ou fin de l’enveloppe pour un CT avec enveloppe), selon la pire projection (plan ou tendance)',
           )}
         </tr>
       </thead>
@@ -401,7 +401,7 @@ function EnveloppeSection({ row }: { row: CtRow }) {
       />
       <p className="pil-note pil-inspector-note">
         <Link to={`/enveloppes?ct=${encodeURIComponent(row.ct)}`} size="sm">
-          Modifier l’enveloppe
+          Voir l’enveloppe
         </Link>
       </p>
     </InspectorSection>
@@ -449,7 +449,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
           <p className="pil-note pil-inspector-note">
             Budget reconstruit (charge max) —{' '}
             <Link to={`/enveloppes?ct=${q}`} size="sm">
-              configurer une enveloppe
+              aucune enveloppe dans le fichier CàT
             </Link>
           </p>
         </InspectorSection>
@@ -606,9 +606,9 @@ export default function BudgetPage() {
             ) : (
               fc && (
                 <p className="pil-note">
-                  Aucune enveloppe saisie : le budget de chaque CT est sa charge max reconstruite (plan de charge + provisions).{' '}
+                  Aucune enveloppe importée : le budget de chaque CT est sa charge max reconstruite (plan de charge + provisions).{' '}
                   <Link to="/enveloppes" size="sm">
-                    Saisir les enveloppes
+                    Importer le fichier CàT
                   </Link>
                 </p>
               )

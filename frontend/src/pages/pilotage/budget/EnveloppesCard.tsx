@@ -103,14 +103,14 @@ function Sentence({ s }: { s: EnveloppesSynthese }) {
       : `${fmtEurShort(Math.abs(s.ecart))} ${s.ecart > 0 ? 'au-dessus' : 'en dessous'} ${one ? 'de son enveloppe' : 'de leurs enveloppes au net'}`;
   return (
     <p className="pil-card-head__sub">
-      Atterrissage {one ? 'du CT configuré' : `des ${nCt(s.nb_configures)} configurés`} : {fmtEurShort(s.atterrissage)} pour{' '}
+      Atterrissage {one ? 'du CT avec enveloppe' : `des ${nCt(s.nb_configures)} avec enveloppe`} : {fmtEurShort(s.atterrissage)} pour{' '}
       {fmtEurShort(s.montant)} d’enveloppe{one ? '' : 's'}, soit {net}
       {parts.length > 0 ? ` · ${parts.join(' · ')}` : ''}
       {todo > 0 && (
         <>
           {' · '}
-          <Link to="/enveloppes?filtre=a_configurer" size="sm">
-            {nCt(todo)} à configurer
+          <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
+            {nCt(todo)} sans enveloppe
           </Link>
         </>
       )}
@@ -248,7 +248,7 @@ export default function EnveloppesCard({ synthese, parCt, onOpen }: EnveloppesCa
       )}
       {truncated && (
         <p className="pil-note">
-          Les {shown.length} plus gros écarts sur {nCt(configured.length)} configurés ; tous les CT sont dans le tableau.
+          Les {shown.length} plus gros écarts sur {nCt(configured.length)} avec enveloppe ; tous les CT sont dans le tableau.
         </p>
       )}
     </Card>

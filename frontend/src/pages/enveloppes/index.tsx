@@ -1,6 +1,7 @@
-// Page « Enveloppes » (/enveloppes) : période d'utilisation et montant de l'enveloppe de chaque CT (DECISIONS n° 18).
-// Liste filtrable ; l'enveloppe se saisit dans l'inspecteur (?ct=<code>).
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+// Page « Enveloppes » (/enveloppes, DECISIONS n° 18) : enveloppes par CT importées du fichier « CàT par CT », en lecture seule.
+// Tableau hiérarchique : une ligne de groupe par catégorie (Σ montants), puis « Hors catégorie », puis « Hors fichier »
+// (CT connus des sources sans enveloppe). Clic sur un CT → inspecteur en lecture seule (?ct=<code>).
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -8,7 +9,6 @@ import {
   Group,
   Page,
   PageToolbar,
-  Pagination,
   SearchField,
   SegmentedControl,
   SkeletonRows,
@@ -16,54 +16,60 @@ import {
   Table,
   useDebouncedValue,
 } from '../../ui';
-import { IconEuro } from '../../ui/Icons';
-import type { EnveloppeCT } from '../../api/types';
+import { IconChevronRight, IconEuro, IconImport } from '../../ui/Icons';
+import type { EnveloppesImport } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
-import { fmtPeriod } from '../../lib/format';
+import { fmtDateTime, fmtPeriod } from '../../lib/format';
 import EnveloppeInspector from './EnveloppeInspector';
-import { fmtMontant, norm, useEnveloppes } from './hooks';
+import ImportEnveloppesModal from './ImportEnveloppesModal';
+import { fmtMontant, groupByCategorie, norm, useEnveloppes, type EnveloppeGroup } from './hooks';
 import { SourcePills } from './shared';
 import './enveloppes.css';
 
-const PAGE_SIZE = 50;
-type ConfigFilter = 'all' | 'todo' | 'done';
+type EnvFilter = 'all' | 'with' | 'without';
+const COLS = 5;
+
+function importLine(imp: EnveloppesImport | null | undefined) {
+  if (!imp) return 'Aucun fichier importé';
+  const parts = [imp.filename, fmtDateTime(imp.importe_le), imp.operateur].filter(Boolean);
+  return `Dernier import : ${parts.join(' · ')}`;
+}
 
 export default function EnveloppesPage() {
   const [sp, setSp] = useSearchParams();
   const openCt = sp.get('ct');
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(norm(search.trim()), 200);
-  // ?filtre=a_configurer (lien « k CT à configurer » de la page Budget) : filtre initial.
-  const [filter, setFilter] = useState<ConfigFilter>(() =>
-    sp.get('filtre') === 'a_configurer' ? 'todo' : sp.get('filtre') === 'configures' ? 'done' : 'all',
+  // ?filtre=sans_enveloppe (lien « k CT sans enveloppe » de la page Budget) : filtre initial.
+  const [filter, setFilter] = useState<EnvFilter>(() =>
+    sp.get('filtre') === 'sans_enveloppe' ? 'without' : sp.get('filtre') === 'avec_enveloppe' ? 'with' : 'all',
   );
-  const [page, setPage] = useState(1);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [importOpen, setImportOpen] = useState(false);
 
   const q = useEnveloppes();
-  const all = useMemo(() => q.data ?? [], [q.data]);
+  const all = useMemo(() => q.data?.cts ?? [], [q.data]);
 
   const matching = useMemo(
-    () => (debounced ? all.filter((r) => norm(r.ct).includes(debounced) || norm(r.ct_libelle).includes(debounced)) : all),
+    () =>
+      debounced
+        ? all.filter(
+            (r) =>
+              norm(r.ct).includes(debounced) ||
+              norm(r.ct_libelle).includes(debounced) ||
+              norm(r.categorie_libelle).includes(debounced),
+          )
+        : all,
     [all, debounced],
   );
-  const rows = useMemo(
+  const nbWithout = useMemo(() => matching.filter((r) => r.enveloppe == null).length, [matching]);
+  const groups = useMemo(
     () =>
-      matching.filter((r) => filter === 'all' || (filter === 'todo' ? r.enveloppe == null : r.enveloppe != null)),
+      groupByCategorie(
+        filter === 'all' ? matching : matching.filter((r) => (filter === 'without' ? r.enveloppe == null : r.enveloppe != null)),
+      ),
     [matching, filter],
   );
-  useEffect(() => setPage(1), [debounced, filter]);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const current = Math.min(page, totalPages);
-  const pageRows = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
-
-  const countTodo = (list: EnveloppeCT[]) => list.filter((r) => r.enveloppe == null).length;
-  const nbTodo = countTodo(matching);
-
-  const subtitle = useMemo(() => {
-    if (!q.data) return undefined;
-    const total = q.data.reduce((s, r) => s + (r.enveloppe?.montant ?? 0), 0);
-    return `${q.data.length} CT · ${countTodo(q.data)} à configurer · ${fmtMontant(total)} d'enveloppes`;
-  }, [q.data]);
 
   const setOpen = (ct: string | null) =>
     setSp((prev) => {
@@ -80,28 +86,51 @@ export default function EnveloppesPage() {
     }
   };
 
+  const toggle = (key: string) =>
+    setCollapsed((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+
+  // Arrivée avec ?ct= (lien « Voir l'enveloppe ») : la ligne est amenée dans la vue une fois la liste chargée.
+  const tableRef = useRef<HTMLDivElement>(null);
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (scrolled.current || !openCt || !q.data) return;
+    scrolled.current = true;
+    const tr = tableRef.current?.querySelector<HTMLElement>(`tr[data-ct="${CSS.escape(openCt)}"]`);
+    tr?.scrollIntoView({ block: 'center' });
+  }, [openCt, q.data]);
+
   const toolbar = (
     <PageToolbar
       title="Enveloppes"
-      subtitle={subtitle}
+      subtitle={q.data ? importLine(q.data.import) : undefined}
+      actions={
+        <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setImportOpen(true)}>
+          Importer le fichier CàT
+        </Button>
+      }
       bottom={
         <Group gap={8} wrap={false}>
           <SearchField
             aria-label="Rechercher un CT"
-            placeholder="CT ou libellé…"
+            placeholder="CT, libellé ou catégorie…"
             value={search}
             onChange={setSearch}
             width={280}
           />
-          <SegmentedControl<ConfigFilter>
-            aria-label="Filtrer par configuration"
+          <SegmentedControl<EnvFilter>
+            aria-label="Filtrer par enveloppe"
             equal={false}
             value={filter}
             onChange={setFilter}
             data={[
               { value: 'all', label: 'Tous' },
-              { value: 'todo', label: 'À configurer', count: nbTodo },
-              { value: 'done', label: 'Configurés' },
+              { value: 'with', label: 'Avec enveloppe' },
+              { value: 'without', label: 'Sans enveloppe', count: nbWithout },
             ]}
           />
           {q.isFetching && !q.isLoading && <Spinner size={12} label="Actualisation" />}
@@ -114,20 +143,19 @@ export default function EnveloppesPage() {
     all.length === 0 ? (
       <EmptyState
         icon={<IconEuro size={40} />}
-        title="Aucun CT"
+        title="Aucune enveloppe"
         action={
-          <Group gap={8}>
-            <Button to="/plan">Plan de charge</Button>
-            <Button to="/realise">Réalisé</Button>
-            <Button to="/provisions">Provisions</Button>
-          </Group>
+          <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setImportOpen(true)}>
+            Importer le fichier CàT
+          </Button>
         }
       >
-        Importez un plan de charge, un réalisé ou des provisions : leurs CT apparaîtront ici.
+        Importez l'export « CàT par CT » : chaque CT y reçoit son enveloppe (période et coût prévisionnel), groupée par
+        catégorie. Les CT du plan de charge, du réalisé et des provisions apparaissent aussi ici.
       </EmptyState>
     ) : (
       <EmptyState icon={<IconEuro size={40} />} title="Aucun CT">
-        Aucun CT ne correspond à la recherche.
+        Aucun CT ne correspond à la recherche ou au filtre.
       </EmptyState>
     );
 
@@ -136,62 +164,107 @@ export default function EnveloppesPage() {
       <ErrorAlert error={q.error} />
       {q.isLoading ? (
         <SkeletonRows rows={8} />
-      ) : q.error && !q.data ? null : pageRows.length === 0 ? (
+      ) : q.error && !q.data ? null : groups.length === 0 ? (
         empty
       ) : (
-        <>
-          <Table hover minWidth={720}>
+        <div ref={tableRef}>
+          <Table hover minWidth={760}>
             <thead>
               <tr>
-                <th style={{ width: 110 }}>CT</th>
+                <th style={{ width: 150 }}>CT</th>
                 <th>Libellé</th>
                 <th style={{ width: 200 }}>Sources</th>
                 <th style={{ width: 210 }}>Période</th>
-                <th data-align="right" style={{ width: 130 }}>
-                  Enveloppe
+                <th data-align="right" style={{ width: 140 }}>
+                  Montant
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {pageRows.map((r) => {
-                const e = r.enveloppe;
-                return (
-                  <tr
-                    key={r.ct}
-                    data-clickable
-                    data-selected={r.ct === openCt || undefined}
-                    tabIndex={0}
-                    onClick={() => setOpen(r.ct)}
-                    onKeyDown={(ev) => onRowKey(ev, r.ct)}
-                  >
-                    <td data-mono data-nowrap>
-                      {r.ct}
-                    </td>
-                    <td className={r.ct_libelle ? 'env-ellipsis' : 'env-ellipsis env-muted'} title={r.ct_libelle || undefined}>
-                      {r.ct_libelle || '—'}
-                    </td>
-                    <td data-nowrap>
-                      <SourcePills sources={r.sources} />
-                    </td>
-                    <td data-nowrap className={e ? undefined : 'env-muted'}>
-                      {e ? fmtPeriod(e.date_debut, e.date_fin) : '—'}
-                    </td>
-                    <td data-align="right" data-nowrap className={e ? undefined : 'env-muted'}>
-                      {e ? fmtMontant(e.montant) : 'À configurer'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
+            {groups.map((g) => {
+              const open = !collapsed.has(g.key);
+              return (
+                <tbody key={g.key}>
+                  <GroupRow group={g} open={open} onToggle={() => toggle(g.key)} />
+                  {open &&
+                    g.rows.map((r) => {
+                      const e = r.enveloppe;
+                      return (
+                        <tr
+                          key={r.ct}
+                          data-ct={r.ct}
+                          data-clickable
+                          data-selected={r.ct === openCt || undefined}
+                          tabIndex={0}
+                          onClick={() => setOpen(r.ct)}
+                          onKeyDown={(ev) => onRowKey(ev, r.ct)}
+                        >
+                          <td data-mono data-nowrap className="env-indent">
+                            {r.ct}
+                          </td>
+                          <td
+                            className={r.ct_libelle ? 'env-ellipsis' : 'env-ellipsis env-muted'}
+                            title={r.ct_libelle || undefined}
+                          >
+                            {r.ct_libelle || '—'}
+                          </td>
+                          <td data-nowrap>
+                            <SourcePills sources={r.sources} />
+                          </td>
+                          <td data-nowrap className={e ? undefined : 'env-muted'}>
+                            {e ? fmtPeriod(e.date_debut, e.date_fin) : '—'}
+                          </td>
+                          <td data-align="right" data-nowrap className={e ? undefined : 'env-muted'}>
+                            {e ? fmtMontant(e.montant) : 'Sans enveloppe'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              );
+            })}
           </Table>
-          <Pagination
-            page={current}
-            total={totalPages}
-            onChange={setPage}
-            summary={totalPages > 1 ? `${rows.length} CT` : undefined}
-          />
-        </>
+        </div>
       )}
+      <ImportEnveloppesModal opened={importOpen} onClose={() => setImportOpen(false)} />
     </Page>
+  );
+}
+
+// ------------------------------------------------------------------ Ligne de groupe
+
+function GroupRow({ group: g, open, onToggle }: { group: EnveloppeGroup; open: boolean; onToggle: () => void }) {
+  const onClick = (e: MouseEvent) => {
+    e.preventDefault();
+    onToggle();
+  };
+  const n = g.rows.length;
+  return (
+    <tr className="env-group" onClick={onClick}>
+      <td colSpan={COLS - 1}>
+        <div className="env-group__head">
+          <button
+            type="button"
+            className="env-group__toggle"
+            aria-expanded={open}
+            aria-label={`${open ? 'Replier' : 'Déplier'} ${g.label}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle();
+            }}
+          >
+            <IconChevronRight size={12} stroke={2.2} />
+          </button>
+          <span className="env-group__label" title={g.label}>
+            {g.label}
+          </span>
+          {g.code && <span className="env-code">{g.code}</span>}
+          {g.kind === 'hors_fichier' && <span className="env-muted">budget reconstruit</span>}
+          <span className="env-muted env-group__count">{n} CT</span>
+        </div>
+      </td>
+      <td data-align="right" data-nowrap className="env-group__sum">
+        {g.kind === 'hors_fichier' ? '' : fmtMontant(g.montant)}
+      </td>
+    </tr>
   );
 }

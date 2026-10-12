@@ -1,99 +1,74 @@
-// Enveloppes par CT (DECISIONS n° 18, 19) : liste, enregistrement, retrait, validation du formulaire.
+// Enveloppes par CT (DECISIONS n° 18, 19) : liste, import du fichier « CàT par CT », regroupement par catégorie.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { enveloppeApi } from '../../api/client';
-import type { Enveloppe, EnveloppeCT, EnveloppeInput, EnveloppeSources } from '../../api/types';
-import { loadOperateur } from '../../components/lifecycle/lifecycleUtils';
+import type { EnveloppeCT } from '../../api/types';
 import { fmtEur } from '../../lib/format';
 import { qk } from '../../lib/queryKeys';
-import { toast } from '../../ui';
 
-/** Liste des CT (triée par CT côté serveur) ; l'inspecteur lit sa ligne ici (pas de route unitaire). */
+/** Dernier import + CT (triés côté serveur) ; l'inspecteur lit sa ligne ici (pas de route unitaire). */
 export function useEnveloppes() {
   return useQuery({ queryKey: qk.enveloppes(), queryFn: enveloppeApi.list });
 }
 
-/** Remplace (ou retire) la ligne d'un CT dans le cache de la liste. */
-function patchList(rows: EnveloppeCT[] | undefined, ct: string, next: EnveloppeCT | null) {
-  if (!rows) return rows;
-  return next ? rows.map((r) => (r.ct === ct ? next : r)) : rows.filter((r) => r.ct !== ct);
+/** Aperçu du fichier : n'écrit rien. Erreurs (422 en-tête / fichier illisible) affichées par l'appelant. */
+export function usePreviewEnveloppes() {
+  return useMutation({ mutationFn: (file: File) => enveloppeApi.preview(file) });
 }
 
-export function hasSource(s: EnveloppeSources) {
-  return s.plan || s.realise || s.provisions;
-}
-
-/** PUT /enveloppes/:ct : met la ligne à jour dans le cache, invalide, notifie. Erreurs affichées par l'appelant. */
-export function useSaveEnveloppe(onSaved?: (row: EnveloppeCT) => void) {
+/** Import confirmé : remplace toutes les enveloppes, puis rafraîchit la page, l'analyse (budget des CT) et le journal. */
+export function useCommitEnveloppes() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ct, body }: { ct: string; body: EnveloppeInput }) =>
-      enveloppeApi.save(ct, { ...body, operateur: loadOperateur() || undefined }),
-    onSuccess: (row, { ct }) => {
-      qc.setQueryData<EnveloppeCT[]>(qk.enveloppes(), (rows) => patchList(rows, ct, row));
+    mutationFn: ({ file, importeur }: { file: File; importeur?: string }) => enveloppeApi.commit(file, importeur),
+    onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.enveloppes() });
       // L'enveloppe remplace la charge max dans l'analyse (DECISIONS n° 19) : Budget et Prévisions à recalculer.
       void qc.invalidateQueries({ queryKey: ['analyse'] });
-      toast({ tone: 'success', title: 'Enveloppe enregistrée.' });
-      onSaved?.(row);
+      void qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });
 }
 
-/** DELETE /enveloppes/:ct : le CT repasse « à configurer », ou quitte la liste s'il n'est plus dans aucun import. */
-export function useRemoveEnveloppe(onRemoved?: (row: EnveloppeCT | null) => void) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (row: EnveloppeCT) => enveloppeApi.remove(row.ct),
-    onSuccess: (_, row) => {
-      const next = hasSource(row.sources) ? { ...row, enveloppe: null } : null;
-      qc.setQueryData<EnveloppeCT[]>(qk.enveloppes(), (rows) => patchList(rows, row.ct, next));
-      void qc.invalidateQueries({ queryKey: qk.enveloppes() });
-      void qc.invalidateQueries({ queryKey: ['analyse'] });
-      toast({ tone: 'success', title: 'Enveloppe retirée.' });
-      onRemoved?.(next);
-    },
-  });
+// ------------------------------------------------------------------ Groupes
+
+export type GroupKind = 'categorie' | 'hors_categorie' | 'hors_fichier';
+
+export interface EnveloppeGroup {
+  /** Code de catégorie, ou clé fixe des deux groupes de fin. */
+  key: string;
+  kind: GroupKind;
+  label: string;
+  /** Code de la ligne de catégorie (…00) ; '' pour les groupes de fin. */
+  code: string;
+  rows: EnveloppeCT[];
+  /** Σ montants des enveloppes du groupe. */
+  montant: number;
 }
 
-// ------------------------------------------------------------------ Formulaire
+export const HORS_CATEGORIE = '__hors_categorie';
+export const HORS_FICHIER = '__hors_fichier';
 
-export interface EnveloppeForm {
-  /** YYYY-MM-DD ou '' */
-  debut: string;
-  fin: string;
-  montant: number | null;
-  commentaire: string;
-}
-
-export type EnveloppeErrors = Partial<Record<keyof EnveloppeForm, string>>;
-
-export function initForm(e: Enveloppe | null | undefined): EnveloppeForm {
-  return e
-    ? { debut: e.date_debut.slice(0, 10), fin: e.date_fin.slice(0, 10), montant: e.montant, commentaire: e.commentaire }
-    : { debut: '', fin: '', montant: null, commentaire: '' };
-}
-
-export function sameForm(a: EnveloppeForm, b: EnveloppeForm) {
-  return a.debut === b.debut && a.fin === b.fin && a.montant === b.montant && a.commentaire.trim() === b.commentaire.trim();
-}
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Mêmes règles que l'API : dates requises (YYYY-MM-DD), fin ≥ début, montant requis, fini et ≥ 0. */
-export function validate(f: EnveloppeForm): EnveloppeErrors {
-  const err: EnveloppeErrors = {};
-  if (!f.debut) err.debut = 'Date de début requise.';
-  else if (!ISO_DATE.test(f.debut)) err.debut = 'Date invalide.';
-  if (!f.fin) err.fin = 'Date de fin requise.';
-  else if (!ISO_DATE.test(f.fin)) err.fin = 'Date invalide.';
-  else if (!err.debut && f.fin < f.debut) err.fin = 'La fin doit être postérieure ou égale au début.';
-  if (f.montant == null) err.montant = 'Montant requis.';
-  else if (!Number.isFinite(f.montant) || f.montant < 0) err.montant = 'Le montant doit être positif ou nul.';
-  return err;
-}
-
-export function toInput(f: EnveloppeForm): EnveloppeInput {
-  return { date_debut: f.debut, date_fin: f.fin, montant: f.montant ?? 0, commentaire: f.commentaire.trim() };
+/** Catégories dans l'ordre du serveur, puis « Hors catégorie », puis « Hors fichier » ; groupes vides omis. */
+export function groupByCategorie(rows: EnveloppeCT[]): EnveloppeGroup[] {
+  const cats = new Map<string, EnveloppeGroup>();
+  const horsCat: EnveloppeGroup = { key: HORS_CATEGORIE, kind: 'hors_categorie', label: 'Hors catégorie', code: '', rows: [], montant: 0 };
+  const horsFichier: EnveloppeGroup = { key: HORS_FICHIER, kind: 'hors_fichier', label: 'Hors fichier', code: '', rows: [], montant: 0 };
+  for (const r of rows) {
+    let g: EnveloppeGroup;
+    if (!r.enveloppe) g = horsFichier;
+    else if (!r.categorie) g = horsCat;
+    else {
+      const found = cats.get(r.categorie);
+      if (found) g = found;
+      else {
+        g = { key: r.categorie, kind: 'categorie', label: r.categorie_libelle || r.categorie, code: r.categorie, rows: [], montant: 0 };
+        cats.set(r.categorie, g);
+      }
+    }
+    g.rows.push(r);
+    g.montant += r.enveloppe?.montant ?? 0;
+  }
+  return [...cats.values(), horsCat, horsFichier].filter((g) => g.rows.length > 0);
 }
 
 /** Recherche insensible à la casse et aux accents. */
@@ -101,3 +76,6 @@ export const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu,
 
 /** Montant : centimes seulement s'il y en a. */
 export const fmtMontant = (v: number) => fmtEur(v, !Number.isInteger(v));
+
+/** « 1 enveloppe » / « 3 enveloppes ». */
+export const nEnveloppes = (n: number) => `${n.toLocaleString('fr-FR')} enveloppe${n > 1 ? 's' : ''}`;

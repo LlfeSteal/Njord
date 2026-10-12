@@ -214,12 +214,12 @@ function MethodNote({ fc }: { fc: Previsions }) {
         vigueur). Tendance = réalisé à date + rythme moyen des 4 dernières semaines. Données arrêtées au {fmtDate(fc.as_of)}.
       </p>
       <p className="pil-note">
-        Enveloppes (Données › Enveloppes) : pour un CT configuré, le budget est le montant de son enveloppe et tout le prévisionnel porte sur sa
+        Enveloppes (Données › Enveloppes) : pour un CT avec enveloppe (fichier CàT), le budget est le montant de son enveloppe et tout le prévisionnel porte sur sa
         période (semaines de début et de fin incluses) : consommé = réalisé daté dans la période, atterrissage = consommé + plan restant de la
         période, échéance = fin de l’enveloppe. Le réalisé et le plan hors période sont montrés à part ; les provisions restent une marge
         disponible. Dépassement si l’atterrissage dépasse l’enveloppe ; sous-consommation si le non consommé à la fin de l’enveloppe dépasse les
         seuils. Périmètre = somme des CT, chacun sur son budget et son échéance.{' '}
-        {env ? `${nbEnv} CT configuré${nbEnv > 1 ? 's' : ''} sur ${env.nb_ct}.` : ''}
+        {env ? `${nbEnv} CT avec enveloppe sur ${env.nb_ct}.` : ''}
       </p>
       {e && (
         <p className="pil-note">

@@ -12,12 +12,100 @@
   color: var(--text-secondary);
 }
 
+/* Code de catégorie : monospace secondaire. */
+.env-code {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Sources du CT : pastilles neutres sur une ligne. */
 .env-sources {
   display: inline-flex;
   flex-wrap: nowrap;
   gap: 4px;
   vertical-align: middle;
+}
+
+/* Ligne de groupe (catégorie, Hors catégorie, Hors fichier) sur --fill. */
+.ui-table tr.env-group > td {
+  background-color: var(--fill);
+  border-top: 0.5px solid var(--separator);
+  cursor: pointer;
+}
+
+.env-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.env-group__toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.env-group__toggle:hover {
+  background: var(--fill);
+}
+
+.env-group__toggle svg {
+  transition: transform 0.2s var(--ease);
+}
+
+.env-group__toggle[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+
+.env-group__label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.env-group__count {
+  flex: none;
+  font-size: 12px;
+}
+
+.env-group__sum {
+  font-weight: 600;
+}
+
+/* CT sous sa catégorie : retrait 24 px (aligné sur le libellé du groupe). */
+.ui-table td.env-indent {
+  padding-left: 36px;
+}
+
+/* Catégorie dans l'inspecteur : libellé + code. */
+.env-cat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.env-ellipsis-inline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Aide courte dans l'inspecteur. */

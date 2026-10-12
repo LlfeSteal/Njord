@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Charge toute la démo Njord par l'API : timeline du plan de charge (6 versions),
-# réalisé, provisions, puis les enveloppes par CT de demo_enveloppes.csv.
+# réalisé, provisions, puis les enveloppes par CT (demo_cat.xlsx, format « CàT par CT »).
 # Voir test_data_demo/enveloppes/README.md.
 set -euo pipefail
 
@@ -10,7 +10,7 @@ IMPORTEUR="seed-demo"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO="$(cd "$HERE/.." && pwd)"
-CSV="$HERE/demo_enveloppes.csv"
+CAT="$HERE/demo_cat.xlsx"
 
 usage() {
 	cat <<EOF
@@ -21,9 +21,10 @@ http://localhost:8080/api ; actuel : $API).
 
   (sans option)       base vide attendue : importe les 6 versions du plan de charge
                       (timeline, avec leurs dates d'effet), le réalisé, les
-                      provisions, puis enregistre les enveloppes par CT.
-  --enveloppes-only   enregistre seulement les enveloppes de demo_enveloppes.csv
-                      (PUT /enveloppes/:ct, rejouable : upsert).
+                      provisions, puis importe les enveloppes par CT.
+  --enveloppes-only   importe seulement les enveloppes de demo_cat.xlsx
+                      (POST /enveloppes/import, rejouable : chaque import
+                      remplace toutes les enveloppes).
   --help              affiche cette aide.
 
 Exemple : API=http://localhost:8091/api $0
@@ -136,58 +137,18 @@ EOF
 	import_file provision "$DEMO/demo_provision.xlsx" "Provisions démo octobre 2026"
 }
 
-# Une ligne « CT<TAB>JSON » par enveloppe du CSV (JSON construit par json.dumps).
-enveloppes_json() {
-	python3 - "$CSV" "$IMPORTEUR" <<'PY'
-import csv, json, sys
-path, operateur = sys.argv[1], sys.argv[2]
-with open(path, encoding="utf-8-sig", newline="") as f:
-    for n, row in enumerate(csv.DictReader(f, delimiter=";"), start=2):
-        ct = (row.get("ct") or "").strip()
-        if not ct:
-            continue
-        try:
-            montant = float((row.get("montant") or "").strip().replace(",", "."))
-        except ValueError:
-            sys.exit(f"{path}:{n} : montant invalide pour {ct}")
-        body = {
-            "date_debut": (row.get("date_debut") or "").strip(),
-            "date_fin": (row.get("date_fin") or "").strip(),
-            "montant": montant,
-            "commentaire": (row.get("commentaire") or "").strip(),
-            "operateur": operateur,
-        }
-        print(ct + "\t" + json.dumps(body, ensure_ascii=False))
-PY
-}
-
-put_enveloppes() {
-	[ -f "$CSV" ] || { echo "ERREUR : fichier introuvable : $CSV" >&2; exit 1; }
-	local lines ct body ko=0 total=0
-	lines="$(enveloppes_json)"
-	echo "Enveloppes ($(basename "$CSV")) :"
-	while IFS=$'\t' read -r ct body; do
-		[ -n "$ct" ] || continue
-		total=$((total + 1))
-		req PUT "/enveloppes/$ct" -H 'Content-Type: application/json' --data-binary "$body"
-		case "$CODE" in
-		2??) printf '  %-12s ok\n' "$ct" ;;
-		*)
-			ko=$((ko + 1))
-			printf '  %-12s ERREUR HTTP %s : %s\n' "$ct" "$CODE" "$(tr -d '\n' <"$BODY")"
-			;;
-		esac
-	done <<<"$lines"
-	if [ "$ko" -gt 0 ]; then
-		echo "ERREUR : $ko enveloppe(s) sur $total non enregistrée(s)." >&2
-		[ "$MODE" = enveloppes ] && echo "Les imports ont-ils été faits ? (404 = CT inconnu des sources)" >&2
-		exit 1
-	fi
-	echo "$total enveloppe(s) enregistrée(s)."
+# Import du fichier « CàT par CT » : remplace toutes les enveloppes (DECISIONS n° 18).
+import_enveloppes() {
+	[ -f "$CAT" ] || { echo "ERREUR : fichier introuvable : $CAT (le générer : voir README.md)" >&2; exit 1; }
+	echo "Enveloppes ($(basename "$CAT")) :"
+	must POST /enveloppes/import -F "file=@$CAT" -F "importeur=$IMPORTEUR"
+	local resume
+	resume="$(json_get '"%s ok, %s warn, %s drop" % (d["ok"], d["warn"], d["drop"]) + "".join(" ; %s × %s" % (n, m) for m, n in sorted((d.get("motifs_count") or {}).items()))' 2>/dev/null || echo "importé")"
+	echo "  $resume"
 }
 
 check_health
 if [ "$MODE" = all ]; then
 	import_all
 fi
-put_enveloppes
+import_enveloppes

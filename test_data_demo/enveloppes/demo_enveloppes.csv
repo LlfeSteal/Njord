@@ -1,13 +1,14 @@
-ct;date_debut;date_fin;montant;commentaire
-Y99F90001;2026-01-01;2026-12-31;108000;Enveloppe 2026 votée en CODIR (démo)
-Y99F900012;2026-01-01;2026-12-31;79000;Budget aléas 2026, revu en comité trimestriel (démo)
-Y99F900014;2026-01-01;2026-12-31;0;Aucun achat prévu en 2026 (démo)
-Y99F900015;2027-01-01;2027-12-31;40000;Fonds de transformation 2027, pré-arbitré (démo)
-Y99F90002;2026-01-01;2026-09-30;15000;Plateforme cloud décommissionnée fin septembre (démo)
-Y99F90003;2026-01-01;2026-12-31;100000;Enveloppe Data 2026 (démo)
-Y99F90006;2026-01-01;2026-12-31;130000;Enveloppe DevEx 2026 votée en CODIR (démo)
-Y99F90007;2026-09-01;2026-11-30;72000;Lot MBSE de l'automne, clos au 30/11 (démo)
-Y99F90008;2026-01-01;2026-12-31;50000;Enveloppe architecture 2026 réduite (démo)
-Y99F90601;2026-01-01;2026-12-31;31000;Plan de formation 2026 (démo)
-Y99F90602;2026-01-01;2026-12-31;38000;Support 24/7 : enveloppe initiale avant extension (démo)
-Y99F90701;2027-01-01;2027-03-31;4000;Pilote IA du T1 2027 (démo)
+categorie;categorie_libelle;ct;libelle;date_debut;date_fin;montant
+Y99F91000;Socle produit & plateforme (démo);Y99F90001;Alpha Core Team;2026-01-01;2026-12-31;108000
+Y99F91000;Socle produit & plateforme (démo);Y99F90002;Platform Cloud;2026-01-01;2026-09-30;15000
+Y99F91000;Socle produit & plateforme (démo);Y99F90003;Data Stack - management de la donnée;2026-01-01;2026-12-31;100000
+Y99F91000;Socle produit & plateforme (démo);Y99F90006;Squad Development Experience;2026-01-01;2026-12-31;130000
+Y99F92000;Ingénierie & architecture (démo);Y99F90007;Intégration système & MBSE;2026-09-01;2026-11-30;72000
+Y99F92000;Ingénierie & architecture (démo);Y99F90008;Comité d'Architecture;2026-01-01;2026-12-31;50000
+Y99F92000;Ingénierie & architecture (démo);Y99F90701;Pilote IA générative;2027-01-01;2027-03-31;4000
+Y99F93000;Services transverses (démo);Y99F90601;Squad Académie & Montée en compétence;2026-01-01;2026-12-31;31000
+Y99F93000;Services transverses (démo);Y99F90602;Support exploitation 24/7;2026-01-01;2026-12-31;38000
+Y99F94000;Réserves, achats & transformation (démo);Y99F900012;Provisions pour aléas;2026-01-01;2026-12-31;79000
+Y99F94000;Réserves, achats & transformation (démo);Y99F900013;Prestations externes (A NE PAS UTILISER);;;0
+Y99F94000;Réserves, achats & transformation (démo);Y99F900014;Achats non stockables;2026-01-01;2026-12-31;0
+Y99F94000;Réserves, achats & transformation (démo);Y99F900015;Fonds de transformation;2027-01-01;2027-12-31;40000

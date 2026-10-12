@@ -215,7 +215,7 @@ type RealiseEntriesPage struct {
 
 // ---------------------------------------------------------------------------
 // Provisions (DECISIONS n° 16) : fonds disponibles non engagés, par CT.
-// charge max d'un CT = Σ PPS du plan + Σ provisions ; budget = Σ charge max.
+// Informatives : le budget d'un CT est l'enveloppe du fichier (DECISIONS n° 20).
 
 type ProvisionLine struct {
 	ID        int64  `json:"id"`

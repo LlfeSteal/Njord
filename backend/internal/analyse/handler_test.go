@@ -474,9 +474,17 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 	if ctx.DefaultProvisionID != nil || ctx.ProvisionVersions == nil || len(ctx.ProvisionVersions) != 0 {
 		t.Errorf("context sans provisions : %+v / %v", ctx.ProvisionVersions, ctx.DefaultProvisionID)
 	}
+	// Provisions informatives (DECISIONS n° 20) : Σ des provisions des CT, jamais un budget.
+	provs := func(res domain.AnalyseResult) float64 {
+		sum := 0.0
+		for _, p := range res.Previsions.ParCT {
+			sum += p.Provisions
+		}
+		return sum
+	}
 	sans := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
 	gs := sans.Previsions.Global
-	if sans.Meta.ProvisionVersion != nil || gs.Provisions != 0 || gs.Budget != gs.PPS || gs.Budget != 10000 {
+	if sans.Meta.ProvisionVersion != nil || provs(sans) != 0 || gs.BudgetSource != "aucun" || gs.Budget != nil {
 		t.Fatalf("sans provisions : meta %+v, global %+v", sans.Meta.ProvisionVersion, gs)
 	}
 	// Id explicite sans aucune version de provisions → 404.
@@ -495,19 +503,17 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov1" {
 		t.Fatalf("meta.provision_version : %+v", res.Meta.ProvisionVersion)
 	}
-	if gl.PPS != gs.PPS || gl.Provisions != 140000 || gl.Budget != gs.Budget+140000 ||
-		gl.AtterrissagePlan != gs.AtterrissagePlan || gl.ResteAFaire != gs.ResteAFaire {
-		t.Errorf("global : %+v (sans : %+v)", gl, gs)
+	he, hs := res.Previsions.HorsEnveloppe, sans.Previsions.HorsEnveloppe
+	hs.NbCT++ // Y99F900015, présent seulement dans les provisions
+	if provs(res) != 140000 || gl.Budget != nil || he != hs {
+		t.Errorf("global : %+v, hors enveloppe %+v (sans : %+v)", gl, res.Previsions.HorsEnveloppe, sans.Previsions.HorsEnveloppe)
 	}
-	p12 := findCT(t, res.Previsions, "Y99F900012")
-	if p12.PPS != 5000 || p12.Provisions != 100000 || p12.Budget != 105000 || p12.Statut != domain.PrevisionOK {
+	p12, s12 := findCT(t, res.Previsions, "Y99F900012"), findCT(t, sans.Previsions, "Y99F900012")
+	if p12.PPS != 5000 || p12.Provisions != 100000 || p12.Budget != nil || p12.Statut != nil || p12.AtterrissagePlan != s12.AtterrissagePlan {
 		t.Errorf("Y99F900012 : %+v", p12)
 	}
-	if s12 := findCT(t, sans.Previsions, "Y99F900012"); s12.Statut != domain.PrevisionDepassement {
-		t.Errorf("Y99F900012 sans provisions : %+v", s12)
-	}
 	p15 := findCT(t, res.Previsions, "Y99F900015")
-	if p15.CTLibelle != "Fonds de transformation" || p15.Budget != 40000 || p15.Consomme != 0 || p15.Statut != domain.PrevisionOK {
+	if p15.CTLibelle != "Fonds de transformation" || p15.Provisions != 40000 || p15.Budget != nil || p15.Consomme != 0 || p15.Statut != nil {
 		t.Errorf("Y99F900015 (provisions seules) : %+v", p15)
 	}
 	var b15 *domain.BudgetCT
@@ -516,15 +522,15 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 			b15 = &res.Budget.ParCT[i]
 		}
 	}
-	if b15 == nil || b15.ChargeMax != 40000 || b15.Provisions != 40000 {
+	if b15 == nil || b15.PPSPlan != 0 || b15.Provisions != 40000 {
 		t.Errorf("budget Y99F900015 : %+v", b15)
 	}
 	nat := 0.0
 	for _, n := range res.Budget.ParNature {
-		nat += n.Budget
+		nat += n.Provisions
 	}
-	if nat != gl.Budget {
-		t.Errorf("Σ natures.budget %v ≠ budget %v", nat, gl.Budget)
+	if nat != 140000 {
+		t.Errorf("Σ natures.provisions %v", nat)
 	}
 	var params string
 	e.st.DB().QueryRow(`SELECT params FROM analyse_last_result WHERE id = 1`).Scan(&params)
@@ -534,8 +540,8 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 
 	// Version archivée choisie explicitement.
 	res = decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse?provision_version_id=prov0", nil))
-	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov0" || res.Previsions.Global.Budget != gs.Budget+500 {
-		t.Errorf("prov0 : %+v, budget %v", res.Meta.ProvisionVersion, res.Previsions.Global.Budget)
+	if res.Meta.ProvisionVersion == nil || res.Meta.ProvisionVersion.ID != "prov0" || provs(res) != 500 {
+		t.Errorf("prov0 : %+v, provisions %v", res.Meta.ProvisionVersion, provs(res))
 	}
 	// Inconnue ou purgée → 404, y compris pour les exports qui partagent les paramètres.
 	for _, path := range []string{"/api/analyse?provision_version_id=nope", "/api/analyse?provision_version_id=prov9",
@@ -548,15 +554,15 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 		t.Errorf("ecarts.csv avec provisions : %d", w.Code)
 	}
 
-	// Plus de version active : retour au budget = Σ PPS, sans 409.
+	// Plus de version active : plus de provisions, sans 409.
 	e.exec(`UPDATE versions SET statut = 'archivee' WHERE id = 'prov1'`)
 	w := e.do("GET", "/api/analyse", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("sans provision active : %d %s", w.Code, w.Body.String())
 	}
 	res = decode[domain.AnalyseResult](t, w)
-	if res.Meta.ProvisionVersion != nil || res.Previsions.Global.Budget != gs.Budget {
-		t.Errorf("sans provision active : %+v, budget %v", res.Meta.ProvisionVersion, res.Previsions.Global.Budget)
+	if res.Meta.ProvisionVersion != nil || provs(res) != 0 {
+		t.Errorf("sans provision active : %+v, provisions %v", res.Meta.ProvisionVersion, provs(res))
 	}
 	e.st.DB().QueryRow(`SELECT params FROM analyse_last_result WHERE id = 1`).Scan(&params)
 	if !strings.Contains(params, `"provision_version_id":""`) {
@@ -568,20 +574,27 @@ func TestHandlerAnalyseEnveloppes(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
 	sans := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
-	if p := findCT(t, sans.Previsions, "Y99F90001"); p.BudgetSource != "charge_max" || p.Enveloppe != nil || p.Budget != 1000 {
+	if p := findCT(t, sans.Previsions, "Y99F90001"); p.BudgetSource != "aucun" || p.Enveloppe != nil || p.Budget != nil || p.Statut != nil {
 		t.Fatalf("sans enveloppe : %+v", p)
+	}
+	if g := sans.Previsions.Global; g.BudgetSource != "aucun" || g.Budget != nil || sans.Previsions.HorsEnveloppe.NbCT != len(sans.Previsions.ParCT) {
+		t.Fatalf("global sans enveloppe : %+v", g)
 	}
 	e.exec(`INSERT INTO enveloppes(ct, categorie, categorie_libelle, date_debut, date_fin, montant) VALUES (?,?,?,?,?,?)`,
 		"Y99F90001", "Y99F90000", "Socle", "2026-09-01", "2026-12-31", 5000)
 	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
 	pv := res.Previsions
 	p := findCT(t, pv, "Y99F90001")
-	if p.BudgetSource != "enveloppe" || p.Budget != 5000 || p.ChargeMax != 1000 || p.Enveloppe == nil ||
-		p.Enveloppe.DateDebut != "2026-09-01" || p.Enveloppe.DateFin != "2026-12-31" || p.Echeance != "2026-12-31" || p.BudgetEcheance != 5000 {
+	if p.BudgetSource != "enveloppe" || fv(p.Budget) != 5000 || p.Enveloppe == nil || p.Enveloppe.DateDebut != "2026-09-01" ||
+		p.Enveloppe.DateFin != "2026-12-31" || p.Echeance != "2026-12-31" || fv(p.BudgetEcheance) != 5000 || p.Statut == nil ||
+		fv(p.CibleMin) != 0 {
 		t.Errorf("Y99F90001 : %+v", p)
 	}
-	if pv.Global.BudgetSource != "mixte" || pv.Global.Budget != sans.Previsions.Global.Budget+4000 ||
-		pv.Enveloppes.NbConfigures != 1 || pv.Enveloppes.Montant != 5000 || pv.Enveloppes.NbCT != len(pv.ParCT) {
-		t.Errorf("global %q / %v, synthèse %+v", pv.Global.BudgetSource, pv.Global.Budget, pv.Enveloppes)
+	// Global = le seul CT avec enveloppe ; les autres sont résumés hors enveloppe.
+	gl := pv.Global
+	if gl.BudgetSource != "enveloppe" || fv(gl.Budget) != 5000 || gl.Consomme != p.Consomme || gl.AtterrissagePlan != p.AtterrissagePlan ||
+		pv.Enveloppes.NbConfigures != 1 || pv.Enveloppes.Montant != 5000 || pv.Enveloppes.NbCT != len(pv.ParCT) ||
+		pv.HorsEnveloppe.NbCT != len(pv.ParCT)-1 {
+		t.Errorf("global %+v, synthèse %+v, hors enveloppe %+v", gl, pv.Enveloppes, pv.HorsEnveloppe)
 	}
 }

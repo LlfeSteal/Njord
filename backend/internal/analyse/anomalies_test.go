@@ -108,34 +108,46 @@ func TestAnomaliesDemo(t *testing.T) {
 	if byCat[domain.AnomalieEcart] == 0 {
 		t.Error("aucune anomalie écart")
 	}
-	// Fin d'exercice (DECISIONS n° 17) exposée par /analyse ; une anomalie par CT en sous-consommation.
-	if g := res.Previsions.Global; g.Echeance != "2026-12-31" || g.BudgetEcheance <= 0 || g.SemainesEcheance != 13 {
-		t.Errorf("fin d'exercice globale : %+v", g)
+	// Sans enveloppe (DECISIONS n° 20) : aucun budget, donc aucune anomalie budget ;
+	// le global est vide et les CT sont résumés hors enveloppe.
+	if byCat[domain.AnomalieBudget] != 0 {
+		t.Errorf("%d anomalies budget sans enveloppe", byCat[domain.AnomalieBudget])
 	}
-	keys := map[string]bool{}
-	for _, a := range res.Anomalies {
-		keys[a.Key] = true
+	if g := res.Previsions.Global; g.BudgetSource != "aucun" || g.Budget != nil || g.Echeance != "" || len(g.Series) != 0 {
+		t.Errorf("global sans enveloppe : %+v", g)
 	}
-	for _, p := range res.Previsions.ParCT {
-		if k := anomalieKey("budget_sous_conso", p.CT); keys[k] != p.SousConsommation {
-			t.Errorf("%s : anomalie %v, sous-consommation %v", k, keys[k], p.SousConsommation)
+	if he := res.Previsions.HorsEnveloppe; he.NbCT != len(res.Previsions.ParCT) || he.NbCT == 0 {
+		t.Errorf("hors enveloppe : %+v", he)
+	}
+	body := w.Body.String()
+	for _, f := range []string{`"cible_min"`, `"hors_enveloppe"`, `"non_consomme_source"`, `"prevu"`} {
+		if !strings.Contains(body, f) {
+			t.Errorf("champ %s absent du JSON", f)
 		}
 	}
-	if !strings.Contains(w.Body.String(), `"non_consomme_source"`) || !strings.Contains(w.Body.String(), `"projection_tendance_echeance"`) {
-		t.Error("champs de fin d'exercice absents du JSON")
+	for _, f := range []string{`"charge_max"`, `"pps_echeance"`, `"provisions_echeance"`, `"mixte"`} {
+		if strings.Contains(body, f) {
+			t.Errorf("champ supprimé %s présent dans le JSON", f)
+		}
 	}
-	// Analyse budgétaire (DECISIONS n° 10) : 5 natures dont Σ = budget et consommé des prévisions.
+	// Analyse par nature (DECISIONS n° 10 et 20) : 5 natures, Σ PPS = PPS des CT, Σ réalisé = consommé des CT.
 	if pn := res.Budget.ParNature; len(pn) != 5 || pn[0].Nature != "provision" || pn[0].PPS < 85000 {
 		t.Errorf("par nature : %+v", pn)
 	} else {
-		var pps, reel float64
+		var pps, reel, ctPPS float64
 		for _, n := range pn {
 			pps += n.PPS
 			reel += n.Realise
+			if !near(n.Prevu, n.PPS+n.Provisions, 0.02) {
+				t.Errorf("%s : prévu %v ≠ pps + provisions", n.Nature, n.Prevu)
+			}
 		}
-		g := res.Previsions.Global
-		if math.Abs(pps-g.Budget) > 0.05 || math.Abs(reel-g.Consomme) > 0.05 {
-			t.Errorf("Σ natures PPS %.2f / réalisé %.2f, prévisions %.2f / %.2f", pps, reel, g.Budget, g.Consomme)
+		for _, p := range res.Previsions.ParCT {
+			ctPPS += p.PPS
+		}
+		he := res.Previsions.HorsEnveloppe
+		if math.Abs(pps-ctPPS) > 0.05 || math.Abs(reel-he.Consomme) > 0.05 {
+			t.Errorf("Σ natures PPS %.2f / réalisé %.2f, prévisions %.2f / %.2f", pps, reel, ctPPS, he.Consomme)
 		}
 		t.Logf("par nature : %+v", pn)
 	}
@@ -317,14 +329,20 @@ func TestAnomaliesSuiviCycle(t *testing.T) {
 func TestAnomaliesBudget(t *testing.T) {
 	plan := &domain.Version{ID: "plan1"}
 	real := &domain.Version{ID: "real1"}
+	f := func(v float64) *float64 { return &v }
+	st := func(v domain.PrevisionStatut) *domain.PrevisionStatut { return &v }
+	env := &domain.Enveloppe{DateDebut: "2026-01-01", DateFin: "2026-12-31", Montant: 10000}
 	res := domain.AnalyseResult{
 		Meta: domain.AnalyseMeta{PlanVersion: plan, RealiseVersion: real},
 		Previsions: domain.Previsions{ParCT: []domain.PrevisionCT{
-			{CT: "CT1", CTLibelle: "CT1 - Socle", Budget: 10000, AtterrissagePlan: 12500, AtterrissageTendance: 15000,
-				EcartPlan: 2500, EcartTendance: 5000, Statut: domain.PrevisionDepassement},
-			{CT: "CT2", Budget: 10000, AtterrissagePlan: 9600, AtterrissageTendance: 10800,
-				EcartPlan: -400, EcartTendance: 800, Statut: domain.PrevisionVigilance},
-			{CT: "CT3", Budget: 10000, AtterrissagePlan: 8000, AtterrissageTendance: 8000, EcartPlan: -2000, EcartTendance: -2000, Statut: domain.PrevisionOK},
+			{CT: "CT1", CTLibelle: "CT1 - Socle", Budget: f(10000), AtterrissagePlan: 12500, AtterrissageTendance: 15000,
+				EcartPlan: f(2500), EcartTendance: f(5000), Statut: st(domain.PrevisionDepassement), Enveloppe: env},
+			{CT: "CT2", Budget: f(10000), AtterrissagePlan: 9600, AtterrissageTendance: 10800,
+				EcartPlan: f(-400), EcartTendance: f(800), Statut: st(domain.PrevisionVigilance), Enveloppe: env},
+			{CT: "CT3", Budget: f(10000), AtterrissagePlan: 8000, AtterrissageTendance: 8000, EcartPlan: f(-2000), EcartTendance: f(-2000),
+				Statut: st(domain.PrevisionOK), Enveloppe: env},
+			// Sans enveloppe (DECISIONS n° 20) : aucun budget, aucune anomalie, même avec du consommé.
+			{CT: "CT4", BudgetSource: "aucun", Consomme: 5000, AtterrissagePlan: 5000, AtterrissageTendance: 9000},
 		}},
 	}
 	r := &run{s: domain.Settings{SeuilCTRisqueEur: 10000}}
@@ -341,7 +359,7 @@ func TestAnomaliesBudget(t *testing.T) {
 	if a.Titre != "Atterrissage · CT1 : dépassement prévu (+"+fmtEur(2500)+")" {
 		t.Errorf("titre : %q", a.Titre)
 	}
-	if a.Detail != "Atterrissage prévu 12 500 € pour un budget de 10 000 € (tendance 15 000 €)" {
+	if a.Detail != "Atterrissage prévu "+fmtEur(12500)+" pour une enveloppe de "+fmtEur(10000)+" (01/01/2026 → 31/12/2026) (tendance "+fmtEur(15000)+")" {
 		t.Errorf("detail : %q", a.Detail)
 	}
 	if b.Key != "budget|CT2" || b.Gravite != 2 || *b.Montant != 800 {

@@ -488,10 +488,11 @@ func TestQualite(t *testing.T) {
 	rw := mo("CTA", "DURAND Claire", 100, "2026-09-09")
 	rw.StatutParsing = domain.ParsingWarn
 	in.Entries = []domain.RealiseEntry{late, rw, sansNom, illisible, sansTG, mo("CTA", "MARTIN Théo", 1, "2026-09-10")}
+	in.Enveloppes = map[string]domain.Enveloppe{"CTA": fcEnv("2026-01-01", "2026-12-31", 200000)}
 	res := Run(in, store.DefaultSettings())
 
 	want := map[string]struct{ regle, count int }{
-		"tg_ecart_budget":     {1, 1}, // réalisé 22 500 € vs PPS 200 000 €
+		"tg_ecart_budget":     {1, 1}, // réalisé 22 500 € vs enveloppe 200 000 €
 		"mo_quantite_semaine": {2, 1}, // DURAND 220 h en W37
 		"sans_tg":             {4, 1},
 		"cloture":             {5, 1},
@@ -654,7 +655,7 @@ func TestBudgetParNature(t *testing.T) {
 	var pps, reel float64
 	for i, w := range want {
 		n := res.Budget.ParNature[i]
-		if n.Nature != w.nature || n.PPS != w.pps || n.Realise != w.realise || n.Libelle == "" {
+		if n.Nature != w.nature || n.PPS != w.pps || n.Realise != w.realise || n.Libelle == "" || n.Prevu != w.pps {
 			t.Errorf("%s : %+v, attendu PPS %.0f réalisé %.0f", w.nature, n, w.pps, w.realise)
 		}
 		pps += n.PPS
@@ -918,52 +919,65 @@ func TestBudgetProvisions(t *testing.T) {
 	for _, b := range res.Budget.ParCT {
 		byCT[b.CT] = b
 	}
-	if b := byCT["CTA"]; b.PPSPlan != 5000 || b.Provisions != 1535 || b.ChargeMax != 6535 {
+	if b := byCT["CTA"]; b.PPSPlan != 5000 || b.Provisions != 1535 {
 		t.Errorf("CTA : %+v", b)
 	}
-	if b, ok := byCT["CTQ"]; !ok || b.PPSPlan != 0 || b.Provisions != 400 || b.ChargeMax != 400 || b.CTLibelle != "Fonds" {
+	if b, ok := byCT["CTQ"]; !ok || b.PPSPlan != 0 || b.Provisions != 400 || b.CTLibelle != "Fonds" {
 		t.Errorf("CTQ (provisions seules) : %+v", b)
 	}
-	if b := byCT["CTR"]; b.Provisions != 1000 || b.ChargeMax != 1000 {
+	if b := byCT["CTR"]; b.Provisions != 1000 {
 		t.Errorf("CTR : %+v", b)
 	}
 
+	// Natures (DECISIONS n° 20) : prévu = PPS + provisions, une dépense prévue et non un budget.
 	want := []struct {
 		nature          string
 		pps, provisions float64
 	}{
 		{"provision", 0, 10300}, {"mo", 5000, 0}, {"capacite", 0, 1035}, {"frais", 0, 250}, {"autres", 0, 1400},
 	}
-	var budget float64
+	var prevu float64
 	for i, w := range want {
 		n := res.Budget.ParNature[i]
-		if n.Nature != w.nature || n.PPS != w.pps || n.Provisions != w.provisions || n.Budget != w.pps+w.provisions {
+		if n.Nature != w.nature || n.PPS != w.pps || n.Provisions != w.provisions || n.Prevu != w.pps+w.provisions {
 			t.Errorf("%s : %+v, attendu PPS %.0f provisions %.0f", w.nature, n, w.pps, w.provisions)
 		}
-		budget += n.Budget
+		prevu += n.Prevu
 	}
 	if n := res.Budget.ParNature[1]; n.PctConsomme == nil || *n.PctConsomme != 20 {
 		t.Errorf("mo : %% consommé %v", n.PctConsomme)
 	}
 	if n := res.Budget.ParNature[4]; n.PctConsomme == nil || *n.PctConsomme != round2(150000.0/1400*100) {
-		t.Errorf("autres : %% consommé sur le budget %v", n.PctConsomme)
+		t.Errorf("autres : %% consommé sur le prévu %v", n.PctConsomme)
 	}
-	if gl := res.Previsions.Global; budget != gl.Budget || gl.Budget != 5000+12985 {
-		t.Errorf("Σ natures.budget %.2f ≠ budget global %.2f", budget, gl.Budget)
+	if prevu != 5000+12985 {
+		t.Errorf("Σ natures.prevu %.2f", prevu)
+	}
+	// Sans enveloppe : ni budget global, ni règle qualité 1, ni anomalie budget (provisions ou pas).
+	if gl := res.Previsions.Global; gl.BudgetSource != "aucun" || gl.Budget != nil {
+		t.Errorf("global sans enveloppe : %+v", gl)
+	}
+	if q := findQual(res, "tg_ecart_budget"); q != nil {
+		t.Errorf("tg_ecart_budget sans enveloppe : %+v", q)
+	}
+	for _, a := range res.Anomalies {
+		if a.Categorie == domain.AnomalieBudget {
+			t.Errorf("anomalie budget sans enveloppe : %+v", a)
+		}
 	}
 
-	// Règle qualité 1 : CTR (réalisé + provisions, sans plan) comparé à sa charge max.
+	// Avec une enveloppe sur CTR : règle 1 et anomalie face au montant, provisions ignorées.
+	in.Enveloppes = map[string]domain.Enveloppe{"CTR": fcEnv("2026-01-01", "2026-12-31", 1000)}
+	res = Run(in, store.DefaultSettings())
 	q := findQual(res, "tg_ecart_budget")
-	if q == nil || q.Count != 1 || len(q.Details) != 1 ||
-		q.Details[0] != "CTR : réalisé 60000 € / charge max 1000 € (PPS 0 € + provisions 1000 €)" {
+	if q == nil || q.Count != 1 || len(q.Details) != 1 || q.Details[0] != "CTR : réalisé 60000 € / enveloppe 1000 €" {
 		t.Errorf("tg_ecart_budget : %+v", q)
 	}
-	// Anomalie budget : composition de la charge max dans le détail.
 	found := false
 	for _, a := range res.Anomalies {
-		if a.Categorie == domain.AnomalieBudget && a.CT == "CTR" {
+		if a.Categorie == domain.AnomalieBudget && a.CT == "CTR" && a.Key == "budget|CTR" {
 			found = true
-			if !strings.Contains(a.Detail, "pour un budget de "+fmtEur(1000)+" (PDC "+fmtEur(0)+" + provisions "+fmtEur(1000)+")") {
+			if !strings.Contains(a.Detail, "pour une enveloppe de "+fmtEur(1000)+" (") || strings.Contains(a.Detail, "provisions") {
 				t.Errorf("détail : %q", a.Detail)
 			}
 		}

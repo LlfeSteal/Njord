@@ -23,7 +23,7 @@ var qualityOrder = []string{
 }
 
 var qualityDefs = map[string]qualityDef{
-	"tg_ecart_budget":     {1, "%d CT dont le Σ € réalisé s'écarte de leur budget (enveloppe, sinon PPS planifié + provisions) au-delà du seuil"},
+	"tg_ecart_budget":     {1, "%d CT dont le Σ € réalisé s'écarte de leur enveloppe au-delà du seuil"},
 	"mo_quantite_semaine": {2, "%d imputations MO hebdomadaires dépassent le seuil d'heures par personne (physiquement impossibles)"},
 	"sans_tg":             {4, "%d écritures sans TG exclues de l'analyse"},
 	"cloture":             {5, "%d écritures dont la période comptable précède la date de dépense de plus de 7 jours"},
@@ -83,16 +83,10 @@ func fmtH(v float64) string { return strconv.FormatFloat(round2(v), 'f', -1, 64)
 
 // dataQuality: §10 rules 1, 4, 5 and the warn counts (segments of the
 // timeline, whole réalisé version). Règle 1 : réalisé comparé à l'enveloppe du
-// CT (DECISIONS n° 19), sinon à la charge max (PPS + provisions, n° 16) des CT
-// présents au plan ou aux provisions.
+// CT (DECISIONS n° 19), seulement pour les CT qui en ont une (n° 20).
 func (r *run) dataQuality() {
-	ppsByCT, provByCT := map[string]float64{}, map[string]float64{}
-	for i := range r.provs {
-		provByCT[strings.TrimSpace(r.provs[i].CT)] += r.provs[i].Montant
-	}
 	for i := range r.lines {
 		l := &r.lines[i]
-		ppsByCT[strings.TrimSpace(l.CT)] += l.PPS
 		if l.StatutParsing == domain.ParsingWarn {
 			r.q.add("plan_warn", r.lineRef(l)+motif(l.MotifRejet))
 		}
@@ -121,21 +115,12 @@ func (r *run) dataQuality() {
 	}
 	sortStrings(tgs)
 	for _, tg := range tgs {
-		pps, inPlan := ppsByCT[tg]
-		prov, inProv := provByCT[tg]
-		env, inEnv := r.fcEnveloppe(tg)
-		if !inPlan && !inProv && !inEnv {
+		env, ok := r.fcEnveloppe(tg)
+		if !ok {
 			continue
 		}
-		budget, ref := pps+prov, "PPS "+fmtH(pps)+" €"
-		switch {
-		case inEnv:
-			budget, ref = env.Montant, "enveloppe "+fmtH(env.Montant)+" €"
-		case inProv:
-			ref = "charge max " + fmtH(pps+prov) + " € (PPS " + fmtH(pps) + " € + provisions " + fmtH(prov) + " €)"
-		}
-		if d := eurByTG[tg] - budget; d > r.s.SeuilEcartTGEur || -d > r.s.SeuilEcartTGEur {
-			r.q.add("tg_ecart_budget", tg+" : réalisé "+fmtH(eurByTG[tg])+" € / "+ref)
+		if d := eurByTG[tg] - env.Montant; d > r.s.SeuilEcartTGEur || -d > r.s.SeuilEcartTGEur {
+			r.q.add("tg_ecart_budget", tg+" : réalisé "+fmtH(eurByTG[tg])+" € / enveloppe "+fmtH(env.Montant)+" €")
 		}
 	}
 }

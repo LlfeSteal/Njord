@@ -28,12 +28,12 @@ type Input struct {
 	Entries        []domain.RealiseEntry
 	Personnes      []domain.Personne // référentiel (clé nom_normalise = names.Key)
 	Squads         []domain.Squad
-	// Provisions (DECISIONS n° 16) : version retenue (nil = aucune, budget = Σ PPS)
-	// et ses lignes ; charge max d'un CT = Σ PPS + Σ provisions.
+	// Provisions (DECISIONS n° 16) : version retenue (nil = aucune) et ses
+	// lignes ; informatives (natures, marge), jamais un budget (n° 20).
 	ProvisionVersion *domain.Version
 	Provisions       []domain.ProvisionLine
-	// Enveloppes saisies (DECISIONS n° 19), clé = CT (TrimSpace) : remplacent
-	// la charge max comme budget du CT, sur leur période.
+	// Enveloppes importées (DECISIONS n° 19 et 20), clé = CT (TrimSpace) :
+	// seul budget d'un CT, sur leur période ; sans enveloppe, aucun budget.
 	Enveloppes map[string]domain.Enveloppe
 	// Période d'analyse en semaines ISO "2026-W36" ; "" = défaut (semaines communes).
 	WeekFrom, WeekTo string

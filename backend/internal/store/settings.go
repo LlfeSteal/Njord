@@ -57,11 +57,6 @@ func (s *Store) PutSettings(ctx context.Context, st domain.Settings, operateur s
 	if st.PurgeDelaiJours < 0 || st.DiviseurHorsPlanH <= 0 {
 		return st, Precondition("paramètres invalides : délai de purge ≥ 0 et diviseur hors plan > 0 requis")
 	}
-	if st.FinExercice != "" {
-		if _, err := time.Parse("2006-01-02", st.FinExercice); err != nil {
-			return st, Precondition("paramètres invalides : fin d'exercice attendue au format AAAA-MM-JJ (ou vide)")
-		}
-	}
 	if st.SeuilSousConsoPct < 0 || st.SeuilSousConsoPct > 100 || st.SeuilSousConsoEur < 0 {
 		return st, Precondition("paramètres invalides : seuil de sous-consommation entre 0 et 100 %% et montant ≥ 0 requis")
 	}

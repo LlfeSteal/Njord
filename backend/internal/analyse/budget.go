@@ -69,8 +69,8 @@ func pct(num, den float64) *float64 {
 
 // budget computes §7.4 (per CT + global) and the alerts of §7.5 on every
 // entry of the réalisé version (avoirs included), independently of the week
-// period which only scopes the hours comparison. Charge max d'un CT = PPS du
-// plan + provisions (DECISIONS n° 16) ; les natures ventilent les deux.
+// period which only scopes the hours comparison. Les natures ventilent la
+// dépense prévue (PPS du plan + provisions) : un prévu, pas un budget (DECISIONS n° 20).
 func (r *run) budget() (domain.Budget, domain.Alertes) {
 	byCT := map[string]*domain.BudgetCT{}
 	get := func(ct string) *domain.BudgetCT {
@@ -165,7 +165,6 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 		g.NonSecurise += b.NonSecurise
 		g.NonClasse += b.NonClasse
 		b.Securise, b.NonSecurise, b.NonClasse = round2(b.Securise), round2(b.NonSecurise), round2(b.NonClasse)
-		b.ChargeMax = round2(b.PPSPlan + b.Provisions)
 		b.PPSPlan, b.Provisions = round2(b.PPSPlan), round2(b.Provisions)
 		b.HeuresMO, b.CoutMOEur = round2(b.HeuresMO), round2(b.CoutMOEur)
 		b.PctSecurite = pct(b.Securise, b.Securise+b.NonSecurise)
@@ -182,9 +181,9 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 	out.Global = g
 	out.ParNature = make([]domain.BudgetNature, 0, len(natures))
 	for _, n := range natures {
-		bud, reel := round2(natPPS[n.code]+natProv[n.code]), round2(natReel[n.code])
+		prevu, reel := round2(natPPS[n.code]+natProv[n.code]), round2(natReel[n.code])
 		out.ParNature = append(out.ParNature, domain.BudgetNature{Nature: n.code, Libelle: n.libelle,
-			PPS: round2(natPPS[n.code]), Provisions: round2(natProv[n.code]), Budget: bud, Realise: reel, PctConsomme: pct(reel, bud)})
+			PPS: round2(natPPS[n.code]), Provisions: round2(natProv[n.code]), Prevu: prevu, Realise: reel, PctConsomme: pct(reel, prevu)})
 	}
 	al.PctNonSecurise = g.PctNonSecurise
 	al.AlerteGlobale = g.PctNonSecurise != nil && *g.PctNonSecurise > r.s.SeuilNonSecurisePct

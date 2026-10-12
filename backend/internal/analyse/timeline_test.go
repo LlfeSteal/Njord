@@ -264,9 +264,9 @@ func TestRunTimeline(t *testing.T) {
 			t.Errorf("correspondance non couverte : %+v", c)
 		}
 	}
-	// Les prévisions (€) portent sur tout le réalisé : seule l'anomalie budget de CTX subsiste.
+	// Les prévisions (€) portent sur tout le réalisé, mais CTX n'a pas d'enveloppe : aucune anomalie budget (DECISIONS n° 20).
 	for _, a := range res.Anomalies {
-		if a.Ressource == "BARBIER Luc" || (a.CT == "CTX" && a.Categorie != domain.AnomalieBudget) {
+		if a.Ressource == "BARBIER Luc" || a.CT == "CTX" {
 			t.Errorf("anomalie non couverte : %+v", a)
 		}
 	}
@@ -300,14 +300,19 @@ func TestRunTimeline(t *testing.T) {
 		pps += n.PPS
 	}
 	pv := res.Previsions
-	if p := findCT(t, pv, "CT1"); p.Budget != 2500 || p.FinPlan != "2026-10-04" {
-		t.Errorf("prévision CT1 : budget %v, fin %s", p.Budget, p.FinPlan)
+	p1 := findCT(t, pv, "CT1")
+	if p1.PPS != 2500 || p1.FinPlan != "2026-10-04" {
+		t.Errorf("prévision CT1 : PPS %v, fin %s", p1.PPS, p1.FinPlan)
 	}
-	if pv.Global.Budget != 4500 || pps != 4500 {
-		t.Errorf("budget global %v, natures %v", pv.Global.Budget, pps)
+	ctPPS := 0.0
+	for _, p := range pv.ParCT {
+		ctPPS += p.PPS
+	}
+	if ctPPS != 4500 || pps != 4500 {
+		t.Errorf("PPS des prévisions %v, natures %v", ctPPS, pps)
 	}
 	cov := map[string]domain.Couverture{}
-	for _, pt := range pv.Global.Series {
+	for _, pt := range p1.Series {
 		cov[pt.Week] = pt.Couverture
 	}
 	if cov["2026-W36"] != domain.CouvertureAucune || cov["2026-W38"] != domain.CouvertureTotale || cov["2026-W45"] != domain.CouvertureAucune {

@@ -9,49 +9,42 @@ import (
 	"njord/internal/domain"
 )
 
-// Prévisions budgétaires (SPEC_analyse §7.7) : atterrissage par CT sur tout
-// l'horizon du plan, indépendamment de la période d'analyse (r.from/r.to).
+// Prévisions budgétaires (SPEC_analyse §7.7) : atterrissage par CT,
+// indépendamment de la période d'analyse (r.from/r.to).
 //
 //   - dépense prévue hebdo d'une ligne = PPS × heures de la semaine ÷ heures de
 //     la ligne (répartition en jours ouvrés, Calendar.Distribute) ;
-//   - budget = charge max = Σ PPS des segments + Σ provisions du CT
-//     (DECISIONS n° 16) ; c'est la référence des écarts, du % consommé et du statut ;
 //   - consommé = Σ TOTAL EN € brut (MO comprise) ;
 //   - reste à faire = dépense prévue (plan seul) des semaines > as_of_week ;
 //   - tendance = rythme moyen des 4 dernières semaines × semaines restantes.
 //
-// Les provisions ne sont qu'un budget disponible : ni reste à faire, ni
-// atterrissage, ni série (budget_cumul = dépense prévue cumulée du plan seul) ;
-// leurs dates ne servent qu'au budget de l'exercice.
+// Budget = enveloppe du fichier, rien d'autre (DECISIONS n° 20) : PPS et
+// provisions ne sont qu'informatifs (ni budget, ni reste à faire, ni série).
 //
-// Fin d'exercice (DECISIONS n° 17) : le budget non consommé à l'échéance E est
-// perdu. Semaine WE de E incluse :
-//   - budget de l'exercice = PPS prévu des semaines ≤ WE (+ PPS hors série,
-//     compté entier) + provisions datées ≤ E ou sans date lisible ;
-//   - projections à E : plan (consommé + prévu des semaines ]as_of, WE]) et
-//     tendance (consommé + rythme × semaines ]as_of, WE]) ;
-//   - non consommé = budget de l'exercice − la plus basse des deux, plancher 0 ;
-//   - sous-consommation si non consommé > seuil % du budget de l'exercice et
-//     > seuil € (indicateur séparé du statut).
-// Global = enveloppe commune : mêmes formules sur les sommes des CT.
-//
-// Enveloppes (DECISIONS n° 19) : un CT configuré (Input.Enveloppes) a pour
-// budget le montant de son enveloppe et pour exercice sa période [D, E]
-// (semaines ISO WD et WE incluses entières) :
+// CT avec enveloppe (Input.Enveloppes, DECISIONS n° 19) : budget = montant,
+// exercice propre au CT sur sa période [D, E] (semaines ISO WD et WE incluses
+// entières) :
 //   - consommé = € datés dans [D, E] + écritures sans date ; les € datés hors
 //     période vont au réalisé hors enveloppe (exclus du consommé, du rythme et
 //     des séries ; les heures réelles restent comptées) ;
 //   - prévu des semaines < WD ou > WE (+ PPS hors série) = plan hors
-//     enveloppe : ni reste à faire, ni budget de l'échéance, ni série ;
+//     enveloppe : ni reste à faire, ni série ;
 //   - reste à faire = prévu des semaines ]as_of, WE] ∩ ≥ WD ; tendance =
 //     consommé + rythme (réel de la période) × semaines ]as_of, WE] ;
 //   - échéance = E, budget de l'échéance = montant, projections = atterrissages ;
-//     provisions (datées ≤ E ou sans date) seulement informatives ;
+//     non consommé = montant − la plus basse des deux, plancher 0 ;
+//     sous-consommation si non consommé > seuil % du montant et > seuil €
+//     (indicateur séparé du statut, n° 17) ; zone cible [cible_min, montant] ;
 //   - séries cumulées sur la période seule (0 avant WD, plates après WE) ;
-//     l'axe est prolongé jusqu'à WE pour que la tendance atteigne l'atterrissage.
-// Un CT non configuré garde la charge max. Global = somme des CT, chacun sur
-// son budget et son horizon (pièces de l'échéance sommées CT par CT) ; sans
-// aucune enveloppe, mêmes formules que ci-dessus sur les sommes.
+//     l'axe couvre toute la période pour que la tendance atteigne l'atterrissage.
+//
+// CT sans enveloppe : aucun budget (champs de budget nil), horizon = tout le
+// plan ; consommé, atterrissages et séries restent calculés.
+//
+// Global = périmètre des CT avec enveloppe, chacun sur son budget et son
+// horizon : sommes, puis mêmes formules (statut, écarts, seuils) sur les sommes ;
+// séries sur l'union des périodes. Les CT sans enveloppe sont résumés à part
+// (Previsions.HorsEnveloppe).
 
 // fcTolerance absorbe les arrondis dans la comparaison atterrissage / budget.
 const fcTolerance = 0.5
@@ -59,8 +52,7 @@ const fcTolerance = 0.5
 // fcBucket accumulates the raw (unrounded) figures of one CT.
 type fcBucket struct {
 	pps, provisions float64
-	ppsHorsSerie    float64 // PPS dans le budget mais hors série hebdo (spreadPPS nil)
-	provEcheance    float64 // provisions datées ≤ échéance ou sans date lisible
+	ppsHorsSerie    float64 // PPS hors série hebdo (spreadPPS nil)
 	consomme        float64
 	undated         float64 // € d'écritures sans date de dépense valide (comptés au consommé)
 	prevu           map[string]float64
@@ -68,7 +60,7 @@ type fcBucket struct {
 	hplan           map[string]float64
 	hreel           map[string]float64
 	fin             string // max date_fin (YYYY-MM-DD)
-	// Enveloppe (DECISIONS n° 19) : période [wd, we] en semaines ISO ; nil = charge max.
+	// Enveloppe (DECISIONS n° 19) : période [wd, we] en semaines ISO ; nil = sans budget.
 	env       *domain.Enveloppe
 	wd, we    string
 	consoHors float64 // € datés hors de la période (exclus du consommé)
@@ -78,7 +70,7 @@ func newFcBucket() *fcBucket {
 	return &fcBucket{prevu: map[string]float64{}, reel: map[string]float64{}, hplan: map[string]float64{}, hreel: map[string]float64{}}
 }
 
-// inPeriod: la semaine w compte pour le budget du CT (toujours sans enveloppe).
+// inPeriod: la semaine w compte pour le CT (toujours sans enveloppe).
 func (b *fcBucket) inPeriod(w string) bool {
 	return b.env == nil || (w >= b.wd && w <= b.we)
 }
@@ -99,33 +91,24 @@ func (r *run) fcEnveloppe(ct string) (domain.Enveloppe, bool) {
 	return e, true
 }
 
-// fcCalc is the computed forecast of one bucket, series aligned on the axis.
+// fcCalc is the computed forecast of one bucket (or of the global), raw
+// figures and series aligned on the axis.
 type fcCalc struct {
-	pps, provisions, budget                       float64 // budget = montant de l'enveloppe, sinon pps + provisions (charge max)
+	pps, provisions                               float64
 	consomme, reste, atterPlan, atterTend, rythme float64
-	sr                                            int
+	sr                                            int // semaines restantes (avec budget : jusqu'à l'échéance)
 	fin                                           string
-	// Fin d'exercice (bruts, non arrondis).
-	ppsEch, provEch, prevuEch                    float64 // prevuEch = prévu des semaines ]as_of, WE]
-	se                                           int     // semaines ]as_of, WE]
-	echeance                                     string
-	budgetCum, reelCum, planCum, tendCum, hp, hr []float64
+	budgetCum, reelCum, planCum, tendCum, hp, hr  []float64
+	// Budget (DECISIONS n° 20) : montant de l'enveloppe (global : Σ montants) ;
+	// budgeted = false sans enveloppe. Projections à l'échéance = atterrissages.
+	budgeted bool
+	budget   float64
+	echeance string  // fin de l'enveloppe (global : la plus tardive)
+	nc       float64 // non consommé (global : Σ des CT, sans compensation)
+	ncSrc    string  // plan | tendance | ""
 	// Enveloppe (DECISIONS n° 19).
 	env                 *domain.Enveloppe
 	planHors, consoHors float64
-	ech                 *fcEch // pièces de l'échéance précalculées (enveloppe, global avec enveloppes) ; nil = n° 17
-}
-
-// fcEch: budget de l'échéance et projections à l'échéance (bruts).
-type fcEch struct{ budget, plan, tend float64 }
-
-// echeancePieces returns the raw end-of-period budget and projections :
-// précalculés (c.ech), sinon formules du n° 17 sur les pièces.
-func (c fcCalc) echeancePieces() fcEch {
-	if c.ech != nil {
-		return *c.ech
-	}
-	return fcEch{c.ppsEch + c.provEch, c.consomme + c.prevuEch, c.consomme + c.rythme*float64(c.se)}
 }
 
 // previsions computes the landing forecast (SPEC_analyse §7.7).
@@ -212,30 +195,27 @@ func (r *run) previsions() domain.Previsions {
 		b.reel[w] += e.TotalEur
 	}
 	asOfWeek := WeekOfDate(asOf)
-	echeance := r.echeance(asOf)
-	echWeek := WeekOfDate(echeance)
 
-	// Provisions : budget disponible du CT, sans série ; celles datées après
-	// l'échéance (fin de l'enveloppe le cas échéant) relèvent de l'exercice
-	// suivant (hors budget de l'exercice).
+	// Provisions : informatives (marge disponible), sans série.
 	for i := range r.provs {
 		pv := &r.provs[i]
-		b := get(strings.TrimSpace(pv.CT))
-		b.provisions += pv.Montant
-		lim := echeance
-		if b.env != nil {
-			lim = b.env.DateFin
-		}
-		if _, ok := ParseDate(pv.DateDebut); !ok || pv.DateDebut[:10] <= lim {
-			b.provEcheance += pv.Montant
-		}
+		get(strings.TrimSpace(pv.CT)).provisions += pv.Montant
 	}
 
-	// Axe prolongé jusqu'à la fin des enveloppes : la tendance d'un CT configuré
-	// court jusqu'à sa fin (même si le plan s'arrête avant).
+	// Axe prolongé à toute la période des enveloppes : la tendance d'un CT
+	// configuré court jusqu'à sa fin (même si le plan s'arrête avant) et l'axe
+	// du global couvre l'union des périodes.
+	envMin, envMax := "", ""
 	for _, b := range buckets {
 		if b.env != nil {
+			extend(b.wd)
 			extend(b.we)
+			if envMin == "" || b.wd < envMin {
+				envMin = b.wd
+			}
+			if b.we > envMax {
+				envMax = b.we
+			}
 		}
 	}
 
@@ -262,59 +242,39 @@ func (r *run) previsions() domain.Previsions {
 
 	cts := make([]string, 0, len(buckets))
 	for ct := range buckets {
-		cts = append(cts, ct)
+		if ct != "" { // lignes sans CT / écritures sans TG : hors de toute enveloppe
+			cts = append(cts, ct)
+		}
 	}
 	sort.Strings(cts)
 
 	n := len(axis)
 	g := fcCalc{budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n)}
-	g.echeance = echeance
-	se := fcRemaining(axis, asOfWeek, echeance)
-	g.se = se
 	out := domain.Previsions{AsOf: asOf, AsOfWeek: asOfWeek, ParCT: []domain.PrevisionCT{}}
-	var gEch fcEch // pièces de l'échéance sommées CT par CT
-	nbEnv := 0
 	for _, ct := range cts {
 		b := buckets[ct]
 		c := r.fcCompute(b, axis, asIdx, asOfWeek, last4)
-		c.provEch = b.provEcheance
-		if b.env != nil {
-			// Exercice propre au CT : échéance = fin de l'enveloppe, budget = montant,
-			// projections = atterrissages (déjà restreints à la période).
-			nbEnv++
-			c.echeance, c.se = b.env.DateFin, c.sr
-			for w, v := range b.prevu {
-				if b.inPeriod(w) {
-					c.ppsEch += v
-				}
-			}
-			c.prevuEch = c.reste
-			c.ech = &fcEch{b.env.Montant, c.atterPlan, c.atterTend}
-		} else {
-			c.echeance, c.se = echeance, se
-			c.ppsEch = b.ppsHorsSerie
-			for w, v := range b.prevu {
-				if w <= echWeek {
-					c.ppsEch += v
-					if asOfWeek == "" || w > asOfWeek {
-						c.prevuEch += v
-					}
-				}
-			}
+		out.ParCT = append(out.ParCT, r.fcBuild(ct, r.ctLibelle[ct], c, axis, cov, asIdx, 0, n-1))
+		if !c.budgeted {
+			h := &out.HorsEnveloppe
+			h.NbCT++
+			h.Consomme += c.consomme
+			h.AtterrissagePlan += c.atterPlan
+			h.AtterrissageTendance += c.atterTend
+			continue
 		}
-		pe := c.echeancePieces()
-		gEch.budget += pe.budget
-		gEch.plan += pe.plan
-		gEch.tend += pe.tend
+		// Global = périmètre des enveloppes, chaque CT sur son budget et son horizon.
+		g.budgeted = true
+		g.budget += c.budget
+		g.nc += c.nc
+		if c.echeance > g.echeance {
+			g.echeance = c.echeance
+		}
 		g.planHors += c.planHors
 		g.consoHors += c.consoHors
-		g.ppsEch += c.ppsEch
-		g.provEch += c.provEch
-		g.prevuEch += c.prevuEch
 		g.pps += c.pps
 		g.provisions += c.provisions
-		g.budget += c.budget
 		g.consomme += c.consomme
 		g.reste += c.reste
 		g.atterPlan += c.atterPlan
@@ -331,46 +291,48 @@ func (r *run) previsions() domain.Previsions {
 			g.hp[i] += c.hp[i]
 			g.hr[i] += c.hr[i]
 		}
-		if ct == "" {
-			continue // lignes sans CT / écritures sans TG : comptées dans le global seulement
+	}
+	h := &out.HorsEnveloppe
+	h.Consomme, h.AtterrissagePlan, h.AtterrissageTendance = round2(h.Consomme), round2(h.AtterrissagePlan), round2(h.AtterrissageTendance)
+
+	// Séries du global sur l'union des périodes [min WD, max WE] ; vides sans enveloppe.
+	lo, hi := 0, -1
+	if g.budgeted {
+		g.sr = fcRemaining(axis, asOfWeek, g.echeance)
+		g.ncSrc = fcSource(g.atterPlan, g.atterTend, g.nc)
+		lo, hi = n, -1
+		for i, w := range axis {
+			if w >= envMin && w <= envMax {
+				lo, hi = min(lo, i), i
+			}
 		}
-		out.ParCT = append(out.ParCT, r.fcBuild(ct, r.ctLibelle[ct], c, axis, cov, asIdx))
 	}
-	g.sr = fcRemaining(axis, asOfWeek, g.fin)
-	if nbEnv > 0 {
-		g.ech = &gEch // chaque CT sur son budget et son horizon
-	}
-	out.Global = r.fcBuild("", "Périmètre", g, axis, cov, asIdx)
-	out.Global.BudgetSource = fcBudgetSource(out.ParCT)
+	out.Global = r.fcBuild("", "Périmètre", g, axis, cov, asIdx, lo, hi)
 	out.Enveloppes = fcSynthese(out.ParCT)
 
+	// Tri : CT avec enveloppe par statut (dépassement d'abord) puis écart plan
+	// décroissant ; CT sans enveloppe en dernier, atterrissage plan décroissant.
 	rank := map[domain.PrevisionStatut]int{domain.PrevisionDepassement: 0, domain.PrevisionVigilance: 1, domain.PrevisionOK: 2}
 	sort.SliceStable(out.ParCT, func(i, j int) bool {
 		a, b := out.ParCT[i], out.ParCT[j]
-		if rank[a.Statut] != rank[b.Statut] {
-			return rank[a.Statut] < rank[b.Statut]
+		if (a.Statut == nil) != (b.Statut == nil) {
+			return a.Statut != nil
 		}
-		if a.EcartPlan != b.EcartPlan {
-			return a.EcartPlan > b.EcartPlan
+		if a.Statut == nil {
+			if a.AtterrissagePlan != b.AtterrissagePlan {
+				return a.AtterrissagePlan > b.AtterrissagePlan
+			}
+			return a.CT < b.CT
+		}
+		if rank[*a.Statut] != rank[*b.Statut] {
+			return rank[*a.Statut] < rank[*b.Statut]
+		}
+		if *a.EcartPlan != *b.EcartPlan {
+			return *a.EcartPlan > *b.EcartPlan
 		}
 		return a.CT < b.CT
 	})
 	return out
-}
-
-// echeance returns the end of the fiscal year (YYYY-MM-DD): settings.fin_exercice,
-// à défaut le 31/12 de l'année de as_of (sans réalisé : de l'année de Input.Now).
-func (r *run) echeance(asOf string) string {
-	if t, ok := ParseDate(r.s.FinExercice); ok {
-		return t.Format(time.DateOnly)
-	}
-	year := r.in.Now.Year()
-	if t, ok := ParseDate(asOf); ok {
-		year = t.Year()
-	} else if r.in.Now.IsZero() {
-		year = time.Now().Year()
-	}
-	return time.Date(year, time.December, 31, 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
 }
 
 // spreadPPS returns the planned spend of a line per ISO week:
@@ -424,15 +386,15 @@ func (r *run) spreadPPS(l *domain.PlanLine) map[string]float64 {
 
 // fcCompute derives the figures and the raw cumulative series of one bucket.
 // Avec enveloppe : budget = montant, prévu et réel restreints à la période,
-// semaines restantes jusqu'à la fin de l'enveloppe.
+// semaines restantes jusqu'à la fin de l'enveloppe, non consommé à sa fin.
 func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, last4 []string) fcCalc {
 	n := len(axis)
-	c := fcCalc{pps: b.pps, provisions: b.provisions, budget: b.pps + b.provisions, consomme: b.consomme, fin: b.fin,
+	c := fcCalc{pps: b.pps, provisions: b.provisions, consomme: b.consomme, fin: b.fin,
 		budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n),
 		env: b.env, consoHors: b.consoHors}
 	if b.env != nil {
-		c.budget, c.planHors = b.env.Montant, b.ppsHorsSerie
+		c.budgeted, c.budget, c.echeance, c.planHors = true, b.env.Montant, b.env.DateFin, b.ppsHorsSerie
 	}
 	for w, v := range b.prevu {
 		switch {
@@ -453,6 +415,9 @@ func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, 
 	}
 	c.atterPlan = c.consomme + c.reste
 	c.atterTend = c.consomme + c.rythme*float64(c.sr)
+	if c.budgeted {
+		c.nc, c.ncSrc = fcNonConsomme(c.budget, c.atterPlan, c.atterTend)
+	}
 
 	budgetCum, reelCum := 0.0, b.undated
 	base := b.undated // cumul réel à as_of (point de départ des projections)
@@ -495,7 +460,7 @@ func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, 
 
 // fcRemaining counts the weeks after asOfWeek up to the week of fin (0 if fin
 // is past or unknown). Without réalisé, every week of the axis up to fin counts.
-// Sert aussi aux semaines restantes jusqu'à l'échéance (fin = fin d'exercice).
+// Sert aussi aux semaines restantes jusqu'à l'échéance (fin de l'enveloppe).
 func fcRemaining(axis []string, asOfWeek, fin string) int {
 	finWeek := WeekOfDate(fin)
 	if finWeek == "" {
@@ -517,11 +482,30 @@ func fcRemaining(axis []string, asOfWeek, fin string) int {
 	return int(z.Sub(a).Hours()/24/7+0.5) + extra
 }
 
-// fcStatut: dépassement si atterrissage plan > budget (enveloppe ou charge max) ou CT sans
-// budget consommé ; vigilance si tendance > budget ou plan > 95 % du budget.
+// fcNonConsomme: budget − la plus basse des deux projections à l'échéance (la
+// pire), plancher 0, et la projection retenue.
+func fcNonConsomme(budget, projPlan, projTend float64) (float64, string) {
+	nc := math.Max(0, budget-math.Min(projPlan, projTend))
+	return nc, fcSource(projPlan, projTend, nc)
+}
+
+// fcSource names the projection retained for the non consommé : la plus
+// basse des deux (la pire) ; "" s'il n'y a rien de non consommé.
+func fcSource(projPlan, projTend, nc float64) string {
+	switch {
+	case round2(nc) == 0:
+		return ""
+	case round2(projTend) < round2(projPlan):
+		return "tendance"
+	}
+	return "plan"
+}
+
+// fcStatut: dépassement si atterrissage plan > budget ; vigilance si tendance
+// > budget ou plan > 95 % du budget.
 func fcStatut(c fcCalc) domain.PrevisionStatut {
 	switch {
-	case c.atterPlan > c.budget+fcTolerance, c.budget == 0 && c.consomme > 0:
+	case c.atterPlan > c.budget+fcTolerance:
 		return domain.PrevisionDepassement
 	case c.atterTend > c.budget+fcTolerance, c.atterPlan > 0.95*c.budget+fcTolerance:
 		return domain.PrevisionVigilance
@@ -529,73 +513,73 @@ func fcStatut(c fcCalc) domain.PrevisionStatut {
 	return domain.PrevisionOK
 }
 
+// fcCibleMin: bas de la zone cible [cible_min, budget] (DECISIONS n° 20) =
+// budget − max(seuil % × budget, seuil €), plancher 0. Atterrir en dessous =
+// sous-consommation (mêmes seuils).
+func fcCibleMin(budget float64, s domain.Settings) float64 {
+	return math.Max(0, budget-math.Max(s.SeuilSousConsoPct/100*budget, s.SeuilSousConsoEur))
+}
+
 func fcPtr(v float64) *float64 {
 	v = round2(v)
 	return &v
 }
 
-// fcEcheance fills the end-of-fiscal-year figures (DECISIONS n° 17) from the raw
-// pieces : non consommé face à la pire des deux projections, seuils % et €.
-// Avec enveloppe (n° 19) : fin de l'enveloppe, budget = montant.
-func fcEcheance(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
-	pe := c.echeancePieces()
-	budget, projPlan, projTend := pe.budget, pe.plan, pe.tend
-	worst, source := projPlan, "plan"
-	if round2(projTend) < round2(projPlan) {
-		worst, source = projTend, "tendance"
-	}
-	nc := math.Max(0, budget-worst)
-	if round2(nc) == 0 {
-		nc, source = 0, ""
-	}
+// fcBudget fills the budget fields (DECISIONS n° 19 et 20) : écarts, statut,
+// % consommé, échéance (fin de l'enveloppe), non consommé face à la pire des
+// deux projections (= atterrissages), seuils % et €, zone cible.
+func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
+	statut := fcStatut(c)
 	necessaire := 0.0
-	if c.se > 0 {
-		necessaire = math.Max(0, (budget-c.consomme)/float64(c.se))
+	if c.sr > 0 {
+		necessaire = math.Max(0, (c.budget-c.consomme)/float64(c.sr))
 	}
+	p.BudgetSource = "enveloppe"
+	p.Budget = fcPtr(c.budget)
+	p.PctConsomme = pct(c.consomme, c.budget)
+	p.EcartPlan = fcPtr(c.atterPlan - c.budget)
+	p.EcartTendance = fcPtr(c.atterTend - c.budget)
+	p.Statut = &statut
 	p.Echeance = c.echeance
-	p.BudgetEcheance = round2(budget)
-	p.PPSEcheance = round2(c.ppsEch)
-	p.ProvisionsEcheance = round2(c.provEch)
-	p.ProjectionPlanEcheance = round2(projPlan)
-	p.ProjectionTendanceEcheance = round2(projTend)
-	p.NonConsomme = round2(nc)
-	p.NonConsommeSource = source
-	p.RythmeNecessaire = round2(necessaire)
-	p.SemainesEcheance = c.se
-	p.SousConsommation = nc > s.SeuilSousConsoPct/100*budget+fcTolerance && nc > s.SeuilSousConsoEur+fcTolerance
+	p.BudgetEcheance = fcPtr(c.budget)
+	p.ProjectionPlanEcheance = round2(c.atterPlan)
+	p.ProjectionTendanceEcheance = round2(c.atterTend)
+	p.NonConsomme = fcPtr(c.nc)
+	p.NonConsommeSource = c.ncSrc
+	p.RythmeNecessaire = fcPtr(necessaire)
+	p.SemainesEcheance = c.sr
+	p.SousConsommation = c.nc > s.SeuilSousConsoPct/100*c.budget+fcTolerance && c.nc > s.SeuilSousConsoEur+fcTolerance
+	p.CibleMin = fcPtr(fcCibleMin(c.budget, s))
 }
 
-// fcBuild rounds the figures and builds the weekly points.
-func (r *run) fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couverture, asIdx int) domain.PrevisionCT {
+// fcBuild rounds the figures and builds the weekly points of axis[lo..hi].
+func (r *run) fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.Couverture, asIdx, lo, hi int) domain.PrevisionCT {
 	p := domain.PrevisionCT{
 		CT:                    ct,
 		CTLibelle:             libelle,
-		Budget:                round2(c.budget),
-		BudgetSource:          "charge_max",
-		ChargeMax:             round2(c.pps + c.provisions),
+		BudgetSource:          "aucun",
 		PPS:                   round2(c.pps),
 		Provisions:            round2(c.provisions),
 		Consomme:              round2(c.consomme),
-		PctConsomme:           pct(c.consomme, c.budget),
 		ResteAFaire:           round2(c.reste),
 		AtterrissagePlan:      round2(c.atterPlan),
 		AtterrissageTendance:  round2(c.atterTend),
-		EcartPlan:             round2(c.atterPlan - c.budget),
-		EcartTendance:         round2(c.atterTend - c.budget),
 		RythmeHebdo:           round2(c.rythme),
 		SemainesRestantes:     c.sr,
 		FinPlan:               c.fin,
-		Statut:                fcStatut(c),
-		Series:                make([]domain.PrevisionPoint, 0, len(axis)),
+		Series:                make([]domain.PrevisionPoint, 0, max(0, hi-lo+1)),
 		PlanHorsEnveloppe:     round2(c.planHors),
 		ConsommeHorsEnveloppe: round2(c.consoHors),
 	}
 	if c.env != nil {
 		e := *c.env
-		p.BudgetSource, p.Enveloppe = "enveloppe", &e
+		p.Enveloppe = &e
 	}
-	fcEcheance(&p, c, r.s)
-	for i, w := range axis {
+	if c.budgeted {
+		fcBudget(&p, c, r.s)
+	}
+	for i := lo; i <= hi; i++ {
+		w := axis[i]
 		pt := domain.PrevisionPoint{Week: w, BudgetCumul: round2(c.budgetCum[i]), HeuresPlan: round2(c.hp[i]), Couverture: cov[i]}
 		if m, err := WeekMonday(w); err == nil {
 			pt.Debut = m.Format(time.DateOnly)
@@ -613,24 +597,6 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.
 	return p
 }
 
-// fcBudgetSource: source du budget global — enveloppe si tous les CT de par_ct
-// en ont une, charge_max si aucun, mixte sinon.
-func fcBudgetSource(par []domain.PrevisionCT) string {
-	nb := 0
-	for _, p := range par {
-		if p.Enveloppe != nil {
-			nb++
-		}
-	}
-	switch {
-	case nb == 0:
-		return "charge_max"
-	case nb == len(par):
-		return "enveloppe"
-	}
-	return "mixte"
-}
-
 // fcSynthese: lecture brute des CT configurés de par_ct (DECISIONS n° 19),
 // sans compensation entre CT pour le dépassement et le non consommé.
 func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
@@ -642,10 +608,10 @@ func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
 		out.NbConfigures++
 		out.Montant += p.Enveloppe.Montant
 		out.Atterrissage += p.AtterrissagePlan
-		out.Depassement += math.Max(0, p.EcartPlan)
-		out.NonConsomme += p.NonConsomme
+		out.Depassement += math.Max(0, *p.EcartPlan)
+		out.NonConsomme += *p.NonConsomme
 		out.PlanHorsEnveloppe += p.PlanHorsEnveloppe
-		if p.Statut == domain.PrevisionDepassement {
+		if *p.Statut == domain.PrevisionDepassement {
 			out.NbDepassement++
 		}
 		if p.SousConsommation {

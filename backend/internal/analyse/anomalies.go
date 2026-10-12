@@ -487,46 +487,35 @@ func qualiteAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	return out
 }
 
-// budgetAnomalies: one per CT whose landing forecast is not ok.
+// budgetAnomalies: one per CT with an envelope whose landing forecast is not
+// ok, plus its under-consumption (DECISIONS n° 20 : sans enveloppe, aucun budget,
+// donc aucune anomalie budget).
 func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	out := []domain.Anomalie{}
 	for _, p := range res.Previsions.ParCT {
-		if p.Statut == domain.PrevisionOK || p.Statut == "" {
+		if p.Statut == nil || p.Enveloppe == nil || *p.Statut == domain.PrevisionOK {
 			continue
 		}
 		g, what := 2, "vigilance"
-		if p.Statut == domain.PrevisionDepassement {
+		if *p.Statut == domain.PrevisionDepassement {
 			g, what = 3, "dépassement prévu"
 		}
-		// Montant = écart de l'atterrissage plan au budget (celui de la page Budget) ;
-		// la tendance n'est citée, et nommée, que si elle seule dépasse le budget.
-		montant := p.EcartPlan
+		// Montant = écart de l'atterrissage plan à l'enveloppe (celui de la page Budget) ;
+		// la tendance n'est citée, et nommée, que si elle seule dépasse l'enveloppe.
+		montant := *p.EcartPlan
 		titre := "Atterrissage · " + p.CT + " : " + what
 		switch {
 		case montant > 0:
 			titre += " (+" + fmtEur(montant) + ")"
-		case p.EcartTendance > 0:
-			montant = p.EcartTendance
+		case *p.EcartTendance > 0:
+			montant = *p.EcartTendance
 			titre += " (tendance +" + fmtEur(montant) + ")"
 		}
-		budget := "un budget de " + fmtEur(p.Budget)
-		switch {
-		case p.Enveloppe != nil:
-			// Budget = enveloppe du CT (DECISIONS n° 19), sur sa période.
-			budget = "une enveloppe de " + fmtEur(p.Budget) + " (" + fmtPeriode(p.Enveloppe) + ")"
-		case p.Provisions != 0:
-			// Budget = charge max (DECISIONS n° 16) : on en donne la composition.
-			budget += " (PDC " + fmtEur(p.PPS) + " + provisions " + fmtEur(p.Provisions) + ")"
-		}
-		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour " + budget +
-			" (tendance " + fmtEur(p.AtterrissageTendance) + ")"
-		if p.Enveloppe != nil && p.PlanHorsEnveloppe >= 0.5 {
+		// Budget = enveloppe du CT (DECISIONS n° 19), sur sa période.
+		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour une enveloppe de " +
+			fmtEur(*p.Budget) + " (" + fmtPeriode(p.Enveloppe) + ") (tendance " + fmtEur(p.AtterrissageTendance) + ")"
+		if p.PlanHorsEnveloppe >= 0.5 {
 			detail += " · " + fmtEur(p.PlanHorsEnveloppe) + " planifiés hors enveloppe"
-		}
-		if p.Budget == 0 && p.Enveloppe == nil {
-			// CT présent au réalisé mais absent du plan et des provisions : dépense sans budget plutôt que « dépassement ».
-			titre = "Dépense hors budget · " + p.CT + " (" + fmtEur(p.Consomme) + ")"
-			detail = fmtEur(p.Consomme) + " dépensés sur un CT absent du plan de charge (aucun budget prévu)"
 		}
 		out = append(out, domain.Anomalie{
 			Key:       anomalieKey("budget", p.CT),
@@ -538,12 +527,12 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			CTLibelle: p.CTLibelle,
 			Montant:   ptrF(round2(montant)),
 			Lien:      query("/previsions", "ct", p.CT),
-			Fingerprint: fingerprint(string(p.Statut), fpE(p.Budget), fpE(p.AtterrissagePlan),
+			Fingerprint: fingerprint(string(*p.Statut), fpE(*p.Budget), fpE(p.AtterrissagePlan),
 				fpE(p.AtterrissageTendance)),
 		})
 	}
 	for _, p := range res.Previsions.ParCT {
-		if p.SousConsommation {
+		if p.SousConsommation && p.Enveloppe != nil && p.NonConsomme != nil {
 			out = append(out, sousConsoAnomalie(p))
 		}
 	}
@@ -561,30 +550,25 @@ func fmtPeriode(e *domain.Enveloppe) string {
 	return f(e.DateDebut) + " → " + f(e.DateFin)
 }
 
-// sousConsoAnomalie: budget de l'exercice qui ne sera pas consommé à l'échéance
-// (DECISIONS n° 17) ou de l'enveloppe à sa fin (n° 19), en plus d'une éventuelle
-// anomalie de dépassement / vigilance.
+// sousConsoAnomalie: part de l'enveloppe qui ne sera pas consommée à sa fin
+// (DECISIONS n° 17 et 19), en plus d'une éventuelle anomalie de dépassement / vigilance.
 func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 	echeance := p.Echeance
 	if t, ok := ParseDate(p.Echeance); ok {
 		echeance = t.Format("02/01/2006")
 	}
-	quand, budget := "au "+echeance, "Budget de l'exercice "+fmtEur(p.BudgetEcheance)
-	switch {
-	case p.Enveloppe != nil:
-		// Exercice propre au CT (DECISIONS n° 19) : budget = montant de l'enveloppe.
-		quand = "à la fin de l'enveloppe, le " + echeance
-		budget = "Enveloppe " + fmtEur(p.BudgetEcheance) + " (" + fmtPeriode(p.Enveloppe) + ")"
-	case p.ProvisionsEcheance != 0:
-		budget += " (PDC " + fmtEur(p.PPSEcheance) + " + provisions " + fmtEur(p.ProvisionsEcheance) + ")"
-	}
-	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(p.NonConsomme) + " non consommés " + quand
-	if pc := pct(p.NonConsomme, p.BudgetEcheance); pc != nil {
+	budget, nc := *p.BudgetEcheance, *p.NonConsomme
+	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(nc) + " non consommés à la fin de l'enveloppe, le " + echeance
+	if pc := pct(nc, budget); pc != nil {
 		titre += " (" + strconv.FormatFloat(math.Round(*pc), 'f', 0, 64) + "\u00a0%)"
 	}
-	detail := budget + " ; projection plan " + fmtEur(p.ProjectionPlanEcheance) +
-		", tendance " + fmtEur(p.ProjectionTendanceEcheance) + " ; il faudrait " +
-		fmtEur(p.RythmeNecessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
+	necessaire := 0.0
+	if p.RythmeNecessaire != nil {
+		necessaire = *p.RythmeNecessaire
+	}
+	detail := "Enveloppe " + fmtEur(budget) + " (" + fmtPeriode(p.Enveloppe) + ") ; projection plan " +
+		fmtEur(p.ProjectionPlanEcheance) + ", tendance " + fmtEur(p.ProjectionTendanceEcheance) +
+		" ; il faudrait " + fmtEur(necessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
 	return domain.Anomalie{
 		Key:       anomalieKey("budget_sous_conso", p.CT),
 		Categorie: domain.AnomalieBudget,
@@ -593,9 +577,9 @@ func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 		Detail:    detail,
 		CT:        p.CT,
 		CTLibelle: p.CTLibelle,
-		Montant:   ptrF(p.NonConsomme),
+		Montant:   ptrF(nc),
 		Lien:      query("/previsions", "ct", p.CT),
-		Fingerprint: fingerprint(fpE(p.BudgetEcheance), fpE(p.ProjectionPlanEcheance),
+		Fingerprint: fingerprint(fpE(budget), fpE(p.ProjectionPlanEcheance),
 			fpE(p.ProjectionTendanceEcheance)),
 	}
 }

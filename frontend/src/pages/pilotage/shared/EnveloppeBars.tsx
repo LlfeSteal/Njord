@@ -14,6 +14,7 @@ const LEGEND: ChartSeries[] = [
   { key: 'plan', label: 'Atterrissage plan', token: '--blue', opacity: 0.3 },
   { key: 'tendance', label: 'Tendance', token: '--text', shape: 'tick' },
   { key: 'zone', label: 'Zone cible', token: '--success', opacity: 0.25 },
+  { key: 'over', label: 'Dépassement', token: '--danger', opacity: 0.18 },
 ];
 
 /** Axe : 0 → 100 %, étendu au plus grand atterrissage jusqu'à 150 % (au-delà : barre coupée d'un chevron). */
@@ -123,7 +124,8 @@ export function EnveloppeBars({ previsions, limit, onSelect }: EnveloppeBarsProp
     .sort(compareRows);
   if (all.length === 0) return null;
   const rows = limit != null ? all.slice(0, limit) : all;
-  const peak = Math.max(100, ...rows.map((r) => Math.max(r.plan, r.tendance)));
+  // Une enveloppe à 0 € n'a pas de % : elle n'étire pas l'axe (mention à la place de sa barre).
+  const peak = Math.max(100, ...rows.filter((r) => r.budget > 0).map((r) => Math.max(r.plan, r.tendance)));
   const max = Math.min(AXIS_CAP, Math.ceil(peak / 10) * 10);
   const ticks = [0, 50, 100, ...(max - 100 >= 20 ? [max] : [])];
 
@@ -171,29 +173,38 @@ export function EnveloppeBars({ previsions, limit, onSelect }: EnveloppeBarsProp
                     <span className="pil-envbars__code">{p.ct}</span>
                     {p.ct_libelle && <span className="pil-envbars__libelle">{p.ct_libelle}</span>}
                   </span>
-                  <span className="pil-envbars__track" aria-hidden>
-                    {r.cible < 100 && (
-                      <span className="pil-envbars__zone" style={{ left: at(r.cible, max), width: `calc(${at(100, max)} - ${at(r.cible, max)})` }} />
-                    )}
-                    <span className="pil-envbars__ref" style={{ left: at(100, max) }} />
-                    {r.consomme > 0.05 && (
-                      <span
-                        className="pil-envbars__consomme"
-                        data-end={!hasPlan || consClipped ? '' : undefined}
-                        data-clip={consClipped ? '' : undefined}
-                        style={{ width: at(r.consomme, max) }}
-                      />
-                    )}
-                    {hasPlan && !consClipped && (
-                      <span
-                        className="pil-envbars__plan"
-                        data-gap={r.consomme > 0.05 ? '' : undefined}
-                        data-clip={clipped ? '' : undefined}
-                        style={{ '--from': at(r.consomme, max), '--to': at(r.plan, max) } as CSSProperties}
-                      />
-                    )}
-                    <span className="pil-envbars__tendance" style={{ left: at(r.tendance, max) }} />
-                  </span>
+                  {r.budget > 0 ? (
+                    <span className="pil-envbars__track" aria-hidden>
+                      <span className="pil-envbars__over" style={{ left: at(100, max) }} />
+                      {r.cible < 100 && (
+                        <span className="pil-envbars__zone" style={{ left: at(r.cible, max), width: `calc(${at(100, max)} - ${at(r.cible, max)})` }} />
+                      )}
+                      <span className="pil-envbars__ref" style={{ left: at(100, max) }} />
+                      {r.consomme > 0.05 && (
+                        <span
+                          className="pil-envbars__consomme"
+                          data-end={!hasPlan || consClipped ? '' : undefined}
+                          data-clip={consClipped ? '' : undefined}
+                          style={{ width: at(r.consomme, max) }}
+                        />
+                      )}
+                      {hasPlan && !consClipped && (
+                        <span
+                          className="pil-envbars__plan"
+                          data-gap={r.consomme > 0.05 ? '' : undefined}
+                          data-clip={clipped ? '' : undefined}
+                          style={{ '--from': at(r.consomme, max), '--to': at(r.plan, max) } as CSSProperties}
+                        />
+                      )}
+                      <span className="pil-envbars__tendance" style={{ left: at(r.tendance, max) }} />
+                    </span>
+                  ) : (
+                    <span className="pil-envbars__track">
+                      <span className="pil-envbars__note">
+                        Enveloppe à 0 € : {fmtEurShort(p.consomme)} consommés, atterrissage {fmtEurShort(p.atterrissage_plan)}
+                      </span>
+                    </span>
+                  )}
                   <span className="pil-envbars__value">{value}</span>
                 </button>
               </Tooltip>

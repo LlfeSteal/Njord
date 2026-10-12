@@ -366,10 +366,12 @@ export function forecastSentence(p: PrevisionCT): string {
   const e = echeanceOf(p);
   if (!e || p.budget == null) return `${sansEnveloppeSentence(p)}.`;
   const w = echeanceWords(e);
-  if (e.nonConsomme > 0.5)
-    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
+  // Même lecture que le statut et le point d'arrivée de la trajectoire : dépassement, puis sous-consommation
+  // (au-delà des seuils seulement : sous eux, l'atterrissage est dans la zone cible).
   if (p.ecart_plan != null && p.ecart_plan > 0.5)
     return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when}, soit ${fmtEurShort(p.ecart_plan)} au-dessus ${w.of} (${fmtEurShort(p.budget)}).`;
+  if (p.sous_consommation && e.nonConsomme > 0.5)
+    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
   const inTarget = p.cible_min != null && p.atterrissage_plan >= p.cible_min - 0.5 && p.atterrissage_plan <= p.budget + 0.5;
   return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when} pour ${e.kind === 'perimetre' ? 'des enveloppes' : 'une enveloppe'} de ${fmtEurShort(p.budget)}${inTarget ? ', dans la zone cible' : ''}.`;
 }

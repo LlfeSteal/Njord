@@ -243,7 +243,10 @@ const FORECAST_SERIES: ChartSeries[] = [
 /** Entrée de légende de la zone cible (pastille plus soutenue que la bande pour rester lisible). */
 const TARGET_SERIES: ChartSeries = { key: 'zone', label: 'Zone cible', token: '--success', opacity: 0.25 };
 
-const FORECAST_TOKENS = ['--blue', '--success', '--text', '--text-secondary', '--separator', '--card'] as const;
+/** Zone de dépassement (au-dessus de l'enveloppe) : fond rouge pâle, pour lire d'un coup d'œil où l'on atterrit. */
+const OVER_SERIES: ChartSeries = { key: 'over', label: 'Dépassement', token: '--danger', opacity: 0.18 };
+
+const FORECAST_TOKENS = ['--blue', '--success', '--danger', '--text', '--text-secondary', '--separator', '--card'] as const;
 
 const AXIS = { axisLine: false, tickLine: false } as const;
 
@@ -256,7 +259,7 @@ function niceCeil(v: number): number {
   return Math.ceil(v / step) * step;
 }
 
-/** Sous cette hauteur (inspecteur), le graphique est compact : ni légende, ni hachure, ni libellé long. */
+/** Sous cette hauteur (inspecteur), le graphique est compact : ni légende, ni libellé long. */
 const COMPACT_HEIGHT = 240;
 
 const DAY_MS = 86_400_000;
@@ -374,8 +377,6 @@ export interface ForecastChartProps {
 /** Trajectoire cumulée vers l'enveloppe : zone cible, enveloppe, réalisé, éventail plan ↔ tendance, point d'arrivée. */
 export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: ForecastChartProps) {
   const c = useTokenColors(FORECAST_TOKENS);
-  const hatch = useTokenColors(HATCH_TOKENS);
-  const patternId = usePatternId();
   const budget = prevision.budget;
   const series = budget == null ? [] : trajectoryOf(prevision);
   if (budget == null || series.length === 0) return null;
@@ -384,26 +385,35 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
   const showLegend = legend ?? !compact;
   const tick = { fill: c['--text-secondary'], fontSize: 11 };
   const hasToday = series.some((p) => p.week === asOfWeek);
-  const runs = compact ? [] : uncoveredRuns(series, 'point');
   const cibleMin = prevision.cible_min;
   const hasZone = cibleMin != null && budget - cibleMin > 0.5;
 
-  // Point d'arrivée : dernière semaine, sur la projection plan (réalisé si l'enveloppe est terminée).
+  // Point d'arrivée, à la dernière semaine : même lecture que le statut, le tableau et la phrase. Dépassement :
+  // atterrissage plan au-dessus de l'enveloppe ; sous-consommation (au-delà des seuils) : le point est sur la
+  // projection retenue (la plus basse), à « enveloppe − non consommé » ; sinon atterrissage plan, dans la cible.
   const last = series[series.length - 1];
-  const landing = last.plan_cumul ?? last.reel_cumul ?? prevision.atterrissage_plan;
-  const ecart = landing - budget;
+  const ecart = prevision.ecart_plan ?? prevision.atterrissage_plan - budget;
+  const nonConso = prevision.non_consomme ?? 0;
   const kind: LandingKind =
-    ecart > 0.5 ? 'over' : cibleMin != null && landing < cibleMin - 0.5 ? 'under' : prevision.statut === 'vigilance' ? 'vigilance' : 'in';
+    prevision.statut === 'depassement'
+      ? 'over'
+      : prevision.sous_consommation
+        ? 'under'
+        : prevision.statut === 'vigilance'
+          ? 'vigilance'
+          : 'in';
+  const landing = kind === 'under' ? budget - nonConso : prevision.atterrissage_plan;
+  const source = prevision.non_consomme_source === 'tendance' ? ' (tendance)' : '';
   const landingText = compact
     ? kind === 'over'
       ? `+${fmtEurShort(ecart)}`
       : kind === 'under'
-        ? `−${fmtEurShort(-ecart)}`
+        ? `−${fmtEurShort(nonConso)}`
         : fmtEurShort(landing)
     : kind === 'over'
       ? `+${fmtEurShort(ecart)} de dépassement`
       : kind === 'under'
-        ? `${fmtEurShort(-ecart)} non consommés`
+        ? `${fmtEurShort(nonConso)} non consommés${source}`
         : kind === 'vigilance'
           ? `${fmtEurShort(landing)} · dans la cible, vigilance`
           : `${fmtEurShort(landing)} · dans la cible`;
@@ -465,16 +475,17 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
 
   const tooltipNote = (d: TrajPoint) => (d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture));
   const tooltipExtra = (d: TrajPoint) => (d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []);
-  const legendSeries = [...FORECAST_SERIES, ...(hasZone ? [TARGET_SERIES] : []), ...(runs.length > 0 ? [UNCOVERED_SERIES] : [])];
+  const legendSeries = [...FORECAST_SERIES, ...(hasZone ? [TARGET_SERIES] : []), OVER_SERIES];
+  // « Aujourd'hui » sur la dernière semaine (enveloppe terminée) : marge pour que son libellé centré ne soit pas coupé.
+  const todayAtEnd = hasToday && last.week === asOfWeek;
   const lineProps = { type: 'monotone' as const, dot: false, connectNulls: false, isAnimationActive: false };
 
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={series} margin={{ top: 20, right: 12, bottom: 0, left: 0 }}>
-          {hatchDefs(patternId, hatch['--gray'])}
+        <ComposedChart data={series} margin={{ top: 20, right: todayAtEnd && !compact ? 36 : 12, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke={c['--separator']} />
-          {uncoveredAreas(runs, patternId)}
+          <ReferenceArea y1={budget} y2={yMax} fill={c['--danger']} fillOpacity={0.06} ifOverflow="hidden" />
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
           <YAxis {...AXIS} width={56} domain={[0, yMax]} tickCount={5} tick={tick} tickFormatter={(v: number) => fmtEurShort(v)} />
           <RTooltip

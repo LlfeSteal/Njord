@@ -508,12 +508,29 @@
   position: relative;
   height: 28px;
 }
-/* Zone cible [cible_min %, 100 %] : bande verte à 12 %, pleine hauteur (continue d'une ligne à l'autre). */
-.pil-envbars__zone {
+/* Zone cible [cible_min %, 100 %] : bande verte à 12 %, et zone de dépassement (> 100 %) rouge à 6 % ; 20 px
+   centrés sur la barre (une bande par ligne, sans effet d'escalier d'une ligne à l'autre). */
+.pil-envbars__zone,
+.pil-envbars__over {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 4px;
+  bottom: 4px;
+}
+.pil-envbars__zone {
   background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.pil-envbars__over {
+  right: 0;
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+/* Enveloppe à 0 € : pas de % possible, une mention à la place de la barre. */
+.pil-envbars__note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 .pil-envbars__ref {
   position: absolute;

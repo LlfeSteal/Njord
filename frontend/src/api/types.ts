@@ -590,9 +590,8 @@ export interface PrevisionCT {
   projection_plan_echeance: number;
   /** Consommé + rythme × semaines ]as_of, échéance] (0 sans enveloppe). */
   projection_tendance_echeance: number;
-  /** max(0, budget − min des deux projections) : enveloppe qui risque d'être perdue ; null sans budget. */
+  /** max(0, budget − atterrissage plan) : enveloppe que le plan de charge ne consommera pas (DECISIONS n° 21) ; null sans budget. */
   non_consomme: number | null;
-  non_consomme_source: 'plan' | 'tendance' | '';
   /** € / semaine à dépenser pour tout consommer à l'échéance ; null sans budget, 0 si aucune semaine. */
   rythme_necessaire: number | null;
   semaines_echeance: number;
@@ -630,10 +629,10 @@ export interface EnveloppesSynthese {
   atterrissage: number;
   /** atterrissage − montant (net : les CT se compensent). */
   ecart: number;
-  /** Σ ecart_plan > 0 des CT configurés. */
+  /** Σ ecart_plan des CT au statut `depassement` (DECISIONS n° 22) : depassement > 0 ⇔ nb_depassement > 0. */
   depassement: number;
   nb_depassement: number;
-  /** Σ non_consomme des CT configurés. */
+  /** Σ non_consomme des CT configurés, CT par CT sans compensation (DECISIONS n° 21). */
   non_consomme: number;
   nb_sous_consommation: number;
   plan_hors_enveloppe: number;

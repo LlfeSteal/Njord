@@ -645,8 +645,7 @@ type PrevisionCT struct {
 	BudgetEcheance             *float64 `json:"budget_echeance"`              // = budget
 	ProjectionPlanEcheance     float64  `json:"projection_plan_echeance"`     // consommé + PPS prévu des semaines ]as_of, échéance] (0 sans enveloppe)
 	ProjectionTendanceEcheance float64  `json:"projection_tendance_echeance"` // consommé + rythme × semaines ]as_of, échéance] (0 sans enveloppe)
-	NonConsomme                *float64 `json:"non_consomme"`                 // max(0, budget − min des deux projections) ; null sans budget
-	NonConsommeSource          string   `json:"non_consomme_source"`          // plan | tendance | "" (rien de non consommé ou sans budget)
+	NonConsomme                *float64 `json:"non_consomme"`                 // max(0, budget − atterrissage plan) : plan de charge seul (DECISIONS n° 21) ; null sans budget
 	RythmeNecessaire           *float64 `json:"rythme_necessaire"`            // (budget − consommé) ÷ semaines_echeance ; null sans budget, 0 si aucune semaine
 	SemainesEcheance           int      `json:"semaines_echeance"`            // semaines après as_of jusqu'à l'échéance (incluse)
 	SousConsommation           bool     `json:"sous_consommation"`            // non_consomme > seuils (% et €) ; false sans budget
@@ -696,9 +695,9 @@ type EnveloppesSynthese struct {
 	Montant            float64 `json:"montant"`              // Σ montants des enveloppes
 	Atterrissage       float64 `json:"atterrissage"`         // Σ atterrissage_plan des CT configurés
 	Ecart              float64 `json:"ecart"`                // atterrissage − montant (net : les CT se compensent)
-	Depassement        float64 `json:"depassement"`          // Σ ecart_plan > 0 des CT configurés (au-dessus de l'enveloppe)
+	Depassement        float64 `json:"depassement"`          // Σ ecart_plan des CT au statut depassement (DECISIONS n° 22) : depassement > 0 ⇔ NbDepassement > 0
 	NbDepassement      int     `json:"nb_depassement"`       // CT configurés au statut depassement
-	NonConsomme        float64 `json:"non_consomme"`         // Σ non_consomme des CT configurés (sous l'enveloppe)
+	NonConsomme        float64 `json:"non_consomme"`         // Σ non_consomme des CT configurés, CT par CT sans compensation (DECISIONS n° 21)
 	NbSousConsommation int     `json:"nb_sous_consommation"` // CT configurés en sous_consommation
 	PlanHorsEnveloppe  float64 `json:"plan_hors_enveloppe"`  // Σ plan_hors_enveloppe des CT configurés
 }

@@ -60,13 +60,10 @@ function statusWords(p: PrevisionCT): string {
   return 'Dans la zone cible';
 }
 
-/** Dernière ligne de la bulle : dépassement ou non consommé (projection retenue), sinon dans la cible. */
+/** Dernière ligne de la bulle : dépassement ou non consommé (plan de charge, DECISIONS n° 21), sinon dans la cible. */
 function verdict(p: PrevisionCT): string {
   if ((p.ecart_plan ?? 0) > 0.5) return `+${fmtEur(p.ecart_plan)} de dépassement`;
-  if ((p.non_consomme ?? 0) > 0.5) {
-    const src = p.non_consomme_source === 'tendance' ? ' (tendance)' : p.non_consomme_source === 'plan' ? ' (plan)' : '';
-    return `${fmtEur(p.non_consomme)} non consommés${src}`;
-  }
+  if ((p.non_consomme ?? 0) > 0.5) return `${fmtEur(p.non_consomme)} non consommés`;
   return 'Enveloppe consommée dans la zone cible';
 }
 

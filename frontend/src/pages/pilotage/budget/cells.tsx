@@ -43,7 +43,7 @@ export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: nu
 
 /**
  * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
- * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − projection retenue).
+ * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − atterrissage plan).
  */
 export function Reste({ value, over, warn, title }: { value: number | null; over: boolean; warn: boolean; title?: string }) {
   if (value == null) return <>—</>;

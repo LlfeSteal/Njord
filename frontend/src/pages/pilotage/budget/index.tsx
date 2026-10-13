@@ -46,7 +46,6 @@ import {
   SOUS_CONSO_LABEL,
   STATUT_LABEL,
   useSort,
-  sourceLabel,
   type Echeance,
 } from '../shared/pilotage';
 import { BudgetCell, Consumption, CtLabel, Reste, RowGlyph } from './cells';
@@ -55,12 +54,11 @@ import NatureBars from './NatureBars';
 import { mergeCtRows, sumOf, type BudgetSource, type CtRow } from './model';
 import '../shared/pilotage.css';
 
-/** Infobulle de « Reste à l'échéance » : enveloppe − projection retenue, à la fin de l'enveloppe. */
+/** Infobulle de « Reste à l'échéance » : enveloppe − atterrissage plan, à la fin de l'enveloppe (DECISIONS n° 21). */
 function resteTitle(e: Echeance | null | undefined): string | undefined {
   if (!e) return undefined;
-  const low = e.source === 'tendance' ? e.projTendance : e.source === 'plan' ? e.projPlan : Math.min(e.projPlan, e.projTendance);
   const w = echeanceWords(e);
-  return `${capitalize(w.when)} : ${w.budget} ${fmtEur(e.budget)} − ${sourceLabel(e.source)} ${fmtEur(low)}`;
+  return `${capitalize(w.when)} : ${w.budget} ${fmtEur(e.budget)} − atterrissage plan ${fmtEur(e.projPlan)}`;
 }
 
 type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'reste';
@@ -199,7 +197,7 @@ function BudgetTable({
             'reste',
             'Reste à l’échéance',
             true,
-            'Enveloppe non consommée à sa fin, selon la pire projection (plan ou tendance)',
+            'Enveloppe non consommée à sa fin, selon le plan de charge',
           )}
         </tr>
       </thead>
@@ -256,7 +254,7 @@ function BudgetTable({
               <Consumption pct={tConso != null && tBudget ? (tConso / tBudget) * 100 : null} />
             </td>
             <td data-align="right">{fmtEur(sumOf(envRows, 'atterrissage'))}</td>
-            <td data-align="right" title="Somme des CT avec enveloppe, chacun à la fin de son enveloppe : les CT se compensent (DECISIONS n° 19, 20)">
+            <td data-align="right" title="Somme des CT avec enveloppe, chacun à la fin de son enveloppe : non consommé CT par CT, sans compensation avec les dépassements (DECISIONS n° 20, 21)">
               {global?.complete ? (
                 <Reste
                   value={global.e.nonConsomme > 0.5 ? global.e.nonConsomme : global.e.depassement}
@@ -322,12 +320,7 @@ function EcheanceSection({ e }: { e: Echeance }) {
     <InspectorSection title={`Fin de l’enveloppe · ${fmtDayMonth(e.date)}`}>
       <KeyValue
         items={[
-          { label: e.source === 'plan' && unspent ? 'Projection plan (retenue)' : 'Projection plan', value: fmtEur(e.projPlan), numeric: true },
-          {
-            label: e.source === 'tendance' && unspent ? 'Projection tendance (retenue)' : 'Projection tendance',
-            value: fmtEur(e.projTendance),
-            numeric: true,
-          },
+          { label: 'Projection plan', value: fmtEur(e.projPlan), numeric: true },
           e.depassement > 0.5
             ? {
                 label: 'Dépassement prévu',
@@ -354,6 +347,7 @@ function EcheanceSection({ e }: { e: Echeance }) {
             numeric: true,
           },
           { label: 'Rythme actuel', value: `${fmtEur(e.rythmeActuel)} / sem.`, numeric: true },
+          { label: 'Projection tendance (repère)', value: fmtEur(e.projTendance), numeric: true },
         ]}
       />
     </InspectorSection>

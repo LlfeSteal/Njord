@@ -66,7 +66,7 @@ function EcartTooltip({ active, payload }: TooltipProps) {
     ['Atterrissage plan', fmtEur(p.atterrissage_plan)],
     ['Écart', `${d.ecart > 0.5 ? '+' : d.ecart < -0.5 ? '−' : ''}${fmtEur(Math.abs(d.ecart))}`],
   ];
-  if ((p.non_consomme ?? 0) > 0.5) rows.push(['Non consommé (pire projection)', fmtEur(p.non_consomme)]);
+  if ((p.non_consomme ?? 0) > 0.5) rows.push(['Non consommé (plan de charge)', fmtEur(p.non_consomme)]);
   if ((p.plan_hors_enveloppe ?? 0) > 0.5) rows.push(['Plan hors enveloppe', fmtEur(p.plan_hors_enveloppe)]);
   return (
     <div className="pil-tooltip">

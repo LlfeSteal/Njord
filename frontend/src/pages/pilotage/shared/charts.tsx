@@ -389,9 +389,9 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
   const cibleMin = prevision.cible_min;
   const hasZone = cibleMin != null && budget - cibleMin > 0.5;
 
-  // Point d'arrivée, à la dernière semaine : même lecture que le statut, le tableau et la phrase. Dépassement :
-  // atterrissage plan au-dessus de l'enveloppe ; sous-consommation (au-delà des seuils) : le point est sur la
-  // projection retenue (la plus basse), à « enveloppe − non consommé » ; sinon atterrissage plan, dans la cible.
+  // Point d'arrivée, à la dernière semaine : même lecture que le statut, le tableau et la phrase. Toujours sur
+  // l'atterrissage plan (DECISIONS n° 21) : au-dessus de l'enveloppe en dépassement, sous la cible en sous-consommation
+  // (= enveloppe − non consommé), dans la cible sinon. La tendance n'est qu'un repère (courbe, éventail).
   const last = series[series.length - 1];
   const ecart = prevision.ecart_plan ?? prevision.atterrissage_plan - budget;
   const nonConso = prevision.non_consomme ?? 0;
@@ -403,8 +403,7 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
         : prevision.statut === 'vigilance'
           ? 'vigilance'
           : 'in';
-  const landing = kind === 'under' ? budget - nonConso : prevision.atterrissage_plan;
-  const source = prevision.non_consomme_source === 'tendance' ? ' (tendance)' : '';
+  const landing = prevision.atterrissage_plan;
   const landingText = compact
     ? kind === 'over'
       ? `+${fmtEurShort(ecart)}`
@@ -414,7 +413,7 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
     : kind === 'over'
       ? `+${fmtEurShort(ecart)} de dépassement`
       : kind === 'under'
-        ? `${fmtEurShort(nonConso)} non consommés${source}`
+        ? `${fmtEurShort(nonConso)} non consommés (plan de charge)`
         : kind === 'vigilance'
           ? `${fmtEurShort(landing)} · dans la cible, vigilance`
           : `${fmtEurShort(landing)} · dans la cible`;

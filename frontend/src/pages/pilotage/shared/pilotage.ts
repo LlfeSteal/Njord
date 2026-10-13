@@ -186,14 +186,13 @@ export interface Echeance {
   date: string;
   /** Montant de l'enveloppe (périmètre : Σ enveloppes). */
   budget: number;
+  /** Atterrissage plan à l'échéance : seule base du non consommé et du dépassement (DECISIONS n° 21). */
   projPlan: number;
+  /** Projection tendance à l'échéance : repère (trace, vigilance), jamais source d'un montant (DECISIONS n° 21). */
   projTendance: number;
-  /** Projection retenue : la plus basse des deux (la pire pour la sous-consommation). */
-  worst: number;
-  source: 'plan' | 'tendance' | '';
-  /** Enveloppe qui risque d'être perdue (≥ 0). */
+  /** Enveloppe que le plan de charge ne consommera pas, donc perdue (≥ 0, DECISIONS n° 21). */
   nonConsomme: number;
-  /** Dépassement de l'enveloppe par les deux projections (au moins ce montant), 0 sinon. */
+  /** Dépassement de l'enveloppe par l'atterrissage plan (`ecart_plan`, DECISIONS n° 21), 0 sinon. */
   depassement: number;
   rythmeNecessaire: number;
   rythmeActuel: number;
@@ -208,10 +207,7 @@ export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
   const budget = p.budget_echeance ?? p.budget ?? 0;
   const projPlan = p.projection_plan_echeance ?? 0;
   const projTendance = p.projection_tendance_echeance ?? 0;
-  const source = p.non_consomme_source ?? '';
-  const worst = source === 'plan' ? projPlan : source === 'tendance' ? projTendance : Math.min(projPlan, projTendance);
   const nonConsomme = Math.max(0, p.non_consomme ?? 0);
-  const low = Math.min(projPlan, projTendance);
   return {
     kind: p.enveloppe ? 'enveloppe' : 'perimetre',
     enveloppe: p.enveloppe ?? null,
@@ -219,10 +215,10 @@ export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
     budget,
     projPlan,
     projTendance,
-    worst,
-    source,
     nonConsomme,
-    depassement: nonConsomme > 0.5 ? 0 : Math.max(0, low - budget),
+    // Plan seul (DECISIONS n° 21). Un CT n'a jamais les deux ; le périmètre peut (non consommé sommé CT par CT, écart net) :
+    // la lecture reste alors « non consommé », comme la ligne de total du tableau.
+    depassement: nonConsomme > 0.5 ? 0 : Math.max(0, p.ecart_plan ?? projPlan - budget),
     rythmeNecessaire: p.rythme_necessaire ?? 0,
     rythmeActuel: p.rythme_hebdo ?? 0,
     semaines: p.semaines_echeance ?? 0,
@@ -235,9 +231,6 @@ export function fmtDayMonth(d: string | null | undefined): string {
   const m = d ? /^\d{4}-(\d{2})-(\d{2})/.exec(d) : null;
   return m ? `${m[2]}/${m[1]}` : '—';
 }
-
-/** Projection retenue, en clair : « projection tendance ». */
-export const sourceLabel = (s: Echeance['source']) => (s === 'tendance' ? 'projection tendance' : s === 'plan' ? 'projection plan' : 'pire projection');
 
 /** « il faudrait 12 k€/sem. (actuel 8 k€/sem.) », ou null s'il ne reste aucune semaine. */
 export function paceText(e: Echeance): string | null {
@@ -303,8 +296,9 @@ export function enveloppesOf(fc: Previsions | null | undefined): EnveloppesSynth
     s.nb_configures += 1;
     s.montant += p.enveloppe.montant;
     s.atterrissage += p.atterrissage_plan;
-    if (p.ecart_plan != null && p.ecart_plan > 0) {
-      s.depassement += p.ecart_plan;
+    // DECISIONS n° 22 : montant et compteur sortent de la même règle (statut), un résidu d'arrondi n'est pas agrégé.
+    if (p.statut === 'depassement') {
+      s.depassement += p.ecart_plan ?? 0;
       s.nb_depassement += 1;
     }
     s.non_consomme += Math.max(0, p.non_consomme ?? 0);
@@ -371,7 +365,7 @@ export function forecastSentence(p: PrevisionCT): string {
   if (p.ecart_plan != null && p.ecart_plan > 0.5)
     return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when}, soit ${fmtEurShort(p.ecart_plan)} au-dessus ${w.of} (${fmtEurShort(p.budget)}).`;
   if (p.sous_consommation && e.nonConsomme > 0.5)
-    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (${sourceLabel(e.source)}).`;
+    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (plan de charge).`;
   const inTarget = p.cible_min != null && p.atterrissage_plan >= p.cible_min - 0.5 && p.atterrissage_plan <= p.budget + 0.5;
   return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when} pour ${e.kind === 'perimetre' ? 'des enveloppes' : 'une enveloppe'} de ${fmtEurShort(p.budget)}${inTarget ? ', dans la zone cible' : ''}.`;
 }

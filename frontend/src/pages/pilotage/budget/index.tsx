@@ -581,20 +581,23 @@ export default function BudgetPage() {
   // Prévisions de l'année choisie (DECISIONS n° 24) ; la synthèse budget (BudgetCT) reste « Tout ».
   const fc = r ? prev.previsions : null;
   const rows = useMemo(() => (r ? mergeCtRows(r, fc) : []), [r, fc]);
+  // Année choisie : un CT sans tranche d'enveloppe dans l'année n'est pas listé (DECISIONS n° 29) ;
+  // l'inspecteur (?ct=) le retrouve dans `rows`.
+  const visibleRows = useMemo(() => (anneeOf(fc) > 0 ? rows.filter((x) => !x.horsAnnee) : rows), [rows, fc]);
   const annee = anneeOf(fc);
   const filtered = useMemo(() => {
     const nq = norm(q.trim());
-    return rows.filter(
+    return visibleRows.filter(
       (x) =>
         (!nq || norm(x.ct).includes(nq) || norm(x.libelle).includes(nq)) &&
         (statut === 'all' || x.statut === statut) &&
         (!risqueOnly || x.risque) &&
         (!sousConsoOnly || x.sousConso),
     );
-  }, [rows, q, statut, risqueOnly, sousConsoOnly]);
+  }, [visibleRows, q, statut, risqueOnly, sousConsoOnly]);
   const env = enveloppesOf(fc);
   const globalE = echeanceOf(fc?.global, annee);
-  const nbEnvRows = rows.filter((x) => x.budget != null).length;
+  const nbEnvRows = visibleRows.filter((x) => x.budget != null).length;
   const selected = ctParam ? rows.find((x) => x.ct === ctParam) : undefined;
 
   const setCt = (ct: string | null) =>
@@ -627,7 +630,7 @@ export default function BudgetPage() {
           subtitle={
             r && (
               <>
-                {rows.length} CT{fc ? ` · données arrêtées au ${fmtDate(fc.as_of)}` : ''} <ArchivedTag result={r} />
+                {visibleRows.length} CT{fc ? ` · données arrêtées au ${fmtDate(fc.as_of)}` : ''} <ArchivedTag result={r} />
               </>
             )
           }

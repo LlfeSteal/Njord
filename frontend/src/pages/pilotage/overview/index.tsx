@@ -99,7 +99,7 @@ function KeyFigures({ fc }: { fc: Previsions | null }) {
       </div>
       {nbHors > 0 && (
         <p className="pil-note">
-          <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
+          <Link to="/enveloppes" size="sm">
             {nbHors} CT sans enveloppe
           </Link>
           {hors ? ` : ${fmtEurShort(hors.consomme)} consommés${en}` : ''}

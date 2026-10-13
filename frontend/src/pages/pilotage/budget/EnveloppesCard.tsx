@@ -113,7 +113,7 @@ function Sentence({ s, annee }: { s: EnveloppesSynthese; annee: number }) {
       {todo > 0 && (
         <>
           {' · '}
-          <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
+          <Link to="/enveloppes" size="sm">
             {nCt(todo)} sans enveloppe
           </Link>
         </>

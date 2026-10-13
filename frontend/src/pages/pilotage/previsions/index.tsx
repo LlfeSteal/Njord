@@ -111,7 +111,7 @@ function HorsEnveloppeNote({ h, annee }: { h: HorsEnveloppe | null | undefined; 
     <p className="pil-note">
       Hors périmètre{enAnnee(annee)} : {h.nb_ct} CT sans enveloppe, {fmtEurShort(h.consomme)} consommés, atterrissage sécurisé{' '}
       {fmtEurShort(h.atterrissage_plan)}.{' '}
-      <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
+      <Link to="/enveloppes" size="sm">
         Voir les CT sans enveloppe
       </Link>
     </p>

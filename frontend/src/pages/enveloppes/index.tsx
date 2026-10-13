@@ -11,7 +11,6 @@ import {
   Page,
   PageToolbar,
   SearchField,
-  SegmentedControl,
   SkeletonRows,
   Spinner,
   Table,
@@ -25,7 +24,6 @@ import { fmtMontant, groupByCategorie, nEnveloppes, norm, useEnveloppes, type En
 import { SourcePills } from './shared';
 import './enveloppes.css';
 
-type EnvFilter = 'all' | 'with' | 'without';
 const COLS = 5;
 
 /** Sous-titre : « N enveloppes · Σ montant ». */
@@ -41,10 +39,6 @@ export default function EnveloppesPage() {
   const openCt = sp.get('ct');
   const [search, setSearch] = useState('');
   const [debounced] = useDebouncedValue(norm(search.trim()), 200);
-  // ?filtre=sans_enveloppe (liens « k CT sans enveloppe » de la Vue d'ensemble, du Budget et des Prévisions) : filtre initial.
-  const [filter, setFilter] = useState<EnvFilter>(() =>
-    sp.get('filtre') === 'sans_enveloppe' ? 'without' : sp.get('filtre') === 'avec_enveloppe' ? 'with' : 'all',
-  );
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [creating, setCreating] = useState(false);
 
@@ -63,14 +57,8 @@ export default function EnveloppesPage() {
         : all,
     [all, debounced],
   );
-  const nbWithout = useMemo(() => matching.filter((r) => r.enveloppe == null).length, [matching]);
-  const groups = useMemo(
-    () =>
-      groupByCategorie(
-        filter === 'all' ? matching : matching.filter((r) => (filter === 'without' ? r.enveloppe == null : r.enveloppe != null)),
-      ),
-    [matching, filter],
-  );
+  // Tout CT a une enveloppe (DECISIONS n° 28) : plus de filtre Avec / Sans enveloppe.
+  const groups = useMemo(() => groupByCategorie(matching), [matching]);
 
   const setOpen = (ct: string | null) => {
     setCreating(false);
@@ -129,17 +117,6 @@ export default function EnveloppesPage() {
             value={search}
             onChange={setSearch}
             width={280}
-          />
-          <SegmentedControl<EnvFilter>
-            aria-label="Filtrer par enveloppe"
-            equal={false}
-            value={filter}
-            onChange={setFilter}
-            data={[
-              { value: 'all', label: 'Tous' },
-              { value: 'with', label: 'Avec enveloppe' },
-              { value: 'without', label: 'Sans enveloppe', count: nbWithout },
-            ]}
           />
           {q.isFetching && !q.isLoading && <Spinner size={12} label="Actualisation" />}
         </Group>

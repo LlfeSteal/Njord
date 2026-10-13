@@ -58,7 +58,7 @@ import {
 import { BudgetCell, Consumption, CtLabel, Reste, RowGlyph } from './cells';
 import EnveloppesCard from './EnveloppesCard';
 import NatureBars from './NatureBars';
-import { mergeCtRows, sumOf, type BudgetSource, type CtRow } from './model';
+import { mergeCtRows, sumOf, type CtRow } from './model';
 import '../shared/pilotage.css';
 
 /** Infobulle de « Reste à l'échéance » : enveloppe − atterrissage sécurisé, à la fin de l'enveloppe (DECISIONS n° 21, 23). */
@@ -82,14 +82,6 @@ function classificationOf(p: PrevisionCT | null | undefined): { securise: number
 
 type SortKey = 'ct' | 'budget' | 'consomme' | 'pct' | 'atterrissage' | 'reste';
 type StatutFilter = 'all' | PrevisionStatut;
-type SourceFilter = 'all' | BudgetSource;
-
-const SOURCE_OPTIONS: { value: SourceFilter; label: string }[] = [
-  { value: 'all', label: 'Tous' },
-  { value: 'enveloppe', label: 'Avec enveloppe' },
-  { value: 'aucun', label: 'Sans enveloppe' },
-];
-const SOURCE_LABEL: Record<BudgetSource, string> = { enveloppe: 'Avec enveloppe', aucun: 'Sans enveloppe' };
 
 const STATUT_OPTIONS: { value: StatutFilter; label: string }[] = [
   { value: 'all', label: 'Tous' },
@@ -584,7 +576,6 @@ export default function BudgetPage() {
   const [statut, setStatut] = useState<StatutFilter>('all');
   const [risqueOnly, setRisqueOnly] = useState(false);
   const [sousConsoOnly, setSousConsoOnly] = useState(false);
-  const [source, setSource] = useState<SourceFilter>('all');
 
   const r = a.result.data;
   // Prévisions de l'année choisie (DECISIONS n° 24) ; la synthèse budget (BudgetCT) reste « Tout ».
@@ -598,10 +589,9 @@ export default function BudgetPage() {
         (!nq || norm(x.ct).includes(nq) || norm(x.libelle).includes(nq)) &&
         (statut === 'all' || x.statut === statut) &&
         (!risqueOnly || x.risque) &&
-        (!sousConsoOnly || x.sousConso) &&
-        (source === 'all' || x.source === source),
+        (!sousConsoOnly || x.sousConso),
     );
-  }, [rows, q, statut, risqueOnly, sousConsoOnly, source]);
+  }, [rows, q, statut, risqueOnly, sousConsoOnly]);
   const env = enveloppesOf(fc);
   const globalE = echeanceOf(fc?.global, annee);
   const nbEnvRows = rows.filter((x) => x.budget != null).length;
@@ -622,10 +612,8 @@ export default function BudgetPage() {
     ...(statut !== 'all' ? [{ key: 'statut', label: `Prévision : ${STATUT_LABEL[statut]}`, onRemove: () => setStatut('all') }] : []),
     ...(risqueOnly ? [{ key: 'risque', label: 'CT à risque', onRemove: () => setRisqueOnly(false) }] : []),
     ...(sousConsoOnly ? [{ key: 'sous_conso', label: SOUS_CONSO_LABEL, onRemove: () => setSousConsoOnly(false) }] : []),
-    ...(source !== 'all' ? [{ key: 'source', label: `Budget : ${SOURCE_LABEL[source]}`, onRemove: () => setSource('all') }] : []),
   ];
   const resetFilters = () => {
-    setSource('all');
     setStatut('all');
     setRisqueOnly(false);
     setSousConsoOnly(false);
@@ -660,7 +648,6 @@ export default function BudgetPage() {
                   value={statut}
                   onChange={(v) => setStatut((v as StatutFilter | null) ?? 'all')}
                 />
-                <Select label="Budget" data={SOURCE_OPTIONS} value={source} onChange={(v) => setSource((v as SourceFilter | null) ?? 'all')} />
                 <Switch label="CT à risque seulement" checked={risqueOnly} onChange={setRisqueOnly} />
                 <Switch label="Sous-consommation seulement" checked={sousConsoOnly} onChange={setSousConsoOnly} />
               </FilterButton>

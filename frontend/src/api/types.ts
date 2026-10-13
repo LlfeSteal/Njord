@@ -212,7 +212,20 @@ export interface EnveloppeCT {
   enveloppe: Enveloppe | null;
 }
 
-/** Dernier import du fichier des enveloppes. */
+/** Corps de PUT /enveloppes/:ct (saisie dans l'interface, DECISIONS n° 27). */
+export interface EnveloppeInput {
+  /** YYYY-MM-DD */
+  date_debut: string;
+  /** YYYY-MM-DD, ≥ date_debut */
+  date_fin: string;
+  /** € ≥ 0 */
+  montant: number;
+  /** Libellé libre de la catégorie ('' = hors catégorie). */
+  categorie: string;
+  operateur?: string;
+}
+
+/** @deprecated Import supprimé (DECISIONS n° 27) ; retiré à l'intégration. */
 export interface EnveloppesImport {
   filename: string;
   importe_le: string;
@@ -222,8 +235,8 @@ export interface EnveloppesImport {
 
 /** GET /enveloppes : CT triés par code de catégorie puis CT, hors catégorie puis hors fichier en dernier. */
 export interface EnveloppesListe {
-  /** null tant qu'aucun fichier n'a été importé. */
-  import: EnveloppesImport | null;
+  /** @deprecated Import supprimé (DECISIONS n° 27) ; retiré à l'intégration. */
+  import?: EnveloppesImport | null;
   cts: EnveloppeCT[];
 }
 
@@ -264,8 +277,10 @@ export interface Settings {
   semaines_verrouillees: number[];
   jours_feries: string[];
   mo_types: string[];
-  securise: string[];
-  non_securise: string[];
+  /** @deprecated Classification du réalisé supprimée (DECISIONS n° 23) ; retiré à l'intégration. */
+  securise?: string[];
+  /** @deprecated idem. */
+  non_securise?: string[];
 }
 
 export interface AuditEntry {
@@ -400,6 +415,11 @@ export interface EcartRow {
    */
   reaffecte: number;
   cts_lies: string[];
+  /**
+   * Clés des anomalies qui citent ce tuple (DECISIONS n° 26), jamais null : `ecart|CT|ressource|flag`, plus
+   * `ecart|B|ressource|erreur_ct` par CT B imputé à tort lié. Masqué des écarts quand ≥ 1 clé et toutes traitées / ignorées.
+   */
+  anomalies: string[];
 }
 
 export interface KPIs {
@@ -446,12 +466,16 @@ export interface BudgetNature {
   pct_consomme: number | null;
 }
 
+/** Classification prévisionnelle (DECISIONS n° 23) : sécurisé = PDC restant + provisions sécurisées, non sécurisé = provisions pour aléas. */
 export interface BudgetCT {
   ct: string;
   ct_libelle: string;
+  /** reste_a_faire + provisions_securisees (prévision « Tout »). */
   securise: number;
+  /** provisions_aleas. */
   non_securise: number;
-  non_classe: number;
+  /** @deprecated supprimé (DECISIONS n° 23). */
+  non_classe?: number;
   pct_securite: number | null; // 0..100
   pps_plan: number;
   /** Σ provisions du CT. */
@@ -464,7 +488,8 @@ export interface BudgetCT {
 export interface BudgetGlobal {
   securise: number;
   non_securise: number;
-  non_classe: number;
+  /** @deprecated supprimé (DECISIONS n° 23). */
+  non_classe?: number;
   pct_securite: number | null;
   pct_non_securise: number | null;
 }
@@ -549,6 +574,8 @@ export interface PrevisionPoint {
   heures_plan: number;
   heures_reel: number | null;
   couverture: Couverture;
+  /** ETP planifiés de la semaine : Σ pourcentage/100 des segments MO × jours ouvrés couverts ÷ jours ouvrés (DECISIONS n° 25). */
+  etp: number;
 }
 
 export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
@@ -567,10 +594,17 @@ export interface PrevisionCT {
   pps: number;
   /** Σ provisions restantes, info. */
   provisions: number;
+  /** Provisions sécurisées (ligne de coût ≠ PROVISIONS POUR ALEAS) comptées dans l'atterrissage : datées dans la période ou sans date (DECISIONS n° 23). */
+  provisions_securisees: number;
+  /** Provisions pour aléas (non sécurisées) : jamais dans l'atterrissage. */
+  provisions_aleas: number;
+  /** Provisions sécurisées datées hors de la période de l'enveloppe (exclues). */
+  provisions_hors_enveloppe: number;
   consomme: number;
   /** consomme ÷ budget, 0..100+ ; null sans budget ou budget nul. */
   pct_consomme: number | null;
   reste_a_faire: number;
+  /** Atterrissage sécurisé = consommé + reste_a_faire + provisions_securisees (DECISIONS n° 23). */
   atterrissage_plan: number;
   atterrissage_tendance: number;
   /** atterrissage_plan − budget ; null sans budget. */
@@ -590,7 +624,7 @@ export interface PrevisionCT {
   projection_plan_echeance: number;
   /** Consommé + rythme × semaines ]as_of, échéance] (0 sans enveloppe). */
   projection_tendance_echeance: number;
-  /** max(0, budget − atterrissage plan) : enveloppe que le plan de charge ne consommera pas (DECISIONS n° 21) ; null sans budget. */
+  /** max(0, budget − atterrissage sécurisé) : enveloppe que le plan de charge et les provisions sécurisées ne consommeront pas (DECISIONS n° 21, 23) ; null sans budget. */
   non_consomme: number | null;
   /** € / semaine à dépenser pour tout consommer à l'échéance ; null sans budget, 0 si aucune semaine. */
   rythme_necessaire: number | null;
@@ -639,6 +673,10 @@ export interface EnveloppesSynthese {
 }
 
 export interface Previsions {
+  /** Filtre d'année (DECISIONS n° 24) : 0 = Tout ; N = enveloppes coupées aux semaines ISO de N, montants au prorata. */
+  annee: number;
+  /** Années proposées : année d'as_of → année de la fin d'enveloppe la plus tardive. */
+  annees: number[];
   as_of: string;
   as_of_week: string;
   global: PrevisionCT;

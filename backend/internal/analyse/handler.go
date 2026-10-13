@@ -25,6 +25,7 @@ func New(st *store.Store) *Handler { return &Handler{st: st, repo: NewRepo(st)} 
 func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/analyse/context", h.context)
 	g.GET("/analyse", h.analyse)
+	g.GET("/analyse/previsions", h.previsionsAnnee)
 	g.GET("/analyse/ecarts.csv", h.ecartsCSV)
 	g.GET("/analyse/realise-enrichi.csv", h.realiseCSV)
 	g.GET("/analyse/plan-timeline", h.planTimeline)
@@ -190,6 +191,9 @@ func (h *Handler) ecartsCSV(c *gin.Context) {
 	}
 	rows := FilterEcarts(res.Ecarts, strings.TrimSpace(c.Query("ct")), strings.TrimSpace(c.Query("ressource")),
 		flags, strings.TrimSpace(c.Query("squad_id")))
+	if httpx.QueryBool(c, "masquer_traites", false) {
+		rows = HideTraites(rows, res.Anomalies) // DECISIONS n° 26
+	}
 	header := []string{"Ressource", "CT", "Semaine", "Prévu (h)", "Réel (h)", "Écart (h)", "Flag", "Confiance", "CT liés"}
 	httpx.CSV(c, "ecarts.csv", header, func(write func([]string) error) error {
 		for _, r := range rows {

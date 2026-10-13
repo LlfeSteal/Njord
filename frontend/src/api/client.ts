@@ -6,6 +6,8 @@ import type {
   AnomalieSuivi,
   AnomalieSuiviInput,
   AuditEntry,
+  EnveloppeCT,
+  EnveloppeInput,
   EnveloppesListe,
   Facets,
   ImportReport,
@@ -13,6 +15,7 @@ import type {
   Kind,
   PlanCompare,
   Personne,
+  Previsions,
   PlanLinesPage,
   PlanTimeline,
   ProvisionLinesPage,
@@ -204,11 +207,17 @@ export const referentielApi = {
 // ------------------------------------------------------------------ Enveloppes (DECISIONS n° 18)
 export const enveloppeApi = {
   list: () => get<EnveloppesListe>('/enveloppes'),
+  /** Crée ou remplace l'enveloppe d'un CT (DECISIONS n° 27) → la ligne du CT. */
+  put: (ct: string, body: EnveloppeInput) => put<EnveloppeCT>(`/enveloppes/${encodeURIComponent(ct)}`, body),
+  /** Supprime l'enveloppe d'un CT → 204. */
+  remove: (ct: string, operateur?: string) => del<void>(`/enveloppes/${encodeURIComponent(ct)}` + qs({ operateur })),
+  /** @deprecated Import supprimé (DECISIONS n° 27). */
   preview: (file: File) => {
     const fd = new FormData();
     fd.append('file', file);
     return post<ImportReport>('/enveloppes/import/preview', fd);
   },
+  /** @deprecated Import supprimé (DECISIONS n° 27). */
   commit: (file: File, importeur?: string) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -230,10 +239,14 @@ export interface EcartsCsvQuery extends AnalyseParams, Query {
   ressource?: string;
   flag?: string;
   squad_id?: string;
+  /** Masque les tuples dont toutes les anomalies sont traitées / ignorées (DECISIONS n° 26). */
+  masquer_traites?: boolean;
 }
 export const analyseApi = {
   context: () => get<AnalyseContext>('/analyse/context'),
   run: (p: AnalyseParams) => get<AnalyseResult>('/analyse', p as Query),
+  /** Prévisions coupées à l'année `annee` (DECISIONS n° 24) ; 0 = Tout. */
+  previsions: (p: AnalyseParams, annee: number) => get<Previsions>('/analyse/previsions', { ...(p as Query), annee }),
   ecartsCsvUrl: (q: EcartsCsvQuery) => csvUrl('/analyse/ecarts.csv', q),
   realiseEnrichiCsvUrl: (p: AnalyseParams & { mask_sensitive?: boolean }) =>
     csvUrl('/analyse/realise-enrichi.csv', p as Query),

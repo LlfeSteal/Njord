@@ -6,7 +6,6 @@ import { settingsApi } from '../../api/client';
 import type { Settings } from '../../api/types';
 import ErrorAlert from '../../components/ErrorAlert';
 import {
-  Banner,
   Button,
   GroupedList,
   ListRow,
@@ -27,7 +26,7 @@ import ReglagesToolbar from './ReglagesToolbar';
 import './reglages.css';
 
 type NumKey = {
-  [K in keyof Settings]: Settings[K] extends number ? K : never;
+  [K in keyof Settings]-?: Settings[K] extends number ? K : never;
 }[keyof Settings];
 
 interface NumField {
@@ -85,7 +84,7 @@ const SECTIONS: Section[] = [
         label: 'CT à risque',
         unit: '€',
         min: 0,
-        description: 'CT à risque si Σ € non sécurisé > seuil',
+        description: 'CT à risque si ses provisions pour aléas (non sécurisées) dépassent ce montant',
       },
       {
         key: 'seuil_non_securise_pct',
@@ -93,7 +92,7 @@ const SECTIONS: Section[] = [
         unit: '%',
         min: 0,
         max: 100,
-        description: 'Alerte globale si % non sécurisé > seuil',
+        description: 'Alerte globale si les provisions pour aléas dépassent ce % du reste sécurisé + non sécurisé',
       },
       {
         key: 'seuil_ecart_tg_eur',
@@ -254,25 +253,27 @@ const SOUS_CONSO_DEFAULTS: Pick<Settings, 'seuil_sous_conso_pct' | 'seuil_sous_c
 };
 
 /** Éditeurs de liste ouverts en fenêtre depuis leur ligne. */
-type ListEditor = 'weeks' | 'holidays' | 'mo_types' | 'securise' | 'non_securise';
+type ListEditor = 'weeks' | 'holidays' | 'mo_types';
 
-const TYPE_LISTS: { key: 'mo_types' | 'securise' | 'non_securise'; label: string; description?: string }[] = [
-  {
-    key: 'mo_types',
-    label: "Types main d'œuvre (heures)",
-    description: "QUANTITE comptée en heures si TYPE ∈ liste et CATEGORIE = MAIN D'OEUVRE",
-  },
-  { key: 'securise', label: 'Types sécurisés' },
-  { key: 'non_securise', label: 'Types non sécurisés' },
-];
+const MO_TYPES_LABEL = "Types main d'œuvre (heures)";
+const MO_TYPES_DESCRIPTION = "QUANTITE comptée en heures si TYPE ∈ liste et CATEGORIE = MAIN D'OEUVRE";
 
 const EDITOR_TITLE: Record<ListEditor, string> = {
   weeks: 'Semaines ISO verrouillées',
   holidays: 'Jours fériés',
-  mo_types: "Types main d'œuvre (heures)",
-  securise: 'Types sécurisés',
-  non_securise: 'Types non sécurisés',
+  mo_types: MO_TYPES_LABEL,
 };
+
+/**
+ * Retire les listes `securise` / `non_securise` (classification du réalisé supprimée, DECISIONS n° 23) :
+ * ni comparées pour « modifié », ni renvoyées à l'enregistrement.
+ */
+function withoutDeprecated(s: Settings): Settings {
+  const out = { ...s };
+  delete out.securise;
+  delete out.non_securise;
+  return out;
+}
 
 /** Ligne de réglage dont la description cède la place à l'erreur de validation. */
 function rowDescription(description: string | undefined, error: string | null | undefined) {
@@ -291,12 +292,12 @@ export default function SettingsForm() {
   const [weekError, setWeekError] = useState<string | null>(null);
   const [editor, setEditor] = useState<ListEditor | null>(null);
 
-  const saved = settingsQ.data ? { ...SOUS_CONSO_DEFAULTS, ...settingsQ.data } : undefined;
+  const saved = settingsQ.data ? { ...SOUS_CONSO_DEFAULTS, ...withoutDeprecated(settingsQ.data) } : undefined;
   const current = draft ?? saved;
   const dirty = !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
   const save = useMutation({
-    mutationFn: (s: Settings) => settingsApi.put(s),
+    mutationFn: (s: Settings) => settingsApi.put(withoutDeprecated(s)),
     onSuccess: (s) => {
       qc.setQueryData(qk.settings(), s);
       qc.invalidateQueries({ queryKey: ['settings'] });
@@ -336,8 +337,6 @@ export default function SettingsForm() {
     .map((f) => fieldError(f, current[f.key]))
     .filter(Boolean);
   const invalid = errors.length > 0;
-
-  const overlap = current.securise.filter((t) => current.non_securise.includes(t));
 
   const onWeeksChange = (vals: string[]) => {
     const bad = vals.filter((v) => !/^\d{1,2}$/.test(v.trim()) || Number(v) < 1 || Number(v) > 53);
@@ -419,26 +418,16 @@ export default function SettingsForm() {
           />
         </GroupedList>
 
-        <Stack gap={8}>
-          <GroupedList
-            title="Classification"
-            footer="Valeurs du champ TYPE du réalisé. Les suggestions reprennent les types connus ; toute autre valeur peut être saisie."
-          >
-            {TYPE_LISTS.map((t) => (
-              <ListRow
-                key={t.key}
-                label={t.label}
-                value={<span className="reglages-summary">{summarize(current[t.key], ['type', 'types'], 'Aucun', 2)}</span>}
-                onClick={() => setEditor(t.key)}
-              />
-            ))}
-          </GroupedList>
-          {overlap.length > 0 && (
-            <Banner tone="warning" compact>
-              Présent dans les deux listes : {overlap.join(', ')}
-            </Banner>
-          )}
-        </Stack>
+        <GroupedList
+          title="Main d'œuvre"
+          footer="Valeurs du champ TYPE du réalisé. Les suggestions reprennent les types connus ; toute autre valeur peut être saisie."
+        >
+          <ListRow
+            label={MO_TYPES_LABEL}
+            value={<span className="reglages-summary">{summarize(current.mo_types, ['type', 'types'], 'Aucun', 2)}</span>}
+            onClick={() => setEditor('mo_types')}
+          />
+        </GroupedList>
 
         {/* Barre d'enregistrement : collante, seulement en cas de modification. */}
         {dirty && (
@@ -488,15 +477,14 @@ export default function SettingsForm() {
         {editor === 'holidays' && (
           <HolidaysEditor label={null} value={current.jours_feries} onChange={(v) => set('jours_feries', v)} />
         )}
-        {TYPE_LISTS.filter((t) => t.key === editor).map((t) => (
+        {editor === 'mo_types' && (
           <TypeListInput
-            key={t.key}
-            label={t.label}
-            description={t.description}
-            value={current[t.key]}
-            onChange={(v) => set(t.key, dedupe(v))}
+            label={MO_TYPES_LABEL}
+            description={MO_TYPES_DESCRIPTION}
+            value={current.mo_types}
+            onChange={(v) => set('mo_types', dedupe(v))}
           />
-        ))}
+        )}
       </Modal>
     </Page>
   );

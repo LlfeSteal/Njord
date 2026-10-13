@@ -28,6 +28,7 @@ const OBJET_TYPES: { value: string; label: string }[] = [
   { value: 'realise_version', label: 'Version de réalisé' },
   { value: 'personne', label: 'Personne' },
   { value: 'squad', label: 'Squad' },
+  { value: 'enveloppe', label: 'Enveloppe' },
   { value: 'settings', label: 'Paramètres' },
 ];
 const OBJET_LABEL = Object.fromEntries(OBJET_TYPES.map((o) => [o.value, o.label]));

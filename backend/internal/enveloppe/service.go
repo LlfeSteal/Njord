@@ -3,94 +3,168 @@ package enveloppe
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
+	"math"
+	"strings"
+	"time"
 
 	"njord/internal/domain"
+	"njord/internal/httpx"
 	"njord/internal/store"
 )
 
-// Service implements the envelope import use cases on top of the store.
+// Service implements the envelope entry use cases (DECISIONS n° 27) on top of the store.
 type Service struct{ st *store.Store }
 
 func NewService(st *store.Store) *Service { return &Service{st: st} }
 
-func buildReport(res *ParseResult, filename string) domain.ImportReport {
-	m := res.MontantTotalEur
-	return domain.ImportReport{
-		Kind:            domain.KindEnveloppe,
-		Filename:        filename,
-		SourceFormat:    res.SourceFormat,
-		SheetName:       res.Sheet,
-		HeaderRow:       res.HeaderRow,
-		Total:           res.Total,
-		OK:              res.OK,
-		Warn:            res.Warn,
-		Drop:            res.Drop,
-		PeriodeDebut:    res.PeriodeDebut,
-		PeriodeFin:      res.PeriodeFin,
-		MontantTotalEur: &m,
-		Issues:          res.Issues,
-		MotifsCount:     res.MotifsCount,
-		ActiveVersion:   nil, // pas de versions (DECISIONS n° 18)
-	}
+// row is one stored envelope.
+type row struct {
+	categorie, categorieLibelle string
+	domain.Enveloppe
 }
 
-// Preview parses the file and returns the report; nothing is written. Un
-// fichier sans enveloppe valide est montré (refusé seulement à l'import).
-func (s *Service) Preview(ctx context.Context, data []byte, filename string) (*domain.ImportReport, error) {
-	res, err := Parse(data)
-	if err != nil {
-		return nil, err
+const (
+	qRow    = `SELECT categorie, categorie_libelle, date_debut, date_fin, montant FROM enveloppes WHERE ct = ?`
+	qCodes  = `SELECT categorie, categorie_libelle FROM enveloppes WHERE categorie <> '' ORDER BY categorie, ct`
+	qUpsert = `INSERT INTO enveloppes(ct, categorie, categorie_libelle, date_debut, date_fin, montant) VALUES (?,?,?,?,?,?)
+		ON CONFLICT(ct) DO UPDATE SET categorie = excluded.categorie, categorie_libelle = excluded.categorie_libelle,
+			date_debut = excluded.date_debut, date_fin = excluded.date_fin, montant = excluded.montant`
+)
+
+// validate checks the CT and the input (400 on error) and returns the row to store,
+// without its category code.
+func validate(ct string, in domain.EnveloppeInput) (row, error) {
+	if ct == "" {
+		return row{}, httpx.BadRequest("CT vide")
 	}
-	rep := buildReport(res, filename)
-	return &rep, nil
+	debut, err := isoDate("date_debut", in.DateDebut)
+	if err != nil {
+		return row{}, err
+	}
+	fin, err := isoDate("date_fin", in.DateFin)
+	if err != nil {
+		return row{}, err
+	}
+	if fin < debut {
+		return row{}, httpx.BadRequest("date_fin antérieure à date_debut")
+	}
+	if in.Montant == nil {
+		return row{}, httpx.BadRequest("montant requis")
+	}
+	m := *in.Montant
+	if math.IsNaN(m) || math.IsInf(m, 0) || m < 0 {
+		return row{}, httpx.BadRequest("montant invalide (nombre ≥ 0 attendu)")
+	}
+	return row{categorieLibelle: strings.TrimSpace(in.Categorie),
+		Enveloppe: domain.Enveloppe{DateDebut: debut, DateFin: fin, Montant: m}}, nil
 }
 
-const insertEnveloppe = `INSERT INTO enveloppes(ct, categorie, categorie_libelle, date_debut, date_fin, montant) VALUES (?,?,?,?,?,?)`
+// isoDate accepts only a valid YYYY-MM-DD date.
+func isoDate(field, s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if _, err := time.Parse(time.DateOnly, s); err != nil || len(s) != len(time.DateOnly) {
+		return "", httpx.BadRequest("champ « " + field + " » : date AAAA-MM-JJ attendue")
+	}
+	return s, nil
+}
 
-// Import parses the file and replaces every envelope in one transaction,
-// together with enveloppes_import and the audit entry. A file without any
-// valid envelope is refused (*ParseError, 422).
-func (s *Service) Import(ctx context.Context, data []byte, filename, operateur string) (*domain.ImportReport, error) {
-	res, err := Parse(data)
+// labelKey: clé de rapprochement des libellés de catégorie (casse et espaces ignorés).
+func labelKey(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+
+// categoryCode returns the code inherited from the old import of an envelope
+// having the same category label, ” when none (or for an empty label).
+func categoryCode(ctx context.Context, tx *sql.Tx, libelle string) (string, error) {
+	key := labelKey(libelle)
+	if key == "" {
+		return "", nil
+	}
+	rows, err := tx.QueryContext(ctx, qCodes)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	n := len(res.Enveloppes)
-	if n == 0 {
-		return nil, &ParseError{CodeNoEnveloppe, fmt.Sprintf(
-			"aucune enveloppe valide dans le fichier (%d ligne(s) rejetée(s)) ; les enveloppes actuelles sont conservées", res.Drop)}
+	defer rows.Close()
+	for rows.Next() {
+		var code, lib string
+		if err := rows.Scan(&code, &lib); err != nil {
+			return "", err
+		}
+		if labelKey(lib) == key {
+			return code, nil
+		}
 	}
-	if operateur == "" {
-		operateur = "local"
+	return "", rows.Err()
+}
+
+// Put creates or replaces the envelope of ct and returns its EnveloppeCT.
+// Audit create / update with the changed field names only (never amounts);
+// nothing is written when nothing changes.
+func (s *Service) Put(ctx context.Context, ct string, in domain.EnveloppeInput, operateur string) (domain.EnveloppeCT, error) {
+	var out domain.EnveloppeCT
+	ct = strings.TrimSpace(ct)
+	nw, err := validate(ct, in)
+	if err != nil {
+		return out, err
 	}
 	err = s.st.Tx(ctx, func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM enveloppes`); err != nil {
+		var old row
+		err := tx.QueryRowContext(ctx, qRow, ct).Scan(&old.categorie, &old.categorieLibelle, &old.DateDebut, &old.DateFin, &old.Montant)
+		exists := err == nil
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		stmt, err := tx.PrepareContext(ctx, insertEnveloppe)
+		if nw.categorie, err = categoryCode(ctx, tx, nw.categorieLibelle); err != nil {
+			return err
+		}
+		changed := []string{}
+		if !exists || old.DateDebut != nw.DateDebut {
+			changed = append(changed, "date_debut")
+		}
+		if !exists || old.DateFin != nw.DateFin {
+			changed = append(changed, "date_fin")
+		}
+		if !exists || old.Montant != nw.Montant {
+			changed = append(changed, "montant")
+		}
+		if (!exists && nw.categorieLibelle != "") ||
+			(exists && (old.categorieLibelle != nw.categorieLibelle || old.categorie != nw.categorie)) {
+			changed = append(changed, "categorie")
+		}
+		if len(changed) > 0 {
+			if _, err := tx.ExecContext(ctx, qUpsert, ct, nw.categorie, nw.categorieLibelle, nw.DateDebut, nw.DateFin, nw.Montant); err != nil {
+				return err
+			}
+			action := "update"
+			if !exists {
+				action = "create"
+			}
+			// Jamais les montants dans le journal.
+			if err := s.st.Audit(ctx, tx, operateur, action, "enveloppe", ct, "champs : "+strings.Join(changed, ", ")); err != nil {
+				return err
+			}
+		}
+		out, err = getCT(ctx, tx, ct)
+		return err
+	})
+	return out, err
+}
+
+// Delete removes the envelope of ct (store.ErrNotFound when it has none).
+func (s *Service) Delete(ctx context.Context, ct, operateur string) error {
+	ct = strings.TrimSpace(ct)
+	if ct == "" {
+		return httpx.BadRequest("CT vide")
+	}
+	return s.st.Tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM enveloppes WHERE ct = ?`, ct)
 		if err != nil {
 			return err
 		}
-		defer stmt.Close()
-		for _, l := range res.Enveloppes {
-			if _, err := stmt.ExecContext(ctx, l.CT, l.Categorie, l.CategorieLibelle, l.DateDebut, l.DateFin, l.Montant); err != nil {
-				return fmt.Errorf("insertion enveloppe ligne %d: %w", l.RowNum, err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO enveloppes_import(id, filename, importe_le, operateur, nb_enveloppes) VALUES (1,?,?,?,?)
-			ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, importe_le = excluded.importe_le,
-				operateur = excluded.operateur, nb_enveloppes = excluded.nb_enveloppes`,
-			filename, store.FormatTime(s.st.Now()), operateur, n); err != nil {
+		if n, err := res.RowsAffected(); err != nil {
 			return err
+		} else if n == 0 {
+			return store.ErrNotFound
 		}
-		// Jamais les montants dans le journal.
-		return s.st.Audit(ctx, tx, operateur, "import", "enveloppe", filename, fmt.Sprintf("%d enveloppes", n))
+		return s.st.Audit(ctx, tx, operateur, "delete", "enveloppe", ct, "")
 	})
-	if err != nil {
-		return nil, err
-	}
-	rep := buildReport(res, filename)
-	return &rep, nil
 }

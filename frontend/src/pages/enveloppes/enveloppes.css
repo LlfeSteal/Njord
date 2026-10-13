@@ -28,7 +28,7 @@
   vertical-align: middle;
 }
 
-/* Ligne de groupe (catégorie, Hors catégorie, Hors fichier) sur --fill. */
+/* Ligne de groupe (catégorie, Hors catégorie, Sans enveloppe) sur --fill. */
 .ui-table tr.env-group > td {
   background-color: var(--fill);
   border-top: 0.5px solid var(--separator);
@@ -91,21 +91,6 @@
 /* CT sous sa catégorie : retrait 24 px (aligné sur le libellé du groupe). */
 .ui-table td.env-indent {
   padding-left: 36px;
-}
-
-/* Catégorie dans l'inspecteur : libellé + code. */
-.env-cat {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
-
-.env-ellipsis-inline {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Aide courte dans l'inspecteur. */

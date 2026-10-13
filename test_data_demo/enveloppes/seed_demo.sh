@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Charge toute la démo Njord par l'API : timeline du plan de charge (6 versions),
-# réalisé, provisions, puis les enveloppes par CT (demo_enveloppes.xlsx, format « CàT par CT »).
+# réalisé, provisions, puis les enveloppes par CT (une requête PUT /enveloppes/:ct par
+# ligne de CT de demo_enveloppes.csv).
 # Voir test_data_demo/enveloppes/README.md.
 set -euo pipefail
 
@@ -10,7 +11,7 @@ IMPORTEUR="seed-demo"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO="$(cd "$HERE/.." && pwd)"
-CAT="$DEMO/demo_enveloppes.xlsx"
+CSV="$HERE/demo_enveloppes.csv"
 
 usage() {
 	cat <<EOF
@@ -21,10 +22,11 @@ http://localhost:8080/api ; actuel : $API).
 
   (sans option)       base vide attendue : importe les 6 versions du plan de charge
                       (timeline, avec leurs dates d'effet), le réalisé, les
-                      provisions, puis importe les enveloppes par CT.
-  --enveloppes-only   importe seulement les enveloppes de demo_enveloppes.xlsx
-                      (POST /enveloppes/import, rejouable : chaque import
-                      remplace toutes les enveloppes).
+                      provisions, puis enregistre les enveloppes par CT.
+  --enveloppes-only   enregistre seulement les enveloppes de demo_enveloppes.csv
+                      (PUT /enveloppes/:ct, une requête par CT ; rejouable :
+                      chaque requête crée ou remplace l'enveloppe du CT, les
+                      enveloppes des autres CT sont conservées).
   --help              affiche cette aide.
 
 Exemple : API=http://localhost:8091/api $0
@@ -137,14 +139,46 @@ EOF
 	import_file provision "$DEMO/demo_provision.xlsx" "Provisions démo octobre 2026"
 }
 
-# Import du fichier « CàT par CT » : remplace toutes les enveloppes (DECISIONS n° 18).
+# csv_enveloppes : lit demo_enveloppes.csv (niveau;code;descriptif;date_debut;
+# date_fin;prevision_solde;cout_encouru;cout_previsionnel, dates AAAA-MM-JJ) et
+# écrit une ligne « CT<tab>corps JSON » par enveloppe. Niveau 0 = catégorie :
+# son libellé (descriptif) s'applique aux CT qui suivent. Montant = coût
+# prévisionnel. Lignes ignorées (sur stderr), comme l'ancien import : période
+# manquante, fin avant début, montant invalide, CT en double.
+csv_enveloppes() {
+	awk -F';' -v op="$IMPORTEUR" '
+	function esc(s) { gsub(/\\/, "\\\\", s); gsub(/"/, "\\\"", s); return s }
+	function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+	function skip(motif) { printf "  ignoré  %-12s %s\n", ct, motif > "/dev/stderr" }
+	{ sub(/\r$/, "") }
+	NR == 1 || $0 ~ /^[ \t]*$/ { next }
+	{
+		niveau = trim($1); ct = trim($2); lib = trim($3)
+		debut = trim($4); fin = trim($5); montant = trim($8)
+		if (niveau == "0") { categ = lib; next }
+		if (ct == "") next
+		if (debut == "" || fin == "") { skip("Période manquante"); next }
+		if (fin < debut) { skip("Fin avant début"); next }
+		if (montant !~ /^[0-9]+([.][0-9]+)?$/) { skip("Montant invalide"); next }
+		if (ct in vu) { skip("CT en double"); next }
+		vu[ct] = 1
+		printf "%s\t{\"date_debut\":\"%s\",\"date_fin\":\"%s\",\"montant\":%s,\"categorie\":\"%s\",\"operateur\":\"%s\"}\n",
+			ct, debut, fin, montant, esc(categ), esc(op)
+	}' "$CSV"
+}
+
+# Enveloppes saisies par l'API (DECISIONS n° 27) : une requête par CT.
 import_enveloppes() {
-	[ -f "$CAT" ] || { echo "ERREUR : fichier introuvable : $CAT (le générer : voir README.md)" >&2; exit 1; }
-	echo "Enveloppes ($(basename "$CAT")) :"
-	must POST /enveloppes/import -F "file=@$CAT" -F "importeur=$IMPORTEUR"
-	local resume
-	resume="$(json_get '"%s ok, %s warn, %s drop" % (d["ok"], d["warn"], d["drop"]) + "".join(" ; %s × %s" % (n, m) for m, n in sorted((d.get("motifs_count") or {}).items()))' 2>/dev/null || echo "importé")"
-	echo "  $resume"
+	[ -f "$CSV" ] || { echo "ERREUR : fichier introuvable : $CSV" >&2; exit 1; }
+	echo "Enveloppes ($(basename "$CSV"), PUT /enveloppes/:ct) :"
+	local lignes n=0 ct body
+	lignes="$(csv_enveloppes)"
+	while IFS=$'\t' read -r ct body; do
+		[ -n "$ct" ] || continue
+		must PUT "/enveloppes/$ct" -H 'Content-Type: application/json' --data-binary "$body"
+		n=$((n + 1))
+	done <<<"$lignes"
+	echo "  $n enveloppe(s) enregistrée(s)"
 }
 
 check_health

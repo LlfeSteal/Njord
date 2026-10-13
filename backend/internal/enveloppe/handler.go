@@ -1,14 +1,18 @@
-// Package enveloppe manages the budget envelopes per CT, imported from the
-// « CàT par CT » export (DECISIONS n° 18): parsing, import (each confirmed
-// import replaces every envelope) and consultation. No manual entry.
+// Package enveloppe manages the budget envelopes per CT (DECISIONS n° 18 and
+// 27): one envelope per CT (period and amount, free category label), entered
+// in the interface (PUT / DELETE /enveloppes/:ct), and the list of every known
+// CT with its envelope. The « CàT par CT » file import was removed (n° 27).
 package enveloppe
 
 import (
-	"errors"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"njord/internal/domain"
 	"njord/internal/httpx"
 	"njord/internal/store"
 )
@@ -21,17 +25,16 @@ type Handler struct {
 
 func New(st *store.Store) *Handler { return &Handler{st: st, svc: NewService(st)} }
 
-// Register mounts GET /enveloppes, POST /enveloppes/import/preview and
-// POST /enveloppes/import.
+// Register mounts GET /enveloppes, PUT /enveloppes/:ct and DELETE /enveloppes/:ct.
 func (h *Handler) Register(g *gin.RouterGroup) {
 	g.GET("/enveloppes", h.list)
-	g.POST("/enveloppes/import/preview", h.preview)
-	g.POST("/enveloppes/import", h.importFile)
+	g.PUT("/enveloppes/:ct", h.put)
+	g.DELETE("/enveloppes/:ct", h.delete)
 }
 
 // list: GET /enveloppes → EnveloppesListe.
 func (h *Handler) list(c *gin.Context) {
-	out, err := listCTs(c, h.st.DB())
+	out, err := listCTs(c.Request.Context(), h.st.DB())
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -39,42 +42,35 @@ func (h *Handler) list(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// importError maps parser blocking errors to 422.
-func importError(c *gin.Context, err error) {
-	var pe *ParseError
-	if errors.As(err, &pe) {
-		httpx.Error(c, httpx.Unprocessable(pe.Code, pe.Msg))
-		return
-	}
-	httpx.Error(c, err)
-}
-
-// preview: POST /enveloppes/import/preview (multipart file) → ImportReport ; n'écrit rien.
-func (h *Handler) preview(c *gin.Context) {
-	data, filename, err := httpx.FormFile(c, "file")
+// put: PUT /enveloppes/:ct (EnveloppeInput) → EnveloppeCT ; crée ou remplace l'enveloppe.
+func (h *Handler) put(c *gin.Context) {
+	var in domain.EnveloppeInput
+	data, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	rep, err := h.svc.Preview(c, data, filename)
-	if err != nil {
-		importError(c, err)
+	if strings.TrimSpace(string(data)) == "" {
+		httpx.Error(c, httpx.BadRequest("corps JSON requis"))
 		return
 	}
-	c.JSON(http.StatusOK, rep)
-}
-
-// importFile: POST /enveloppes/import (multipart file, importeur?) → ImportReport.
-func (h *Handler) importFile(c *gin.Context) {
-	data, filename, err := httpx.FormFile(c, "file")
+	if err := json.Unmarshal(data, &in); err != nil {
+		httpx.Error(c, httpx.BadRequest("corps JSON invalide"))
+		return
+	}
+	out, err := h.svc.Put(c.Request.Context(), c.Param("ct"), in, httpx.Operateur(c, in.Operateur))
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	rep, err := h.svc.Import(c, data, filename, httpx.Operateur(c, ""))
-	if err != nil {
-		importError(c, err)
+	c.JSON(http.StatusOK, out)
+}
+
+// delete: DELETE /enveloppes/:ct?operateur= → 204 ; 404 si le CT n'a pas d'enveloppe.
+func (h *Handler) delete(c *gin.Context) {
+	if err := h.svc.Delete(c.Request.Context(), c.Param("ct"), httpx.Operateur(c, "")); err != nil {
+		httpx.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, rep)
+	c.Status(http.StatusNoContent)
 }

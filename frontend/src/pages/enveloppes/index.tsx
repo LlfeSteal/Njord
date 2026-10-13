@@ -1,6 +1,7 @@
-// Page « Enveloppes » (/enveloppes, DECISIONS n° 18) : enveloppes par CT importées du fichier « CàT par CT », en lecture seule.
-// Tableau hiérarchique : une ligne de groupe par catégorie (Σ montants), puis « Hors catégorie », puis « Hors fichier »
-// (CT connus des sources sans enveloppe). Clic sur un CT → inspecteur en lecture seule (?ct=<code>).
+// Page « Enveloppes » (/enveloppes, DECISIONS n° 18 et 27) : enveloppes par CT saisies dans l'interface.
+// Tableau hiérarchique : une ligne de groupe par libellé de catégorie (Σ montants), puis « Hors catégorie », puis
+// « Sans enveloppe » (CT connus des sources sans enveloppe). Clic sur un CT → inspecteur éditable (?ct=<code>) ;
+// « Nouvelle enveloppe » → inspecteur en création (CT saisi).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -16,23 +17,23 @@ import {
   Table,
   useDebouncedValue,
 } from '../../ui';
-import { IconChevronRight, IconEuro, IconImport } from '../../ui/Icons';
-import type { EnveloppesImport } from '../../api/types';
+import { IconChevronRight, IconEuro, IconPlus } from '../../ui/Icons';
 import ErrorAlert from '../../components/ErrorAlert';
-import { fmtDateTime, fmtPeriod } from '../../lib/format';
+import { fmtPeriod } from '../../lib/format';
 import EnveloppeInspector from './EnveloppeInspector';
-import ImportEnveloppesModal from './ImportEnveloppesModal';
-import { fmtMontant, groupByCategorie, norm, useEnveloppes, type EnveloppeGroup } from './hooks';
+import { fmtMontant, groupByCategorie, nEnveloppes, norm, useEnveloppes, type EnveloppeGroup } from './hooks';
 import { SourcePills } from './shared';
 import './enveloppes.css';
 
 type EnvFilter = 'all' | 'with' | 'without';
 const COLS = 5;
 
-function importLine(imp: EnveloppesImport | null | undefined) {
-  if (!imp) return 'Aucun fichier importé';
-  const parts = [imp.filename, fmtDateTime(imp.importe_le), imp.operateur].filter(Boolean);
-  return `Dernier import : ${parts.join(' · ')}`;
+/** Sous-titre : « N enveloppes · Σ montant ». */
+function summaryLine(cts: { enveloppe: { montant: number } | null }[]) {
+  const withEnv = cts.filter((r) => r.enveloppe != null);
+  if (withEnv.length === 0) return 'Aucune enveloppe';
+  const total = withEnv.reduce((s, r) => s + (r.enveloppe?.montant ?? 0), 0);
+  return `${nEnveloppes(withEnv.length)} · ${fmtMontant(total)}`;
 }
 
 export default function EnveloppesPage() {
@@ -45,7 +46,7 @@ export default function EnveloppesPage() {
     sp.get('filtre') === 'sans_enveloppe' ? 'without' : sp.get('filtre') === 'avec_enveloppe' ? 'with' : 'all',
   );
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [importOpen, setImportOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const q = useEnveloppes();
   const all = useMemo(() => q.data?.cts ?? [], [q.data]);
@@ -71,13 +72,20 @@ export default function EnveloppesPage() {
     [matching, filter],
   );
 
-  const setOpen = (ct: string | null) =>
+  const setOpen = (ct: string | null) => {
+    setCreating(false);
     setSp((prev) => {
       const n = new URLSearchParams(prev);
       if (ct) n.set('ct', ct);
       else n.delete('ct');
       return n;
     });
+  };
+
+  const startCreate = () => {
+    setOpen(null);
+    setCreating(true);
+  };
 
   const onRowKey = (e: KeyboardEvent, ct: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -107,10 +115,10 @@ export default function EnveloppesPage() {
   const toolbar = (
     <PageToolbar
       title="Enveloppes"
-      subtitle={q.data ? importLine(q.data.import) : undefined}
+      subtitle={q.data ? summaryLine(all) : undefined}
       actions={
-        <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setImportOpen(true)}>
-          Importer le fichier CàT
+        <Button variant="primary" icon={<IconPlus size={15} />} onClick={startCreate}>
+          Nouvelle enveloppe
         </Button>
       }
       bottom={
@@ -145,13 +153,13 @@ export default function EnveloppesPage() {
         icon={<IconEuro size={40} />}
         title="Aucune enveloppe"
         action={
-          <Button variant="primary" icon={<IconImport size={15} />} onClick={() => setImportOpen(true)}>
-            Importer le fichier CàT
+          <Button variant="primary" icon={<IconPlus size={15} />} onClick={startCreate}>
+            Nouvelle enveloppe
           </Button>
         }
       >
-        Importez l'export « CàT par CT » : chaque CT y reçoit son enveloppe (période et coût prévisionnel), groupée par
-        catégorie. Les CT du plan de charge, du réalisé et des provisions apparaissent aussi ici.
+        Créez l'enveloppe d'un CT : sa période et son montant en font le budget, groupé par catégorie. Les CT du plan de
+        charge, du réalisé et des provisions apparaissent aussi ici.
       </EmptyState>
     ) : (
       <EmptyState icon={<IconEuro size={40} />} title="Aucun CT">
@@ -160,7 +168,22 @@ export default function EnveloppesPage() {
     );
 
   return (
-    <Page toolbar={toolbar} inspector={<EnveloppeInspector key={openCt ?? ''} ct={openCt} onClose={() => setOpen(null)} />}>
+    <Page
+      toolbar={toolbar}
+      inspector={
+        <EnveloppeInspector
+          key={creating ? '__creation' : (openCt ?? '')}
+          ct={openCt}
+          creating={creating}
+          onClose={() => setOpen(null)}
+          onOpen={(ct) => {
+            // Après une création : la nouvelle ligne est amenée dans la vue.
+            scrolled.current = false;
+            setOpen(ct);
+          }}
+        />
+      }
+    >
       <ErrorAlert error={q.error} />
       {q.isLoading ? (
         <SkeletonRows rows={8} />
@@ -225,7 +248,6 @@ export default function EnveloppesPage() {
           </Table>
         </div>
       )}
-      <ImportEnveloppesModal opened={importOpen} onClose={() => setImportOpen(false)} />
     </Page>
   );
 }
@@ -258,12 +280,11 @@ function GroupRow({ group: g, open, onToggle }: { group: EnveloppeGroup; open: b
             {g.label}
           </span>
           {g.code && <span className="env-code">{g.code}</span>}
-          {g.kind === 'hors_fichier' && <span className="env-muted">aucun budget</span>}
           <span className="env-muted env-group__count">{n} CT</span>
         </div>
       </td>
       <td data-align="right" data-nowrap className="env-group__sum">
-        {g.kind === 'hors_fichier' ? '' : fmtMontant(g.montant)}
+        {g.kind === 'sans_enveloppe' ? '' : fmtMontant(g.montant)}
       </td>
     </tr>
   );

@@ -2,13 +2,12 @@ package enveloppe
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"sort"
 	"strings"
 
 	"njord/internal/domain"
 	"njord/internal/store"
+	"njord/internal/xlsxutil"
 )
 
 // ctInfo accumulates what the sources say about one CT.
@@ -17,8 +16,8 @@ type ctInfo struct {
 	realise   string // libellé TG du réalisé, préfixe CT retiré
 	prov      string // dernier segment du groupe des provisions
 	plan      string // groupe du plan
-	categorie string // code de la catégorie du fichier
-	categLib  string // Descriptif de la catégorie
+	categorie string // code de catégorie hérité de l'ancien import, '' sinon
+	categLib  string // libellé de la catégorie, '' = hors catégorie
 	enveloppe *domain.Enveloppe
 }
 
@@ -45,11 +44,10 @@ const (
 		WHERE v.kind = 'provision' AND v.statut = 'active' AND p.statut_parsing <> 'drop'
 		ORDER BY p.row_num, p.id`
 	qEnveloppes = `SELECT ct, categorie, categorie_libelle, date_debut, date_fin, montant FROM enveloppes`
-	qImport     = `SELECT filename, importe_le, operateur, nb_enveloppes FROM enveloppes_import WHERE id = 1`
 )
 
-// listCTs returns the last import and every known CT (union of the sources and
-// of the imported envelopes) with its label, category and envelope; CTs never nil.
+// listCTs returns every known CT (union of the sources and of the envelopes)
+// with its label, category and envelope; CTs never nil.
 func listCTs(ctx context.Context, ex store.Execer) (domain.EnveloppesListe, error) {
 	var liste domain.EnveloppesListe
 	cts := map[string]*ctInfo{}
@@ -107,23 +105,18 @@ func listCTs(ctx context.Context, ex store.Execer) (domain.EnveloppesListe, erro
 		return liste, err
 	}
 
-	imp, err := loadImport(ctx, ex)
-	if err != nil {
-		return liste, err
-	}
-
 	out := make([]domain.EnveloppeCT, 0, len(cts))
 	for ct, i := range cts {
 		out = append(out, domain.EnveloppeCT{CT: ct, CTLibelle: i.libelle(), Categorie: i.categorie,
 			CategorieLibelle: i.categLib, Sources: i.sources, Enveloppe: i.enveloppe})
 	}
-	// Par code de catégorie puis CT ; hors catégorie (enveloppe sans
-	// catégorie) puis hors fichier (sans enveloppe) en dernier.
+	// Par libellé de catégorie (sans accents ni casse) puis CT ; hors catégorie
+	// (enveloppe sans libellé) puis sans enveloppe en dernier.
 	rank := func(x domain.EnveloppeCT) int {
 		switch {
 		case x.Enveloppe == nil:
 			return 2
-		case x.Categorie == "":
+		case x.CategorieLibelle == "":
 			return 1
 		}
 		return 0
@@ -133,13 +126,33 @@ func listCTs(ctx context.Context, ex store.Execer) (domain.EnveloppesListe, erro
 		if rx, ry := rank(x), rank(y); rx != ry {
 			return rx < ry
 		}
-		if x.Categorie != y.Categorie {
-			return x.Categorie < y.Categorie
+		if fx, fy := fold(x.CategorieLibelle), fold(y.CategorieLibelle); fx != fy {
+			return fx < fy
+		}
+		if x.CategorieLibelle != y.CategorieLibelle {
+			return x.CategorieLibelle < y.CategorieLibelle
 		}
 		return x.CT < y.CT
 	})
-	return domain.EnveloppesListe{Import: imp, CTs: out}, nil
+	return domain.EnveloppesListe{CTs: out}, nil
 }
+
+// getCT returns the EnveloppeCT of one CT (store.ErrNotFound when no source
+// nor envelope knows it).
+func getCT(ctx context.Context, ex store.Execer, ct string) (domain.EnveloppeCT, error) {
+	l, err := listCTs(ctx, ex)
+	if err != nil {
+		return domain.EnveloppeCT{}, err
+	}
+	for _, x := range l.CTs {
+		if x.CT == ct {
+			return x, nil
+		}
+	}
+	return domain.EnveloppeCT{}, store.ErrNotFound
+}
+
+func fold(s string) string { return strings.ToLower(xlsxutil.StripAccents(s)) }
 
 func loadEnveloppes(ctx context.Context, ex store.Execer, info func(ct string) *ctInfo) error {
 	rows, err := ex.QueryContext(ctx, qEnveloppes)
@@ -157,21 +170,6 @@ func loadEnveloppes(ctx context.Context, ex store.Execer, info func(ct string) *
 		i.categorie, i.categLib, i.enveloppe = categ, categLib, &e
 	}
 	return rows.Err()
-}
-
-// loadImport returns the last import, nil when no file was ever imported.
-func loadImport(ctx context.Context, ex store.Execer) (*domain.EnveloppesImport, error) {
-	var imp domain.EnveloppesImport
-	var at string
-	err := ex.QueryRowContext(ctx, qImport).Scan(&imp.Filename, &at, &imp.Operateur, &imp.NbEnveloppes)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	imp.ImporteLe = store.ParseTime(at)
-	return &imp, nil
 }
 
 // ctLabel retire le code en tête du libellé TG du réalisé (« Y99F900011 - Réserve… » → « Réserve… ») ;

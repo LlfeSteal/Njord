@@ -1,9 +1,11 @@
 // Ligne CT du pilotage budgétaire : fusion de la synthèse budget (classification, MO, risque)
 // et des prévisions (consommé, atterrissage, statut), par code CT. Partagé avec /previsions.
-// Budget d'un CT = montant de son enveloppe importée, rien d'autre (DECISIONS n° 20) : sans enveloppe, budget,
-// %, écart, statut et reste sont null (« Sans enveloppe »).
-import type { AnalyseResult, BudgetCT, Enveloppe, PrevisionCT, PrevisionStatut } from '../../../api/types';
-import { echeanceOf, forecastOf, hasEnveloppe, type Echeance } from '../shared/pilotage';
+// Budget d'un CT = montant de son enveloppe, rien d'autre (DECISIONS n° 20) : sans enveloppe, budget,
+// %, écart, statut et reste sont null (« Sans enveloppe »). Les prévisions sont celles de l'année choisie
+// (DECISIONS n° 24) : enveloppe = tranche de l'année ; la synthèse budget (classification de repli, MO, risque)
+// reste « Tout ».
+import type { AnalyseResult, BudgetCT, Enveloppe, PrevisionCT, PrevisionStatut, Previsions } from '../../../api/types';
+import { anneeOf, echeanceOf, forecastOf, hasEnveloppe, type Echeance } from '../shared/pilotage';
 
 /** Source du budget d'une ligne CT : enveloppe importée, ou aucun budget. */
 export type BudgetSource = PrevisionCT['budget_source'];
@@ -13,7 +15,7 @@ export interface CtRow {
   libelle: string;
   /** Σ PPS du plan de charge (segments de la timeline). */
   pps: number;
-  /** Provisions restantes du CT (informatives : marge disponible). */
+  /** Provisions restantes du CT (toutes lignes ; détail sécurisées / aléas dans la prévision `p`). */
   provisions: number;
   /** Budget = montant de l'enveloppe ; null sans enveloppe. Référence du % consommé et de l'écart. */
   budget: number | null;
@@ -39,12 +41,20 @@ export interface CtRow {
   reste: number | null;
   /** Le reste est un dépassement (affiché « + » en rouge). */
   resteOver: boolean;
+  /**
+   * Année choisie où le CT, qui a une enveloppe (Tout), n'en a pas de tranche (DECISIONS n° 24) : affiché
+   * « Hors 2027 » plutôt que « Sans enveloppe ». 0 sinon.
+   */
+  horsAnnee: number;
   b?: BudgetCT;
   p?: PrevisionCT;
 }
 
-export function mergeCtRows(result: AnalyseResult): CtRow[] {
-  const fc = forecastOf(result);
+/** Lignes CT ; `fc` = prévisions de l'année choisie (défaut : celles de l'analyse, « Tout »). */
+export function mergeCtRows(result: AnalyseResult, fc: Previsions | null = forecastOf(result)): CtRow[] {
+  const annee = anneeOf(fc);
+  // CT qui ont une enveloppe sur toute la période : sans tranche dans l'année choisie, ils sont « hors année ».
+  const withEnvTout = new Set(annee > 0 ? (result.previsions?.par_ct ?? []).filter(hasEnveloppe).map((p) => p.ct) : []);
   const byCt = new Map<string, CtRow>();
   for (const b of result.budget.par_ct) {
     byCt.set(b.ct, {
@@ -66,6 +76,7 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       sousConso: false,
       reste: null,
       resteOver: false,
+      horsAnnee: withEnvTout.has(b.ct) ? annee : 0,
       b,
     });
   }
@@ -89,9 +100,10 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       sousConso: false,
       reste: null,
       resteOver: false,
+      horsAnnee: 0,
     };
     const env = hasEnveloppe(p);
-    const e = echeanceOf(p);
+    const e = echeanceOf(p, annee);
     const r = resteOf(e);
     byCt.set(p.ct, {
       ...row,
@@ -111,6 +123,7 @@ export function mergeCtRows(result: AnalyseResult): CtRow[] {
       sousConso: env && (e?.sousConso ?? false),
       reste: r.value,
       resteOver: r.over,
+      horsAnnee: !env && withEnvTout.has(p.ct) ? annee : 0,
       p,
     });
   }

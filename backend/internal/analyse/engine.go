@@ -90,8 +90,8 @@ type run struct {
 	corr      map[string]*domain.Correspondance // par nom réalisé brut
 }
 
-// Run produces the full analysis.
-func Run(in Input, s domain.Settings) domain.AnalyseResult {
+// newRun prepares a run: timeline, filtered sources, enrichment and CT labels.
+func newRun(in Input, s domain.Settings) *run {
 	r := &run{
 		in:        in,
 		s:         s,
@@ -132,11 +132,26 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 
 	r.enrich()
 	r.provisionLibelles()
+	return r
+}
+
+// RunPrevisions computes the forecast of the ISO year annee alone (DECISIONS
+// n° 24, GET /analyse/previsions) ; annee ≤ 0 = « Tout » (= Run(in, s).Previsions).
+func RunPrevisions(in Input, s domain.Settings, annee int) domain.Previsions {
+	return newRun(in, s).previsionsFor(annee)
+}
+
+// Run produces the full analysis.
+func Run(in Input, s domain.Settings) domain.AnalyseResult {
+	r := newRun(in, s)
 	r.period()
 	r.planSide()
 	r.realSide()
 	ecarts, kpis := r.rows()
-	budget, alertes := r.budget()
+	// Prévisions « Tout » avant le budget : la classification sécurisé / non
+	// sécurisé en dépend (DECISIONS n° 23) ; jamais du filtre d'année (n° 24).
+	previsions := r.previsions()
+	budget, alertes := r.budget(previsions)
 	kpis.PctSecurise = budget.Global.PctSecurite
 	kpis.NbCTRisque = len(alertes.CTRisque)
 	r.dataQuality()
@@ -171,7 +186,7 @@ func Run(in Input, s domain.Settings) domain.AnalyseResult {
 		Qualite:         r.q.list(),
 		Correspondances: corr,
 	}
-	res.Previsions = r.previsions()
+	res.Previsions = previsions
 	res.Anomalies = r.anomalies(&res)
 	return res
 }

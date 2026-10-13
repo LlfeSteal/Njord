@@ -90,6 +90,26 @@
   gap: 8px;
 }
 
+/* ------------------------------------------------------------------ Filtre d'année (DECISIONS n° 24) */
+.pil-periode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.pil-periode__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+/* Chiffre qui ne dépend pas du filtre d'année : mention 11 px secondaire, à côté d'un titre. */
+.pil-allyears {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 /* ------------------------------------------------------------------ Graphiques */
 .pil-legend {
   display: flex;
@@ -233,9 +253,6 @@
 .pil-stack__seg[data-kind='non_securise'] {
   background: var(--budget-unsecured);
 }
-.pil-stack__seg[data-kind='non_classe'] {
-  background: var(--budget-unclassified);
-}
 .pil-dot {
   display: inline-block;
   width: 8px;
@@ -249,9 +266,6 @@
 }
 .pil-dot[data-kind='non_securise'] {
   background: var(--budget-unsecured);
-}
-.pil-dot[data-kind='non_classe'] {
-  background: var(--budget-unclassified);
 }
 
 /* Liens de la liste « À traiter » dans l'en-tête du groupe. */
@@ -539,7 +553,7 @@
   width: 1px;
   background: var(--text-secondary);
 }
-/* Barre 14 px : consommé plein, puis atterrissage plan à 30 % (2 px de vide entre les deux), bout arrondi 4 px. */
+/* Barre 14 px : consommé plein, puis atterrissage sécurisé à 30 % (2 px de vide entre les deux), bout arrondi 4 px. */
 .pil-envbars__consomme,
 .pil-envbars__plan {
   position: absolute;

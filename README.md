@@ -99,10 +99,10 @@ Le dossier [`test_data_demo/`](test_data_demo/) contient deux fichiers Excel ano
 
 L'onglet **Analyse** permet alors de comparer le prévu et le réalisé.
 
-Pour charger **toute** la démo en une commande, utilise [`test_data_demo/enveloppes/seed_demo.sh`](test_data_demo/enveloppes/). Il passe par l'API et importe, dans l'ordre :
+Pour charger **toute** la démo en une commande, utilise [`test_data_demo/enveloppes/seed_demo.sh`](test_data_demo/enveloppes/). Il passe par l'API et charge, dans l'ordre :
 - les 6 versions de la timeline du plan de charge, avec leurs dates d'effet ;
 - le réalisé et les provisions ;
-- les enveloppes budgétaires par CT.
+- les enveloppes budgétaires par CT, saisies une par une (`PUT /enveloppes/:ct`, une requête par ligne de `demo_enveloppes.csv`) : les enveloppes ne s'importent plus, elles se saisissent dans la page **Enveloppes**.
 
 Lance-le sur une base vide, backend démarré par `make dev-backend` :
 
@@ -110,7 +110,7 @@ Lance-le sur une base vide, backend démarré par `make dev-backend` :
 test_data_demo/enveloppes/seed_demo.sh
 ```
 
-Pour viser une autre adresse, préfixe la commande par `API=http://…/api`. L'option `--enveloppes-only` ne recharge que les enveloppes. Les scénarios sont décrits dans [`test_data_demo/enveloppes/README.md`](test_data_demo/enveloppes/README.md).
+Pour viser une autre adresse, préfixe la commande par `API=http://…/api`. L'option `--enveloppes-only` ne (re)saisit que les enveloppes (elle crée ou remplace celles du CSV, sans supprimer les autres). Les scénarios sont décrits dans [`test_data_demo/enveloppes/README.md`](test_data_demo/enveloppes/README.md).
 
 ## Licence
 

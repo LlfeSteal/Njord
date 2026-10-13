@@ -14,9 +14,6 @@ const (
 	KindPlan      Kind = "plan"
 	KindRealise   Kind = "realise"
 	KindProvision Kind = "provision" // export « Dépenses prévues » (DECISIONS n° 16)
-	// KindEnveloppe ne sert qu'au bilan d'import (ImportReport.Kind) : les
-	// enveloppes ne sont pas versionnées (DECISIONS n° 18).
-	KindEnveloppe Kind = "enveloppe"
 )
 
 type VersionStatut string
@@ -263,13 +260,13 @@ type Personne struct {
 }
 
 // EnveloppeCT : un CT connu d'au moins une source (plan non purgé, réalisé
-// actif, provisions actives) ou du dernier import « CàT par CT », avec son
-// enveloppe (DECISIONS n° 18). Enveloppe = nil si le CT est absent du fichier.
+// actif, provisions actives) ou ayant une enveloppe saisie, avec son enveloppe
+// (DECISIONS n° 18, 27). Enveloppe = nil : CT sans enveloppe.
 type EnveloppeCT struct {
 	CT               string           `json:"ct"`
 	CTLibelle        string           `json:"ct_libelle"`        // réalisé (préfixe CT retiré), sinon groupe des provisions, sinon groupe du plan
-	Categorie        string           `json:"categorie"`         // code de la catégorie du fichier (…00), '' hors fichier ou hors catégorie
-	CategorieLibelle string           `json:"categorie_libelle"` // Descriptif de la ligne de catégorie
+	Categorie        string           `json:"categorie"`         // code hérité de l'ancien import (…00), '' sinon
+	CategorieLibelle string           `json:"categorie_libelle"` // libellé libre de la catégorie, '' = hors catégorie
 	Sources          EnveloppeSources `json:"sources"`
 	Enveloppe        *Enveloppe       `json:"enveloppe"`
 }
@@ -281,8 +278,8 @@ type EnveloppeSources struct {
 	Provisions bool `json:"provisions"` // lignes de la version de provisions active
 }
 
-// Enveloppe : période d'utilisation et montant alloués à un CT (fichier
-// « CàT par CT » : dates de début / fin, colonne « Coût prévisionnel »).
+// Enveloppe : période d'utilisation et montant alloués à un CT, saisis dans
+// l'interface (DECISIONS n° 27).
 type Enveloppe struct {
 	DateDebut string  `json:"date_debut"` // YYYY-MM-DD
 	DateFin   string  `json:"date_fin"`   // YYYY-MM-DD, ≥ date_debut
@@ -298,20 +295,9 @@ type EnveloppeInput struct {
 	Operateur string   `json:"operateur"`
 }
 
-// EnveloppesImport : dernier import du fichier des enveloppes.
-// Deprecated: import supprimé par DECISIONS n° 27 (retiré à l'intégration).
-type EnveloppesImport struct {
-	Filename     string    `json:"filename"`
-	ImporteLe    time.Time `json:"importe_le"`
-	Operateur    string    `json:"operateur"`
-	NbEnveloppes int       `json:"nb_enveloppes"`
-}
-
 // EnveloppesListe : réponse de GET /enveloppes.
 type EnveloppesListe struct {
-	// Deprecated: import supprimé par DECISIONS n° 27 (retiré à l'intégration).
-	Import *EnveloppesImport `json:"import"`
-	CTs    []EnveloppeCT     `json:"cts"` // triés par libellé de catégorie puis CT ; hors catégorie puis sans enveloppe en dernier
+	CTs []EnveloppeCT `json:"cts"` // triés par libellé de catégorie puis CT ; hors catégorie puis sans enveloppe en dernier
 }
 
 type Squad struct {
@@ -341,10 +327,6 @@ type Settings struct {
 	SemainesVerrouillees []int    `json:"semaines_verrouillees"` // [51, 52] (numéros ISO, toute année)
 	JoursFeries          []string `json:"jours_feries"`          // dates YYYY-MM-DD
 	MOTypes              []string `json:"mo_types"`
-	// Deprecated: classification du réalisé supprimée par DECISIONS n° 23 (retiré à l'intégration).
-	Securise []string `json:"securise"`
-	// Deprecated: idem.
-	NonSecurise []string `json:"non_securise"`
 }
 
 type AuditEntry struct {
@@ -377,14 +359,6 @@ const (
 var FlagSeverity = map[Flag]int{
 	FlagAbsence: 6, FlagHorsPlan: 5, FlagErreurCT: 4, FlagSurImputation: 3, FlagSousImputation: 2, FlagConforme: 1,
 }
-
-type Classification string
-
-const (
-	ClassSecurise    Classification = "SECURISE"
-	ClassNonSecurise Classification = "NON_SECURISE"
-	ClassNonClasse   Classification = "NON_CLASSE"
-)
 
 type Confidence string
 
@@ -542,12 +516,10 @@ type KPIs struct {
 // plan de charge restant (reste_a_faire de la prévision « Tout ») + provisions
 // sécurisées comptées ; non sécurisé = provisions pour aléas.
 type BudgetCT struct {
-	CT          string  `json:"ct"`
-	CTLibelle   string  `json:"ct_libelle"`
-	Securise    float64 `json:"securise"`     // reste_a_faire + provisions_securisees (prévision Tout)
-	NonSecurise float64 `json:"non_securise"` // provisions_aleas
-	// Deprecated: supprimé par DECISIONS n° 23 (ne plus lire ni écrire ; retiré à l'intégration).
-	NonClasse   float64  `json:"non_classe"`
+	CT          string   `json:"ct"`
+	CTLibelle   string   `json:"ct_libelle"`
+	Securise    float64  `json:"securise"`     // reste_a_faire + provisions_securisees (prévision Tout)
+	NonSecurise float64  `json:"non_securise"` // provisions_aleas
 	PctSecurite *float64 `json:"pct_securite"` // securise ÷ (securise + non_securise), 0..100, null si dénominateur nul
 	PPSPlan     float64  `json:"pps_plan"`     // Σ PPS du plan sur ce CT
 	Provisions  float64  `json:"provisions"`   // Σ provisions du CT
@@ -557,10 +529,8 @@ type BudgetCT struct {
 }
 
 type BudgetGlobal struct {
-	Securise    float64 `json:"securise"`     // Σ BudgetCT.securise
-	NonSecurise float64 `json:"non_securise"` // Σ BudgetCT.non_securise
-	// Deprecated: supprimé par DECISIONS n° 23 (retiré à l'intégration).
-	NonClasse      float64  `json:"non_classe"`
+	Securise       float64  `json:"securise"`         // Σ BudgetCT.securise
+	NonSecurise    float64  `json:"non_securise"`     // Σ BudgetCT.non_securise
 	PctSecurite    *float64 `json:"pct_securite"`     // 0..100
 	PctNonSecurise *float64 `json:"pct_non_securise"` // 0..100
 }

@@ -1,11 +1,13 @@
 // Analyse par nature (page Budget) : dépense prévue et réalisé par nature de coût, barres sur une échelle commune —
 // piste = prévu (plan de charge, puis provisions restantes en teinte pâle), remplissage = réalisé, au-delà du prévu
 // en rouge avec glyphe (DECISIONS n° 10, 16). Le prévu n'est pas un budget (n° 20) : le budget est l'enveloppe.
+// Ne dépend jamais du filtre d'année (DECISIONS n° 24) : mention « Toutes années » quand une année est choisie.
 import type { CSSProperties } from 'react';
 import { Card, StatusGlyph, Tooltip } from '../../../ui';
 import type { BudgetNature } from '../../../api/types';
 import { fmtEur, fmtPct } from '../../../lib/format';
 import { ChartLegend, type ChartSeries } from '../shared/charts';
+import { AllYearsNote } from '../shared/PeriodeControl';
 import { fmtEurShort } from '../shared/pilotage';
 
 const pctOf = (v: number, scale: number) => `${scale > 0 ? (Math.max(0, v) / scale) * 100 : 0}%`;
@@ -35,7 +37,7 @@ function Detail({ n }: { n: BudgetNature }) {
   );
 }
 
-export default function NatureBars({ rows }: { rows: BudgetNature[] }) {
+export default function NatureBars({ rows, annee = 0 }: { rows: BudgetNature[]; annee?: number }) {
   const scale = Math.max(0, ...rows.flatMap((n) => [prevuOf(n), n.realise]));
   const prevu = rows.reduce((s, n) => s + prevuOf(n), 0);
   const prov = rows.reduce((s, n) => s + provisionsOf(n), 0);
@@ -43,7 +45,10 @@ export default function NatureBars({ rows }: { rows: BudgetNature[] }) {
   return (
     <Card>
       <div className="pil-card-head">
-        <h2 className="pil-card-head__title">Analyse par nature</h2>
+        <h2 className="pil-card-head__title">
+          Analyse par nature
+          <AllYearsNote annee={annee} title="L’analyse par nature ne dépend pas du filtre d’année : elle porte sur toutes les années" />
+        </h2>
       </div>
       <p className="pil-card-head__sub">
         Prévu (plan + provisions) {fmtEur(prevu)}

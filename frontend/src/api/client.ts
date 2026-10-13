@@ -211,19 +211,6 @@ export const enveloppeApi = {
   put: (ct: string, body: EnveloppeInput) => put<EnveloppeCT>(`/enveloppes/${encodeURIComponent(ct)}`, body),
   /** Supprime l'enveloppe d'un CT → 204. */
   remove: (ct: string, operateur?: string) => del<void>(`/enveloppes/${encodeURIComponent(ct)}` + qs({ operateur })),
-  /** @deprecated Import supprimé (DECISIONS n° 27). */
-  preview: (file: File) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    return post<ImportReport>('/enveloppes/import/preview', fd);
-  },
-  /** @deprecated Import supprimé (DECISIONS n° 27). */
-  commit: (file: File, importeur?: string) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    if (importeur) fd.append('importeur', importeur);
-    return post<ImportReport>('/enveloppes/import', fd);
-  },
 };
 
 // ------------------------------------------------------------------ Paramètres & journal

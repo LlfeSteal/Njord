@@ -27,9 +27,16 @@ export function RowGlyph({ row, size }: { row: Pick<CtRow, 'statut' | 'risque'> 
 
 /**
  * Cellule « Budget » (DECISIONS n° 20) : montant de l'enveloppe, période en infobulle ; sans enveloppe,
- * « Sans enveloppe » en texte secondaire (ni pastille, ni montant). Une ligne.
+ * « Sans enveloppe » en texte secondaire (ni pastille, ni montant). Une ligne. Année choisie (DECISIONS n° 24) :
+ * montant de la tranche de l'année ; un CT dont l'enveloppe ne recoupe pas l'année lit « Hors 2027 ».
  */
-export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: number | null } }) {
+export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: number | null; horsAnnee?: number } }) {
+  if (b.budget == null && b.horsAnnee)
+    return (
+      <span className="pil-budget pil-budget--none" title={`L’enveloppe de ce CT ne recoupe pas ${b.horsAnnee}`}>
+        Hors {b.horsAnnee}
+      </span>
+    );
   if (b.budget == null) return <span className="pil-budget pil-budget--none">Sans enveloppe</span>;
   return (
     <span
@@ -43,7 +50,7 @@ export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: nu
 
 /**
  * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
- * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − atterrissage plan).
+ * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − atterrissage sécurisé).
  */
 export function Reste({ value, over, warn, title }: { value: number | null; over: boolean; warn: boolean; title?: string }) {
   if (value == null) return <>—</>;

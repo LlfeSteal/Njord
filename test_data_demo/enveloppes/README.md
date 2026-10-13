@@ -91,6 +91,35 @@ Chiffres relevés sur l'API réelle (moteur des décisions n° 18 et 19), as_of 
 
 Synthèse `previsions.enveloppes` attendue : 20 CT configurés sur 20, Σ enveloppes 1 182 000 €, 4 dépassements (46 017 €), 11 sous-consommations (294 987 € non consommés), 242 639 € de plan hors enveloppe. La timeline compte 123 segments pour Σ PPS = 1 181 434,37 €, comme l'étape 6 de `../timeline/`.
 
+### Chiffres attendus après les décisions n° 21 à 23 (2026-10-13)
+
+Le tableau ci-dessus date des n° 18-19 (non consommé selon la pire projection, provisions hors atterrissage). Depuis le n° 21 le non consommé ne suit que l'atterrissage, et depuis le n° 23 l'**atterrissage sécurisé** (AS) = consommé + plan de charge restant + provisions sécurisées (ligne de coût ≠ PROVISIONS POUR ALEAS) : Y99F900011, Y99F900013 et Y99F900014 passent en dépassement grâce à leurs provisions de capacité, prestations et achats. Relevé sur l'API (seed complet, as_of = 03/10/2026) :
+
+| CT | Enveloppe | AS | dont provisions sécurisées | Non consommé | Statut |
+|---|---:|---:|---:|---:|---|
+| Y99F900011 | 200 000 € | 279 706 € | 60 030 € | 0 € | dépassement |
+| Y99F90602 | 38 000 € | 53 951 € | 0 € | 0 € | dépassement |
+| Y99F900013 | 30 000 € | 41 428 € | 30 000 € | 0 € | dépassement |
+| Y99F90008 | 50 000 € | 60 023 € | 0 € | 0 € | dépassement |
+| Y99F900014 | 0 € | 5 368 € | 5 000 € | 0 € | dépassement |
+| Y99F900022 | 20 000 € | 18 429 € | 0 € | 1 571 € | vigilance |
+| Y99F900010 | 30 000 € | 28 288 € | 0 € | 1 712 € | vigilance |
+| Y99F900012 | 79 000 € | 76 434 € | 0 € | 2 566 € | vigilance |
+| Y99F90001 | 108 000 € | 99 494 € | 0 € | 8 506 € | vigilance |
+| Y99F90009 | 80 000 € | 68 330 € | 0 € | 11 670 € | vigilance + sous-conso |
+| Y99F90004 | 70 000 € | 55 442 € | 0 € | 14 558 € | vigilance + sous-conso |
+| Y99F90701 | 4 000 € | 3 437 € | 0 € | 563 € | ok |
+| Y99F90601 | 31 000 € | 27 045 € | 0 € | 3 955 € | ok |
+| Y99F90007 | 72 000 € | 64 772 € | 0 € | 7 228 € | ok + sous-conso |
+| Y99F90002 | 15 000 € | 6 875 € | 0 € | 8 125 € | ok + sous-conso |
+| Y99F900021 | 25 000 € | 6 400 € | 0 € | 18 600 € | ok + sous-conso |
+| Y99F90003 | 100 000 € | 78 608 € | 0 € | 21 392 € | ok + sous-conso |
+| Y99F90005 | 60 000 € | 35 520 € | 0 € | 24 480 € | ok + sous-conso |
+| Y99F90006 | 130 000 € | 99 474 € | 0 € | 30 526 € | ok + sous-conso |
+| Y99F900015 | 40 000 € | 0 € | 0 € | 40 000 € | ok + sous-conso |
+
+Synthèse : Σ enveloppes 1 182 000 €, AS 1 109 022 €, **5 dépassements (122 475 €)**, **9 sous-consommations**, 195 453 € non consommés (Σ CT par CT), 242 639 € de plan hors enveloppe. Classification : sécurisé 714 663 €, non sécurisé (aléas) 250 000 € (25,92 %), 8 CT à risque. Filtre d'année (n° 24) : 2026 = 20 CT, 1 138 462 € d'enveloppes au prorata ; 2027 = 2 CT, 43 538 € (Σ = 1 182 000 €).
+
 ### Pourquoi ces montants
 
 Pour une enveloppe 2026 commencée avant le réalisé, AP et AT sont la `projection_plan_echeance` et la `projection_tendance_echeance` au 31/12/2026. Le statut et la sous-consommation en découlent :

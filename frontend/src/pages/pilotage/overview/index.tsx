@@ -1,18 +1,22 @@
 // Pilotage « Vue d'ensemble » (/) : où en sont les enveloppes, ce qui est à traiter, comment chaque CT atterrit.
+// Chiffres clés et prévision suivent le filtre d'année (DECISIONS n° 24) ; « À traiter » (anomalies) jamais.
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, GroupedList, Link, ListRow, Metric, Page, PageToolbar, ProgressBar, StatusGlyph } from '../../../ui';
-import type { AnalyseResult, PrevisionCT } from '../../../api/types';
+import type { AnalyseResult, PrevisionCT, Previsions } from '../../../api/types';
 import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
 import { EnveloppesOverviewChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
+import PeriodeControl, { PrevisionsError } from '../shared/PeriodeControl';
+import { usePrevisions } from '../shared/usePrevisions';
 import {
+  anneeOf,
   anomalieGlyph,
   anomaliesATraiter,
   CATEGORIE_LABEL,
+  enAnnee,
   enveloppesOf,
   fmtEurShort,
-  forecastOf,
   forecastSentence,
   graviteGlyph,
   hasEnveloppe,
@@ -29,10 +33,10 @@ function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
 
 /**
  * Chiffres clés (DECISIONS n° 20) : consommé sur Σ enveloppes, enveloppes à risque d'être perdues, dépassement
- * (lecture brute, sans compensation entre CT). Sans aucune enveloppe : état vide vers l'import du fichier CàT.
+ * (lecture brute, sans compensation entre CT). Sans aucune enveloppe : état vide vers la saisie des enveloppes
+ * (DECISIONS n° 27). Année choisie : tranches de l'année (DECISIONS n° 24).
  */
-function KeyFigures({ result }: { result: AnalyseResult }) {
-  const fc = forecastOf(result);
+function KeyFigures({ fc }: { fc: Previsions | null }) {
   if (!fc)
     return (
       <div className="pil-metrics">
@@ -43,17 +47,18 @@ function KeyFigures({ result }: { result: AnalyseResult }) {
     );
   const g = fc.global;
   const env = enveloppesOf(fc);
+  const en = enAnnee(anneeOf(fc));
   if (!hasEnveloppe(g) || !env || env.nb_configures === 0)
     return (
       <EmptyState
-        title="Aucune enveloppe importée"
+        title={en ? `Aucune enveloppe${en}` : 'Aucune enveloppe saisie'}
         action={
           <Button to="/enveloppes" variant="primary">
-            Importer le fichier CàT
+            Nouvelle enveloppe
           </Button>
         }
       >
-        Le budget d’un CT est son enveloppe : sans fichier CàT, aucun CT n’a de budget.
+        Le budget d’un CT est son enveloppe : tant qu’aucune n’est saisie{en}, aucun CT n’a de budget.
       </EmptyState>
     );
   const budget = g.budget ?? env.montant;
@@ -68,7 +73,7 @@ function KeyFigures({ result }: { result: AnalyseResult }) {
         <Metric
           label="Consommé"
           value={fmtEur(g.consomme)}
-          sub={`sur ${fmtEur(budget)} d’enveloppes (${env.nb_configures} CT) · ${fmtPct(pct)}`}
+          sub={`sur ${fmtEur(budget)} d’enveloppes${en} (${env.nb_configures} CT) · ${fmtPct(pct)}`}
         >
           <ProgressBar
             value={pct}
@@ -82,14 +87,14 @@ function KeyFigures({ result }: { result: AnalyseResult }) {
           value={fmtEur(env.non_consomme)}
           tone={risk ? 'warning' : undefined}
           glyph={risk ? SOUS_CONSO_GLYPH : undefined}
-          sub={`${env.nb_sous_consommation} CT sous la zone cible`}
+          sub={`${env.nb_sous_consommation} CT sous la zone cible${en}`}
         />
         <Metric
           label="Dépassement"
           value={fmtEur(env.depassement)}
           tone={over ? 'danger' : undefined}
           glyph={over ? { kind: 'danger', tone: 'danger' } : undefined}
-          sub={`${env.nb_depassement} CT au-dessus de leur enveloppe`}
+          sub={`${env.nb_depassement} CT au-dessus de leur enveloppe${en}`}
         />
       </div>
       {nbHors > 0 && (
@@ -97,7 +102,7 @@ function KeyFigures({ result }: { result: AnalyseResult }) {
           <Link to="/enveloppes?filtre=sans_enveloppe" size="sm">
             {nbHors} CT sans enveloppe
           </Link>
-          {hors ? ` : ${fmtEurShort(hors.consomme)} consommés` : ''}
+          {hors ? ` : ${fmtEurShort(hors.consomme)} consommés${en}` : ''}
         </p>
       )}
     </>
@@ -152,14 +157,17 @@ function ToDo({ result }: { result: AnalyseResult }) {
   );
 }
 
-/** Carte « Prévision » : Σ enveloppes actives face au réalisé cumulé puis au plan de charge projeté (DECISIONS n° 20). */
-function Forecast({ result }: { result: AnalyseResult }) {
-  const fc = forecastOf(result);
+/**
+ * Carte « Prévision » : Σ enveloppes actives face au réalisé cumulé puis à la projection sécurisée (plan de charge +
+ * provisions sécurisées, DECISIONS n° 20, 23), sur l'année choisie (n° 24).
+ */
+function Forecast({ fc }: { fc: Previsions | null }) {
   if (fc && !hasEnveloppe(fc.global)) return null;
+  const annee = anneeOf(fc);
   return (
     <Card>
       <div className="pil-card-head">
-        <h2 className="pil-card-head__title">Prévision</h2>
+        <h2 className="pil-card-head__title">Prévision{annee > 0 ? ` ${annee}` : ''}</h2>
         {fc && (
           <Link to="/previsions" size="sm">
             Détail des prévisions
@@ -168,7 +176,7 @@ function Forecast({ result }: { result: AnalyseResult }) {
       </div>
       {fc ? (
         <>
-          <p className="pil-card-head__sub">{forecastSentence(fc.global)}</p>
+          <p className="pil-card-head__sub">{forecastSentence(fc.global, annee)}</p>
           <EnveloppesOverviewChart previsions={fc} />
         </>
       ) : (
@@ -182,6 +190,7 @@ function Forecast({ result }: { result: AnalyseResult }) {
 
 export default function OverviewPage() {
   const a = useAnalyse();
+  const prev = usePrevisions();
   const r = a.result.data;
   const asOf = r?.previsions?.as_of;
   return (
@@ -197,16 +206,26 @@ export default function OverviewPage() {
               </>
             )
           }
-          actions={<ContextControl analyse={a} />}
+          actions={
+            <>
+              <PeriodeControl prev={prev} />
+              <ContextControl analyse={a} />
+            </>
+          }
         />
       }
     >
       <AnalyseGate analyse={a}>
         {(result) => (
           <>
-            <KeyFigures result={result} />
+            <PrevisionsError prev={prev} />
+            <div className="pil-content" aria-busy={prev.isPlaceholder || undefined}>
+              <KeyFigures fc={prev.previsions} />
+            </div>
             <ToDo result={result} />
-            <Forecast result={result} />
+            <div className="pil-content" aria-busy={prev.isPlaceholder || undefined}>
+              <Forecast fc={prev.previsions} />
+            </div>
           </>
         )}
       </AnalyseGate>

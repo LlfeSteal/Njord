@@ -75,30 +75,39 @@ func readParams(c *gin.Context) (params, error) {
 	return p, nil
 }
 
-// compute resolves the versions, loads the data and runs the engine.
-func (h *Handler) compute(ctx context.Context, p params) (domain.AnalyseResult, error) {
+// input resolves the versions and the settings and loads the engine input.
+func (h *Handler) input(ctx context.Context, p params) (Input, domain.Settings, error) {
 	plan, err := h.repo.ResolveVersion(ctx, domain.KindPlan, p.planID)
 	if err != nil {
-		return domain.AnalyseResult{}, err
+		return Input{}, domain.Settings{}, err
 	}
 	realise, err := h.repo.ResolveVersion(ctx, domain.KindRealise, p.realiseID)
 	if err != nil {
-		return domain.AnalyseResult{}, err
+		return Input{}, domain.Settings{}, err
 	}
 	provision, err := h.repo.ResolveProvision(ctx, p.provisionID)
 	if err != nil {
-		return domain.AnalyseResult{}, err
+		return Input{}, domain.Settings{}, err
 	}
 	s, err := h.st.GetSettings(ctx)
 	if err != nil {
-		return domain.AnalyseResult{}, err
+		return Input{}, domain.Settings{}, err
 	}
 	in, err := h.repo.LoadInput(ctx, plan, realise, provision)
 	if err != nil {
-		return domain.AnalyseResult{}, err
+		return Input{}, domain.Settings{}, err
 	}
 	in.WeekFrom, in.WeekTo, in.IncludeInactive = p.weekFrom, p.weekTo, p.includeInactive
 	in.Now = h.st.Now()
+	return in, s, nil
+}
+
+// compute resolves the versions, loads the data and runs the engine.
+func (h *Handler) compute(ctx context.Context, p params) (domain.AnalyseResult, error) {
+	in, s, err := h.input(ctx, p)
+	if err != nil {
+		return domain.AnalyseResult{}, err
+	}
 	res := Run(in, s)
 	if err := h.mergeSuivi(ctx, &res); err != nil {
 		return domain.AnalyseResult{}, err
@@ -229,7 +238,8 @@ func (h *Handler) realiseCSV(c *gin.Context) {
 	}
 	mask := httpx.QueryBool(c, "mask_sensitive", false)
 	en := NewEnricher(s)
-	header := append(append([]string{}, realiseHeader...), "iso_week", "heures", "eur", "classification")
+	// Plus de colonne classification (DECISIONS n° 23).
+	header := append(append([]string{}, realiseHeader...), "iso_week", "heures", "eur")
 	httpx.CSV(c, "realise-enrichi.csv", header, func(write func([]string) error) error {
 		for i := range entries {
 			e := &entries[i]
@@ -241,7 +251,7 @@ func (h *Handler) realiseCSV(c *gin.Context) {
 			if p.weekTo != "" && (x.ISOWeek == "" || x.ISOWeek > p.weekTo) {
 				continue
 			}
-			rec := append(realiseRecord(e, mask), x.ISOWeek, httpx.FormatFloat(x.Heures), httpx.FormatFloat(x.Eur), string(x.Classification))
+			rec := append(realiseRecord(e, mask), x.ISOWeek, httpx.FormatFloat(x.Heures), httpx.FormatFloat(x.Eur))
 			if err := write(rec); err != nil {
 				return err
 			}

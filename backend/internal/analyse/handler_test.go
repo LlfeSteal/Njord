@@ -179,11 +179,13 @@ func TestHandlerAnalyse(t *testing.T) {
 	if r := byRes["BARBIER Luc"]; r.Flag != domain.FlagHorsPlan || r.Confidence != domain.ConfNone {
 		t.Errorf("BARBIER: %+v", r)
 	}
-	if len(res.Alertes.DeriveProvision) != 2 || len(res.Alertes.CTRisque) != 1 || res.Alertes.CTRisque[0].CT != "Y99F900012" {
+	// Classification prévisionnelle (DECISIONS n° 23) : plan terminé à as_of (W37), aucune
+	// provision → rien de sécurisé ni d'aléas, aucun CT à risque (le TYPE du réalisé n'y entre plus).
+	if len(res.Alertes.DeriveProvision) != 2 || len(res.Alertes.CTRisque) != 0 || res.Alertes.AlerteGlobale {
 		t.Errorf("alertes: %+v", res.Alertes)
 	}
-	if res.Budget.Global.Securise != -300 || res.Budget.Global.NonSecurise != 15000 {
-		t.Errorf("budget (drop exclu, avoir inclus): %+v", res.Budget.Global)
+	if res.Budget.Global.Securise != 0 || res.Budget.Global.NonSecurise != 0 || res.Budget.Global.PctSecurite != nil {
+		t.Errorf("budget : %+v", res.Budget.Global)
 	}
 
 	// Dernier rendu sauvegardé (upsert id = 1).
@@ -230,11 +232,12 @@ func TestHandlerCSV(t *testing.T) {
 	w = e.do("GET", "/api/analyse/realise-enrichi.csv", nil)
 	body = w.Body.String()
 	lines = strings.Split(strings.TrimSpace(body), "\n")
-	if w.Code != http.StatusOK || len(lines) != 6 || !strings.HasSuffix(strings.TrimSpace(lines[0]), "iso_week;heures;eur;classification") {
+	if w.Code != http.StatusOK || len(lines) != 6 || !strings.HasSuffix(strings.TrimSpace(lines[0]), ";MOTIF;iso_week;heures;eur") {
 		t.Fatalf("realise-enrichi: %d %d lignes %q", w.Code, len(lines), lines[0])
 	}
 	if !strings.Contains(lines[0], ";EMPLOYE/FOURNISSEUR;NOM PRENOM;MATRICULE;") ||
-		!strings.Contains(lines[1], ";DURAND Claire Mme;DURAND Claire;A00001;") || !strings.Contains(lines[1], ";2026-W37;26;0;SECURISE") {
+		!strings.Contains(lines[1], ";DURAND Claire Mme;DURAND Claire;A00001;") || !strings.HasSuffix(strings.TrimSpace(lines[1]), ";2026-W37;26;0") ||
+		strings.Contains(body, "SECURISE") {
 		t.Errorf("enrichi: %q / %q", lines[0], lines[1])
 	}
 	masked := e.do("GET", "/api/analyse/realise-enrichi.csv?mask_sensitive=true", nil).Body.String()
@@ -243,7 +246,7 @@ func TestHandlerCSV(t *testing.T) {
 			t.Errorf("donnée sensible %q non masquée", s)
 		}
 	}
-	if !strings.Contains(masked, "NON_SECURISE") {
+	if !strings.Contains(masked, ";2026-W37;0;15000") {
 		t.Error("colonnes dérivées absentes du masqué")
 	}
 }
@@ -504,7 +507,8 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 		t.Fatalf("meta.provision_version : %+v", res.Meta.ProvisionVersion)
 	}
 	he, hs := res.Previsions.HorsEnveloppe, sans.Previsions.HorsEnveloppe
-	hs.NbCT++ // Y99F900015, présent seulement dans les provisions
+	hs.NbCT++                    // Y99F900015, présent seulement dans les provisions
+	hs.AtterrissagePlan += 40000 // sa provision sécurisée (sans enveloppe : comptée, DECISIONS n° 23)
 	if provs(res) != 140000 || gl.Budget != nil || he != hs {
 		t.Errorf("global : %+v, hors enveloppe %+v (sans : %+v)", gl, res.Previsions.HorsEnveloppe, sans.Previsions.HorsEnveloppe)
 	}
@@ -522,8 +526,14 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 			b15 = &res.Budget.ParCT[i]
 		}
 	}
-	if b15 == nil || b15.PPSPlan != 0 || b15.Provisions != 40000 {
+	if b15 == nil || b15.PPSPlan != 0 || b15.Provisions != 40000 || b15.Securise != 40000 || b15.NonSecurise != 0 || b15.Risque {
 		t.Errorf("budget Y99F900015 : %+v", b15)
+	}
+	// Aléas de Y99F900012 (100 000 €) : non sécurisés, CT à risque, alerte globale.
+	if p12.ProvisionsAleas != 100000 || p12.ProvisionsSecurisees != 0 || len(res.Alertes.CTRisque) != 1 ||
+		res.Alertes.CTRisque[0].CT != "Y99F900012" || res.Alertes.CTRisque[0].NonSecurise != 100000 || !res.Alertes.AlerteGlobale ||
+		res.KPIs.NbCTRisque != 1 || fv(res.Budget.Global.PctNonSecurise) != round2(100000.0/140000*100) {
+		t.Errorf("classification : %+v, budget %+v", res.Alertes, res.Budget.Global)
 	}
 	nat := 0.0
 	for _, n := range res.Budget.ParNature {
@@ -596,5 +606,54 @@ func TestHandlerAnalyseEnveloppes(t *testing.T) {
 		pv.Enveloppes.NbConfigures != 1 || pv.Enveloppes.Montant != 5000 || pv.Enveloppes.NbCT != len(pv.ParCT) ||
 		pv.HorsEnveloppe.NbCT != len(pv.ParCT)-1 {
 		t.Errorf("global %+v, synthèse %+v, hors enveloppe %+v", gl, pv.Enveloppes, pv.HorsEnveloppe)
+	}
+}
+
+// TestHandlerPrevisionsAnnee: GET /analyse/previsions?annee=N (DECISIONS n° 24).
+func TestHandlerPrevisionsAnnee(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	e.exec(`INSERT INTO enveloppes(ct, categorie, categorie_libelle, date_debut, date_fin, montant) VALUES (?,?,?,?,?,?)`,
+		"Y99F90001", "Y99F90000", "Socle", "2026-07-01", "2027-06-30", 36500)
+	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
+	if res.Previsions.Annee != 0 || len(res.Previsions.Annees) != 2 || res.Previsions.Annees[0] != 2026 || res.Previsions.Annees[1] != 2027 {
+		t.Fatalf("annees : %d %v", res.Previsions.Annee, res.Previsions.Annees)
+	}
+	var n int
+	e.st.DB().QueryRow(`SELECT COUNT(*) FROM analyse_last_result`).Scan(&n)
+
+	// Sans annee (ou 0) : identique à AnalyseResult.previsions.
+	for _, q := range []string{"", "?annee=0", "?annee=%20"} {
+		w := e.do("GET", "/api/analyse/previsions"+q, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%q : %d %s", q, w.Code, w.Body.String())
+		}
+		if pv := decode[domain.Previsions](t, w); pv.Annee != 0 || len(pv.ParCT) != len(res.Previsions.ParCT) ||
+			pv.Global.AtterrissagePlan != res.Previsions.Global.AtterrissagePlan {
+			t.Errorf("%q : %+v", q, pv.Global)
+		}
+	}
+	w := e.do("GET", "/api/analyse/previsions?annee=2027", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("2027 : %d %s", w.Code, w.Body.String())
+	}
+	pv := decode[domain.Previsions](t, w)
+	p := findCT(t, pv, "Y99F90001")
+	if pv.Annee != 2027 || p.Enveloppe == nil || p.Enveloppe.DateDebut != "2027-01-04" || p.Enveloppe.Montant != 17800 || fv(pv.Global.Budget) != 17800 {
+		t.Errorf("2027 : %+v / %+v", pv.Global, p.Enveloppe)
+	}
+	// Lecture seule : pas de dernier rendu sauvegardé.
+	var n2 int
+	e.st.DB().QueryRow(`SELECT COUNT(*) FROM analyse_last_result`).Scan(&n2)
+	if n2 != n {
+		t.Errorf("analyse_last_result modifié : %d → %d", n, n2)
+	}
+	for _, q := range []string{"annee=abc", "annee=-1", "annee=2026.5", "annee=10000", "week_from=2026-W99"} {
+		if w := e.do("GET", "/api/analyse/previsions?"+q, nil); w.Code != http.StatusBadRequest {
+			t.Errorf("%s : %d", q, w.Code)
+		}
+	}
+	if w := e.do("GET", "/api/analyse/previsions?plan_version_id=nope", nil); w.Code != http.StatusNotFound {
+		t.Errorf("version inconnue : %d", w.Code)
 	}
 }

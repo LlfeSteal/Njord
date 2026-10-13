@@ -67,6 +67,14 @@ export function fmtEurSigned(v: number | null | undefined): string {
   return `${s}${nf0.format(Math.abs(Math.round(v)))}${nbsp}€`;
 }
 
+const nfEtp = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+/** ETP planifiés d'une semaine (DECISIONS n° 25) : « 3,5 ETP », une décimale. */
+export function fmtEtp(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${nfEtp.format(v)}${nbsp}ETP`;
+}
+
 /** "2026-W37" → « S37 ». */
 export function weekShort(w: string | null | undefined): string {
   const m = w ? /W(\d{2})$/.exec(w) : null;
@@ -108,11 +116,22 @@ export const uncoveredSentence = (h: number) =>
  * avec enveloppe, DECISIONS n° 20) n'a pas de séries : les prévisions restent exploitables s'il y a des CT.
  */
 export function forecastOf(result: AnalyseResult): Previsions | null {
-  const p = result.previsions;
+  return forecastFrom(result.previsions);
+}
+
+/** Même contrôle sur des prévisions servies seules (`GET /analyse/previsions?annee=`, DECISIONS n° 24). */
+export function forecastFrom(p: Previsions | null | undefined): Previsions | null {
   if (!p || !p.global || !p.as_of) return null;
   if (!p.global.series?.length && !p.par_ct?.length) return null;
   return p;
 }
+
+// ------------------------------------------------------------------ Filtre d'année (DECISIONS n° 24)
+/** Année des prévisions affichées (0 = Tout), lue sur les données elles-mêmes : les mots suivent toujours les chiffres. */
+export const anneeOf = (fc: Pick<Previsions, 'annee'> | null | undefined): number => (fc?.annee && fc.annee > 0 ? fc.annee : 0);
+
+/** « en 2027 » (avec l'espace initiale) quand une année est choisie, '' pour Tout. */
+export const enAnnee = (annee: number | null | undefined): string => (annee && annee > 0 ? ` en ${annee}` : '');
 
 export const STATUT_LABEL: Record<PrevisionStatut, string> = {
   ok: 'Dans le budget',
@@ -164,7 +183,7 @@ export function rowReason(statut: PrevisionStatut | null | undefined, risque = f
   if (sousConso) parts.push('Enveloppe qui risque de ne pas être consommée (fin de l’enveloppe)');
   if (statut === 'depassement') parts.push('Atterrissage au-delà de l’enveloppe (sur-imputation)');
   if (statut === 'vigilance') parts.push('Atterrissage proche de l’enveloppe');
-  if (risque) parts.push('Part non sécurisée au-delà du seuil');
+  if (risque) parts.push('Provisions pour aléas (non sécurisées) au-delà du seuil');
   return parts.join(' · ');
 }
 
@@ -186,23 +205,31 @@ export interface Echeance {
   date: string;
   /** Montant de l'enveloppe (périmètre : Σ enveloppes). */
   budget: number;
-  /** Atterrissage plan à l'échéance : seule base du non consommé et du dépassement (DECISIONS n° 21). */
+  /**
+   * Atterrissage sécurisé à l'échéance (consommé + plan de charge restant + provisions sécurisées, DECISIONS n° 23) :
+   * seule base du non consommé et du dépassement (DECISIONS n° 21).
+   */
   projPlan: number;
   /** Projection tendance à l'échéance : repère (trace, vigilance), jamais source d'un montant (DECISIONS n° 21). */
   projTendance: number;
-  /** Enveloppe que le plan de charge ne consommera pas, donc perdue (≥ 0, DECISIONS n° 21). */
+  /** Enveloppe que le plan de charge et les provisions sécurisées ne consommeront pas, donc perdue (≥ 0, DECISIONS n° 21, 23). */
   nonConsomme: number;
-  /** Dépassement de l'enveloppe par l'atterrissage plan (`ecart_plan`, DECISIONS n° 21), 0 sinon. */
+  /** Dépassement de l'enveloppe par l'atterrissage sécurisé (`ecart_plan`, DECISIONS n° 21), 0 sinon. */
   depassement: number;
   rythmeNecessaire: number;
   rythmeActuel: number;
   semaines: number;
   /** Au-delà des seuils de sous-consommation (Réglages). */
   sousConso: boolean;
+  /**
+   * Année du filtre (DECISIONS n° 24), 0 = Tout. Avec une année, l'enveloppe est la tranche de l'année et l'échéance
+   * la fin de cette tranche : les mots disent « l'enveloppe en 2027 ».
+   */
+  annee: number;
 }
 
-/** Échéance de l'enveloppe ; null sans enveloppe (aucun budget, DECISIONS n° 20). */
-export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
+/** Échéance de l'enveloppe (tranche de l'année `annee`, 0 = Tout) ; null sans enveloppe (aucun budget, DECISIONS n° 20). */
+export function echeanceOf(p: PrevisionCT | null | undefined, annee = 0): Echeance | null {
   if (!p || !hasEnveloppe(p) || !p.echeance) return null;
   const budget = p.budget_echeance ?? p.budget ?? 0;
   const projPlan = p.projection_plan_echeance ?? 0;
@@ -223,6 +250,7 @@ export function echeanceOf(p: PrevisionCT | null | undefined): Echeance | null {
     rythmeActuel: p.rythme_hebdo ?? 0,
     semaines: p.semaines_echeance ?? 0,
     sousConso: p.sous_consommation ?? false,
+    annee: annee > 0 ? annee : 0,
   };
 }
 
@@ -240,7 +268,10 @@ export function paceText(e: Echeance): string | null {
 
 /** Mots de l'échéance : fin de l'enveloppe d'un CT, ou fin des enveloppes du périmètre. */
 export interface EcheanceWords {
-  /** « à la fin de l'enveloppe (30/06) », « à la fin des enveloppes (31/12) ». */
+  /**
+   * « à la fin de l'enveloppe (30/06) », « à la fin des enveloppes (31/12) » ; année choisie : « à la fin de
+   * l'enveloppe en 2027 (31/12) » (fin de la tranche de l'année, DECISIONS n° 24).
+   */
   when: string;
   /** Repère : « Fin de l'enveloppe 30/06 », « Fin des enveloppes 31/12 ». */
   marker: string;
@@ -256,16 +287,25 @@ export interface EcheanceWords {
 
 export function echeanceWords(e: Echeance): EcheanceWords {
   const d = fmtDayMonth(e.date);
+  const en = enAnnee(e.annee);
+  const y = e.annee > 0 ? ` ${e.annee}` : '';
   if (e.kind === 'perimetre')
     return {
-      when: `à la fin des enveloppes (${d})`,
-      marker: `Fin des enveloppes ${d}`,
-      budget: 'total des enveloppes',
-      of: 'du total des enveloppes',
-      the: 'le total des enveloppes',
+      when: `à la fin des enveloppes${en} (${d})`,
+      marker: `Fin des enveloppes${en} ${d}`,
+      budget: `total des enveloppes${y}`,
+      of: `du total des enveloppes${y}`,
+      the: `le total des enveloppes${y}`,
       fem: false,
     };
-  return { when: `à la fin de l’enveloppe (${d})`, marker: `Fin de l’enveloppe ${d}`, budget: 'enveloppe', of: 'de l’enveloppe', the: 'l’enveloppe', fem: true };
+  return {
+    when: `à la fin de l’enveloppe${en} (${d})`,
+    marker: `Fin de l’enveloppe${en} ${d}`,
+    budget: `enveloppe${y}`,
+    of: `de l’enveloppe${y}`,
+    the: `l’enveloppe${y}`,
+    fem: true,
+  };
 }
 
 /** Majuscule initiale. */
@@ -348,24 +388,33 @@ export function anomaliesATraiter(list: Anomalie[] | null | undefined) {
   return { total: open.length, categories, top };
 }
 
-/** CT sans enveloppe (DECISIONS n° 20) : « Sans enveloppe : 42 k€ consommés, atterrissage 80 k€ (plan) ». */
-export const sansEnveloppeSentence = (p: Pick<PrevisionCT, 'consomme' | 'atterrissage_plan'>) =>
-  `Sans enveloppe : ${fmtEurShort(p.consomme)} consommés, atterrissage ${fmtEurShort(p.atterrissage_plan)} (plan)`;
+/** Libellé de l'atterrissage (DECISIONS n° 23) et sa définition, pour les bulles. */
+export const ATTERRISSAGE_LABEL = 'Atterrissage sécurisé';
+export const ATTERRISSAGE_HELP = 'consommé + plan de charge restant + provisions sécurisées';
+
+/**
+ * CT sans enveloppe (DECISIONS n° 20) : « Sans enveloppe : 42 k€ consommés, atterrissage sécurisé 80 k€ » ;
+ * année choisie : « Sans enveloppe en 2027 : … ».
+ */
+export const sansEnveloppeSentence = (p: Pick<PrevisionCT, 'consomme' | 'atterrissage_plan'>, annee = 0) =>
+  `Sans enveloppe${enAnnee(annee)} : ${fmtEurShort(p.consomme)} consommés, atterrissage sécurisé ${fmtEurShort(p.atterrissage_plan)}`;
 
 /**
  * Phrase de lecture de la trajectoire vers l'enveloppe (DECISIONS n° 20) : ce qui risque d'être perdu, sinon le
- * dépassement, sinon l'atterrissage face à l'enveloppe. Sans enveloppe : consommé et atterrissage seuls.
+ * dépassement, sinon l'atterrissage sécurisé (DECISIONS n° 23) face à l'enveloppe. Sans enveloppe : consommé et
+ * atterrissage seuls. `annee` (DECISIONS n° 24) : tranche de l'année, « à la fin de l'enveloppe en 2027 ».
  */
-export function forecastSentence(p: PrevisionCT): string {
-  const e = echeanceOf(p);
-  if (!e || p.budget == null) return `${sansEnveloppeSentence(p)}.`;
+export function forecastSentence(p: PrevisionCT, annee = 0): string {
+  const e = echeanceOf(p, annee);
+  if (!e || p.budget == null) return `${sansEnveloppeSentence(p, annee)}.`;
   const w = echeanceWords(e);
   // Même lecture que le statut et le point d'arrivée de la trajectoire : dépassement, puis sous-consommation
   // (au-delà des seuils seulement : sous eux, l'atterrissage est dans la zone cible).
   if (p.ecart_plan != null && p.ecart_plan > 0.5)
-    return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when}, soit ${fmtEurShort(p.ecart_plan)} au-dessus ${w.of} (${fmtEurShort(p.budget)}).`;
+    return `Atterrissage sécurisé ${fmtEurShort(p.atterrissage_plan)} ${w.when}, soit ${fmtEurShort(p.ecart_plan)} au-dessus ${w.of} (${fmtEurShort(p.budget)}).`;
   if (p.sous_consommation && e.nonConsomme > 0.5)
-    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (plan de charge).`;
+    return `${capitalize(w.when)}, ${fmtEurShort(e.nonConsomme)} ${w.of} (${fmtEurShort(e.budget)}) risquent d’être perdus (plan de charge + provisions sécurisées).`;
   const inTarget = p.cible_min != null && p.atterrissage_plan >= p.cible_min - 0.5 && p.atterrissage_plan <= p.budget + 0.5;
-  return `Atterrissage ${fmtEurShort(p.atterrissage_plan)} ${w.when} pour ${e.kind === 'perimetre' ? 'des enveloppes' : 'une enveloppe'} de ${fmtEurShort(p.budget)}${inTarget ? ', dans la zone cible' : ''}.`;
+  const what = e.kind === 'perimetre' ? `des enveloppes${e.annee > 0 ? ` ${e.annee}` : ''}` : `une enveloppe${e.annee > 0 ? ` ${e.annee}` : ''}`;
+  return `Atterrissage sécurisé ${fmtEurShort(p.atterrissage_plan)} ${w.when} pour ${what} de ${fmtEurShort(p.budget)}${inTarget ? ', dans la zone cible' : ''}.`;
 }

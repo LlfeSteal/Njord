@@ -2,6 +2,8 @@
 // (DECISIONS n° 20), charge hebdomadaire,
 // légende et bulle au look du kit. Couleurs résolues depuis les tokens. La barre par CT est dans EnveloppeBars.tsx.
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
+// Projection = atterrissage sécurisé : plan de charge restant + provisions sécurisées (DECISIONS n° 23).
+// Bulle de chaque semaine : ETP planifiés (`series[].etp`, DECISIONS n° 25).
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
   Area,
@@ -21,7 +23,7 @@ import {
 import type { Couverture, PrevisionCT, PrevisionPoint, Previsions } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
 import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
-import { fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
+import { fmtEtp, fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -136,6 +138,11 @@ function couvertureNote(c: Couverture | undefined): string | null {
   return null;
 }
 
+/** Ligne de bulle des ETP planifiés de la semaine (DECISIONS n° 25), rien si la série ne les porte pas. */
+function etpRow(etp: number | null | undefined): { label: string; value: string }[] {
+  return typeof etp === 'number' && Number.isFinite(etp) ? [{ label: 'ETP planifiés', value: fmtEtp(etp) }] : [];
+}
+
 /** Suite de semaines consécutives non couvertes, en pas d'axe autour de la zone à hachurer. */
 interface UncoveredRun {
   x1: string;
@@ -232,12 +239,14 @@ const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 
 // ------------------------------------------------------------------ Trajectoire vers l'enveloppe (DECISIONS n° 20)
 // Une question : l'enveloppe sera-t-elle consommée en entier, sans surconsommation ? Axe = période de l'enveloppe
-// (périmètre : union des périodes), zone cible [cible_min, enveloppe], ligne d'enveloppe, éventail plan ↔ tendance,
-// réalisé jusqu'à « Aujourd'hui » et point d'arrivée sur la projection plan, glyphé et libellé selon le statut.
+// (périmètre : union des périodes ; année choisie : la tranche de l'année, DECISIONS n° 24), zone cible
+// [cible_min, enveloppe], ligne d'enveloppe, éventail projection sécurisée ↔ tendance, réalisé jusqu'à
+// « Aujourd'hui » et point d'arrivée sur la projection sécurisée (plan de charge + provisions sécurisées,
+// DECISIONS n° 23), glyphé et libellé selon le statut.
 
 const FORECAST_SERIES: ChartSeries[] = [
   { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
-  { key: 'plan_cumul', label: 'Projection plan', token: '--blue', shape: 'line', opacity: 0.5 },
+  { key: 'plan_cumul', label: 'Projection sécurisée', token: '--blue', shape: 'line', opacity: 0.5 },
   { key: 'tendance_cumul', label: 'Tendance', token: '--blue', shape: 'dash' },
 ];
 
@@ -290,6 +299,8 @@ interface TrajPoint {
   plan_cumul: number | null;
   tendance_cumul: number | null;
   fan: [number, number] | null;
+  /** ETP planifiés de la semaine (absent sur les semaines ajoutées). */
+  etp?: number;
   /** Semaine ajoutée après la fin du plan, jusqu'à la fin de l'enveloppe (projections seules). */
   extension?: boolean;
 }
@@ -316,6 +327,7 @@ function trajectoryOf(p: PrevisionCT): TrajPoint[] {
       plan_cumul: s.plan_cumul,
       tendance_cumul: s.tendance_cumul,
       fan: fanOf(s.plan_cumul, s.tendance_cumul),
+      etp: s.etp,
     }));
   const last = pts[pts.length - 1];
   if (!to || !last) return pts;
@@ -373,10 +385,12 @@ export interface ForecastChartProps {
   height?: number;
   /** Légende HTML sous le graphique (défaut : sauf en format compact). */
   legend?: boolean;
+  /** Année du filtre (DECISIONS n° 24), 0 = Tout : la ligne d'enveloppe se lit « Enveloppe 2027 ». */
+  annee?: number;
 }
 
 /** Trajectoire cumulée vers l'enveloppe : zone cible, enveloppe, réalisé, éventail plan ↔ tendance, point d'arrivée. */
-export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: ForecastChartProps) {
+export function ForecastChart({ prevision, asOfWeek, height = 260, legend, annee = 0 }: ForecastChartProps) {
   const c = useTokenColors(FORECAST_TOKENS);
   const budget = prevision.budget;
   const series = budget == null ? [] : trajectoryOf(prevision);
@@ -390,7 +404,7 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
   const hasZone = cibleMin != null && budget - cibleMin > 0.5;
 
   // Point d'arrivée, à la dernière semaine : même lecture que le statut, le tableau et la phrase. Toujours sur
-  // l'atterrissage plan (DECISIONS n° 21) : au-dessus de l'enveloppe en dépassement, sous la cible en sous-consommation
+  // l'atterrissage sécurisé (DECISIONS n° 21, 23) : au-dessus de l'enveloppe en dépassement, sous la cible en sous-consommation
   // (= enveloppe − non consommé), dans la cible sinon. La tendance n'est qu'un repère (courbe, éventail).
   const last = series[series.length - 1];
   const ecart = prevision.ecart_plan ?? prevision.atterrissage_plan - budget;
@@ -413,7 +427,7 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
     : kind === 'over'
       ? `+${fmtEurShort(ecart)} de dépassement`
       : kind === 'under'
-        ? `${fmtEurShort(nonConso)} non consommés (plan de charge)`
+        ? `${fmtEurShort(nonConso)} non consommés (plan de charge + provisions sécurisées)`
         : kind === 'vigilance'
           ? `${fmtEurShort(landing)} · dans la cible, vigilance`
           : `${fmtEurShort(landing)} · dans la cible`;
@@ -474,7 +488,10 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
   };
 
   const tooltipNote = (d: TrajPoint) => (d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture));
-  const tooltipExtra = (d: TrajPoint) => (d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []);
+  const tooltipExtra = (d: TrajPoint) => [
+    ...etpRow(d.etp),
+    ...(d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []),
+  ];
   const legendSeries = [...FORECAST_SERIES, ...(hasZone ? [TARGET_SERIES] : []), OVER_SERIES];
   // « Aujourd'hui » sur la dernière semaine (enveloppe terminée) : marge pour que son libellé centré ne soit pas coupé.
   const todayAtEnd = hasToday && last.week === asOfWeek;
@@ -511,7 +528,12 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
             strokeDasharray="2 3"
             strokeWidth={1.5}
             ifOverflow="extendDomain"
-            label={{ value: `Enveloppe ${fmtEurShort(budget)}`, position: 'insideBottomLeft', fill: c['--text-secondary'], fontSize: 11 }}
+            label={{
+              value: `Enveloppe${annee > 0 ? ` ${annee}` : ''} ${fmtEurShort(budget)}`,
+              position: 'insideBottomLeft',
+              fill: c['--text-secondary'],
+              fontSize: 11,
+            }}
           />
           {hasToday && (
             <ReferenceLine
@@ -535,12 +557,13 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend }: For
 
 // ------------------------------------------------------------------ Vue d'ensemble : Σ enveloppes (DECISIONS n° 20)
 // Σ des enveloppes actives chaque semaine (lissée), face à la consommation cumulée du périmètre des enveloppes :
-// réalisé jusqu'à « Aujourd'hui », puis projection du plan de charge en pointillé.
+// réalisé jusqu'à « Aujourd'hui », puis projection sécurisée (plan de charge + provisions sécurisées, DECISIONS n° 23)
+// en pointillé. Année choisie (DECISIONS n° 24) : tranches de l'année, montants au prorata.
 
 const OVERVIEW_SERIES: ChartSeries[] = [
   { key: 'env', label: 'Σ enveloppes actives', token: '--text-secondary', shape: 'line' },
   { key: 'reel_cumul', label: 'Réalisé', token: '--blue', shape: 'line' },
-  { key: 'plan_cumul', label: 'Plan de charge (projection)', token: '--blue', shape: 'dash' },
+  { key: 'plan_cumul', label: 'Projection sécurisée', token: '--blue', shape: 'dash' },
 ];
 
 const OVERVIEW_TOKENS = ['--blue', '--success', '--text-secondary', '--separator'] as const;
@@ -570,9 +593,10 @@ interface OverviewPoint {
   env: number;
   reel_cumul: number | null;
   plan_cumul: number | null;
+  etp: number;
 }
 
-/** Vue d'ensemble : Σ enveloppes actives (lissée) face au réalisé cumulé, puis au plan de charge projeté. */
+/** Vue d'ensemble : Σ enveloppes actives (lissée) face au réalisé cumulé, puis à la projection sécurisée. */
 export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsions: Previsions; height?: number }) {
   const c = useTokenColors(OVERVIEW_TOKENS);
   const envs = previsions.par_ct.flatMap((p) => (p.enveloppe ? [p.enveloppe] : []));
@@ -592,7 +616,9 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
     env: lisse[i],
     reel_cumul: s.reel_cumul,
     plan_cumul: s.plan_cumul,
+    etp: s.etp,
   }));
+  const annee = previsions.annee > 0 ? previsions.annee : 0;
   const peak = Math.max(...raw);
   let dataMax = peak;
   for (const d of data) dataMax = Math.max(dataMax, d.reel_cumul ?? 0, d.plan_cumul ?? 0);
@@ -603,7 +629,7 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
   const peakLabel = (p: { x?: number; y?: number; index?: number }) =>
     p.index === peakIdx ? (
       <text x={(p.x ?? 0) + 6} y={(p.y ?? 0) - 8} fill={c['--text-secondary']} fontSize={11}>
-        Σ enveloppes {fmtEurShort(peak)}
+        Σ enveloppes{annee > 0 ? ` ${annee}` : ''} {fmtEurShort(peak)}
       </text>
     ) : (
       <g />
@@ -625,7 +651,7 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
                 series={OVERVIEW_SERIES.filter((s) => s.key !== 'env')}
                 format={(v) => fmtEur(v)}
                 title={(d) => fmtWeek(d.week)}
-                extra={(d) => [{ label: 'Σ enveloppes actives', value: fmtEur(d.envRaw) }]}
+                extra={(d) => [{ label: 'Σ enveloppes actives', value: fmtEur(d.envRaw) }, ...etpRow(d.etp)]}
               />
             }
           />
@@ -667,7 +693,7 @@ const LOAD_SERIES: ChartSeries[] = [
 
 const LOAD_TOKENS = ['--blue', '--text-secondary', '--separator', '--fill'] as const;
 
-/** Heures par semaine : passé = réalisé (plein), à venir = plan (piste), repère « Aujourd'hui ». */
+/** Heures par semaine : passé = réalisé (plein), à venir = plan (piste), repère « Aujourd'hui » ; ETP planifiés en bulle. */
 export function LoadChart({ series, asOfWeek, height = 200 }: { series: PrevisionPoint[]; asOfWeek: string; height?: number }) {
   const c = useTokenColors(LOAD_TOKENS);
   const hatch = useTokenColors(HATCH_TOKENS);
@@ -676,6 +702,7 @@ export function LoadChart({ series, asOfWeek, height = 200 }: { series: Previsio
   const data = series.map((p) => ({
     week: p.week,
     couverture: p.couverture,
+    etp: p.etp,
     passe: p.week <= asOfWeek ? (p.heures_reel ?? 0) : null,
     avenir: p.week > asOfWeek ? p.heures_plan : null,
   }));
@@ -695,11 +722,12 @@ export function LoadChart({ series, asOfWeek, height = 200 }: { series: Previsio
             wrapperStyle={{ outline: 'none' }}
             isAnimationActive={false}
             content={
-              <ChartTooltip<{ week: string; couverture?: Couverture }>
+              <ChartTooltip<{ week: string; couverture?: Couverture; etp?: number }>
                 series={LOAD_SERIES}
                 format={fmtHours}
                 title={(d) => fmtWeek(d.week)}
                 note={(d) => couvertureNote(d.couverture)}
+                extra={(d) => etpRow(d.etp)}
               />
             }
           />

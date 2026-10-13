@@ -1,17 +1,19 @@
 // Barre par CT (Vue d'ensemble, Prévisions portée globale, DECISIONS n° 20) : chaque CT avec enveloppe sur une
 // échelle commune en % de sa propre enveloppe. Zone cible [cible_min %, 100 %], repère 100 %, consommé puis
-// atterrissage plan, repère de la tendance. Triée du plus à risque au moins. Barres HTML/CSS (pas de recharts).
+// atterrissage sécurisé (consommé + plan de charge restant + provisions sécurisées, DECISIONS n° 23), repère de la
+// tendance. Triée du plus à risque au moins. Barres HTML/CSS (pas de recharts). Année choisie (DECISIONS n° 24) :
+// chaque barre est la tranche de l'année de l'enveloppe.
 import type { CSSProperties } from 'react';
 import { StatusGlyph, Tooltip } from '../../../ui';
 import type { PrevisionCT } from '../../../api/types';
 import { fmtEur, fmtPeriod } from '../../../lib/format';
 import { ChartLegend, type ChartSeries } from './charts';
-import { fmtEurShort, rowGlyph } from './pilotage';
+import { ATTERRISSAGE_LABEL, fmtEurShort, rowGlyph } from './pilotage';
 import './pilotage.css';
 
 const LEGEND: ChartSeries[] = [
   { key: 'consomme', label: 'Consommé', token: '--blue' },
-  { key: 'plan', label: 'Atterrissage plan', token: '--blue', opacity: 0.3 },
+  { key: 'plan', label: ATTERRISSAGE_LABEL, token: '--blue', opacity: 0.3 },
   { key: 'tendance', label: 'Tendance', token: '--text', shape: 'tick' },
   { key: 'zone', label: 'Zone cible', token: '--success', opacity: 0.25 },
   { key: 'over', label: 'Dépassement', token: '--danger', opacity: 0.18 },
@@ -26,7 +28,7 @@ const fmtPct0 = (v: number) => `${pctFmt.format(v)} %`;
 interface Row {
   p: PrevisionCT;
   budget: number;
-  /** Consommé, atterrissage plan, tendance et bas de la zone cible, en % de l'enveloppe. */
+  /** Consommé, atterrissage sécurisé, tendance et bas de la zone cible, en % de l'enveloppe. */
   consomme: number;
   plan: number;
   tendance: number;
@@ -44,7 +46,7 @@ function rankOf(p: PrevisionCT): number {
   return 3;
 }
 
-/** Dépassement (écart plan décroissant), sous-consommation (non consommé décroissant), vigilance, ok (% décroissant). */
+/** Dépassement (écart décroissant), sous-consommation (non consommé décroissant), vigilance, ok (% décroissant). */
 function compareRows(a: Row, b: Row): number {
   if (a.rank !== b.rank) return a.rank - b.rank;
   if (a.rank === 0) return (b.p.ecart_plan ?? 0) - (a.p.ecart_plan ?? 0);
@@ -60,10 +62,13 @@ function statusWords(p: PrevisionCT): string {
   return 'Dans la zone cible';
 }
 
-/** Dernière ligne de la bulle : dépassement ou non consommé (plan de charge, DECISIONS n° 21), sinon dans la cible. */
+/**
+ * Dernière ligne de la bulle : dépassement ou non consommé de l'atterrissage sécurisé (plan de charge + provisions
+ * sécurisées, DECISIONS n° 21, 23), sinon dans la cible.
+ */
 function verdict(p: PrevisionCT): string {
   if ((p.ecart_plan ?? 0) > 0.5) return `+${fmtEur(p.ecart_plan)} de dépassement`;
-  if ((p.non_consomme ?? 0) > 0.5) return `${fmtEur(p.non_consomme)} non consommés`;
+  if ((p.non_consomme ?? 0) > 0.5) return `${fmtEur(p.non_consomme)} non consommés (plan de charge + provisions sécurisées)`;
   return 'Enveloppe consommée dans la zone cible';
 }
 
@@ -73,9 +78,10 @@ function RowTooltip({ row }: { row: Row }) {
   const lines: [string, string][] = [
     ['Enveloppe', fmtEur(row.budget)],
     ['Consommé', fmtEur(p.consomme)],
-    ['Atterrissage plan', fmtEur(p.atterrissage_plan)],
+    [ATTERRISSAGE_LABEL, fmtEur(p.atterrissage_plan)],
     ['Tendance', fmtEur(p.atterrissage_tendance)],
   ];
+  if ((p.provisions_securisees ?? 0) > 0.5) lines.splice(3, 0, ['dont provisions sécurisées', fmtEur(p.provisions_securisees)]);
   return (
     <div>
       <div className="pil-tooltip__title">
@@ -152,7 +158,7 @@ export function EnveloppeBars({ previsions, limit, onSelect }: EnveloppeBarsProp
           const hasPlan = r.plan - r.consomme > 0.05;
           const consClipped = r.consomme > max;
           const value = `${r.budget > 0 ? fmtPct0(r.plan) : '—'} · ${fmtEurShort(p.atterrissage_plan)} / ${fmtEurShort(r.budget)}`;
-          const label = `${p.ct}${p.ct_libelle ? ` ${p.ct_libelle}` : ''} : atterrissage plan ${value}. ${statusWords(p)}.`;
+          const label = `${p.ct}${p.ct_libelle ? ` ${p.ct_libelle}` : ''} : atterrissage sécurisé ${value}. ${statusWords(p)}.`;
           return (
             <li key={p.ct}>
               <Tooltip label={<RowTooltip row={r} />} placement="top" maxWidth={340}>
@@ -198,7 +204,7 @@ export function EnveloppeBars({ previsions, limit, onSelect }: EnveloppeBarsProp
                   ) : (
                     <span className="pil-envbars__track">
                       <span className="pil-envbars__note">
-                        Enveloppe à 0 € : {fmtEurShort(p.consomme)} consommés, atterrissage {fmtEurShort(p.atterrissage_plan)}
+                        Enveloppe à 0 € : {fmtEurShort(p.consomme)} consommés, atterrissage sécurisé {fmtEurShort(p.atterrissage_plan)}
                       </span>
                     </span>
                   )}

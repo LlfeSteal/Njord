@@ -71,7 +71,17 @@ func pct(num, den float64) *float64 {
 // entry of the réalisé version (avoirs included), independently of the week
 // period which only scopes the hours comparison. Les natures ventilent la
 // dépense prévue (PPS du plan + provisions) : un prévu, pas un budget (DECISIONS n° 20).
-func (r *run) budget() (domain.Budget, domain.Alertes) {
+//
+// Classification prévisionnelle (DECISIONS n° 23, remplace la classification
+// du réalisé par TYPE) : d'après la prévision « Tout » prev de chaque CT,
+// sécurisé = reste_a_faire + provisions_securisees, non sécurisé =
+// provisions_aleas ; risque = non sécurisé > seuil_ct_risque_eur ; alerte
+// globale = % non sécurisé > seuil_non_securise_pct.
+func (r *run) budget(prev domain.Previsions) (domain.Budget, domain.Alertes) {
+	fc := make(map[string]*domain.PrevisionCT, len(prev.ParCT))
+	for i := range prev.ParCT {
+		fc[prev.ParCT[i].CT] = &prev.ParCT[i]
+	}
 	byCT := map[string]*domain.BudgetCT{}
 	get := func(ct string) *domain.BudgetCT {
 		b := byCT[ct]
@@ -122,14 +132,6 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 		}
 		en := r.enr[i]
 		b := get(ct)
-		switch en.Classification {
-		case domain.ClassSecurise:
-			b.Securise += en.Eur
-		case domain.ClassNonSecurise:
-			b.NonSecurise += en.Eur
-		default:
-			b.NonClasse += en.Eur
-		}
 		if en.MO {
 			b.HeuresMO += en.Heures
 			b.CoutMOEur += e.TotalEur
@@ -161,10 +163,11 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 	out := domain.Budget{ParCT: make([]domain.BudgetCT, 0, len(cts))}
 	for _, ct := range cts {
 		b := byCT[ct]
+		if p := fc[ct]; p != nil {
+			b.Securise, b.NonSecurise = round2(p.ResteAFaire+p.ProvisionsSecurisees), p.ProvisionsAleas
+		}
 		g.Securise += b.Securise
 		g.NonSecurise += b.NonSecurise
-		g.NonClasse += b.NonClasse
-		b.Securise, b.NonSecurise, b.NonClasse = round2(b.Securise), round2(b.NonSecurise), round2(b.NonClasse)
 		b.PPSPlan, b.Provisions = round2(b.PPSPlan), round2(b.Provisions)
 		b.HeuresMO, b.CoutMOEur = round2(b.HeuresMO), round2(b.CoutMOEur)
 		b.PctSecurite = pct(b.Securise, b.Securise+b.NonSecurise)
@@ -177,7 +180,7 @@ func (r *run) budget() (domain.Budget, domain.Alertes) {
 	sort.SliceStable(al.CTRisque, func(i, j int) bool { return al.CTRisque[i].NonSecurise > al.CTRisque[j].NonSecurise })
 	g.PctSecurite = pct(g.Securise, g.Securise+g.NonSecurise)
 	g.PctNonSecurise = pct(g.NonSecurise, g.Securise+g.NonSecurise)
-	g.Securise, g.NonSecurise, g.NonClasse = round2(g.Securise), round2(g.NonSecurise), round2(g.NonClasse)
+	g.Securise, g.NonSecurise = round2(g.Securise), round2(g.NonSecurise)
 	out.Global = g
 	out.ParNature = make([]domain.BudgetNature, 0, len(natures))
 	for _, n := range natures {

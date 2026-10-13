@@ -35,8 +35,7 @@ export interface ParseIssue {
 }
 
 export interface ImportReport {
-  /** `enveloppe` : bilan de l'import « CàT par CT » (non versionné, DECISIONS n° 18). */
-  kind: Kind | 'enveloppe';
+  kind: Kind;
   intitule: string;
   filename: string;
   source_format: string;
@@ -190,7 +189,7 @@ export interface EnveloppeSources {
   provisions: boolean;
 }
 
-/** Enveloppe d'un CT, importée du fichier « CàT par CT » : période d'utilisation + montant (colonne « Coût prévisionnel »). */
+/** Enveloppe d'un CT, saisie dans l'interface (DECISIONS n° 27) : période d'utilisation + montant. */
 export interface Enveloppe {
   /** YYYY-MM-DD */
   date_debut: string;
@@ -200,13 +199,13 @@ export interface Enveloppe {
   montant: number;
 }
 
-/** CT connu des sources ou du fichier ; `enveloppe` null = absent du fichier (« sans enveloppe »). */
+/** CT connu des sources ou ayant une enveloppe ; `enveloppe` null = « sans enveloppe ». */
 export interface EnveloppeCT {
   ct: string;
   ct_libelle: string;
-  /** Code de la ligne de catégorie (…00) au-dessus du CT dans le fichier ; '' hors catégorie ou hors fichier. */
+  /** Code de catégorie hérité de l'ancien import (…00) ; '' sinon. */
   categorie: string;
-  /** Descriptif de la ligne de catégorie. */
+  /** Libellé libre de la catégorie ; '' = hors catégorie. */
   categorie_libelle: string;
   sources: EnveloppeSources;
   enveloppe: Enveloppe | null;
@@ -225,18 +224,8 @@ export interface EnveloppeInput {
   operateur?: string;
 }
 
-/** @deprecated Import supprimé (DECISIONS n° 27) ; retiré à l'intégration. */
-export interface EnveloppesImport {
-  filename: string;
-  importe_le: string;
-  operateur: string;
-  nb_enveloppes: number;
-}
-
-/** GET /enveloppes : CT triés par code de catégorie puis CT, hors catégorie puis hors fichier en dernier. */
+/** GET /enveloppes : CT triés par libellé de catégorie puis CT, hors catégorie puis sans enveloppe en dernier. */
 export interface EnveloppesListe {
-  /** @deprecated Import supprimé (DECISIONS n° 27) ; retiré à l'intégration. */
-  import?: EnveloppesImport | null;
   cts: EnveloppeCT[];
 }
 
@@ -277,10 +266,6 @@ export interface Settings {
   semaines_verrouillees: number[];
   jours_feries: string[];
   mo_types: string[];
-  /** @deprecated Classification du réalisé supprimée (DECISIONS n° 23) ; retiré à l'intégration. */
-  securise?: string[];
-  /** @deprecated idem. */
-  non_securise?: string[];
 }
 
 export interface AuditEntry {
@@ -474,8 +459,6 @@ export interface BudgetCT {
   securise: number;
   /** provisions_aleas. */
   non_securise: number;
-  /** @deprecated supprimé (DECISIONS n° 23). */
-  non_classe?: number;
   pct_securite: number | null; // 0..100
   pps_plan: number;
   /** Σ provisions du CT. */
@@ -488,8 +471,6 @@ export interface BudgetCT {
 export interface BudgetGlobal {
   securise: number;
   non_securise: number;
-  /** @deprecated supprimé (DECISIONS n° 23). */
-  non_classe?: number;
   pct_securite: number | null;
   pct_non_securise: number | null;
 }
@@ -581,7 +562,7 @@ export interface PrevisionPoint {
 export type PrevisionStatut = 'ok' | 'vigilance' | 'depassement';
 
 /**
- * Prévision d'un CT (global : périmètre des CT avec enveloppe, `ct` = ''). Le budget est l'enveloppe du fichier,
+ * Prévision d'un CT (global : périmètre des CT avec enveloppe, `ct` = ''). Le budget est l'enveloppe saisie,
  * rien d'autre (DECISIONS n° 20) : sans enveloppe (`budget_source` = 'aucun'), tous les champs de budget sont null.
  */
 export interface PrevisionCT {

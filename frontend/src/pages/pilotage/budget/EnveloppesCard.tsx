@@ -1,13 +1,15 @@
 // Carte « Plan de charge face aux enveloppes » (page Budget, DECISIONS n° 19) : lecture brute des CT configurés,
 // chacun sur sa période. Une phrase de lecture + barres divergentes de l'écart d'atterrissage à l'enveloppe par CT
-// (atterrissage − enveloppe) : à droite = au-dessus de l'enveloppe (rouge), à gauche = non consommé (orange au-delà
-// des seuils de sous-consommation, gris en deçà). Clic sur une ligne = inspecteur du CT.
+// (atterrissage sécurisé − enveloppe ; atterrissage sécurisé = consommé + plan de charge restant + provisions
+// sécurisées, DECISIONS n° 23) : à droite = au-dessus de l'enveloppe (rouge), à gauche = non consommé (orange au-delà
+// des seuils de sous-consommation, gris en deçà). Clic sur une ligne = inspecteur du CT. Année choisie (DECISIONS
+// n° 24) : tranches de l'année.
 import { Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from 'recharts';
 import { Card, Link } from '../../../ui';
 import type { EnveloppesSynthese, PrevisionCT } from '../../../api/types';
 import { fmtEur, fmtPeriod } from '../../../lib/format';
 import { ChartLegend, type ChartSeries } from '../shared/charts';
-import { fmtEurShort, fmtEurShortSigned, useTokenColors } from '../shared/pilotage';
+import { ATTERRISSAGE_LABEL, enAnnee, fmtEurShort, fmtEurShortSigned, useTokenColors } from '../shared/pilotage';
 
 /** Au-delà, on montre les plus gros écarts (en valeur absolue) : le tableau garde tous les CT. */
 const MAX_BARS = 16;
@@ -63,11 +65,13 @@ function EcartTooltip({ active, payload }: TooltipProps) {
   const env = p.enveloppe;
   const rows: [string, string][] = [
     ['Enveloppe', fmtEur(p.budget)],
-    ['Atterrissage plan', fmtEur(p.atterrissage_plan)],
+    [ATTERRISSAGE_LABEL, fmtEur(p.atterrissage_plan)],
     ['Écart', `${d.ecart > 0.5 ? '+' : d.ecart < -0.5 ? '−' : ''}${fmtEur(Math.abs(d.ecart))}`],
   ];
-  if ((p.non_consomme ?? 0) > 0.5) rows.push(['Non consommé (plan de charge)', fmtEur(p.non_consomme)]);
+  if ((p.provisions_securisees ?? 0) > 0.5) rows.splice(2, 0, ['dont provisions sécurisées', fmtEur(p.provisions_securisees)]);
+  if ((p.non_consomme ?? 0) > 0.5) rows.push(['Non consommé (plan de charge + provisions sécurisées)', fmtEur(p.non_consomme)]);
   if ((p.plan_hors_enveloppe ?? 0) > 0.5) rows.push(['Plan hors enveloppe', fmtEur(p.plan_hors_enveloppe)]);
+  if ((p.provisions_hors_enveloppe ?? 0) > 0.5) rows.push(['Provisions hors enveloppe', fmtEur(p.provisions_hors_enveloppe)]);
   return (
     <div className="pil-tooltip">
       <div className="pil-tooltip__title">
@@ -89,7 +93,7 @@ function EcartTooltip({ active, payload }: TooltipProps) {
 const nCt = (n: number) => `${n} CT`;
 
 /** Phrase de lecture : écart net des CT configurés, puis lecture brute (dépassements, non consommés, hors enveloppe). */
-function Sentence({ s }: { s: EnveloppesSynthese }) {
+function Sentence({ s, annee }: { s: EnveloppesSynthese; annee: number }) {
   const parts: string[] = [];
   if (s.nb_depassement > 0) parts.push(`${nCt(s.nb_depassement)} au-dessus de leur enveloppe : +${fmtEurShort(s.depassement)}`);
   if (s.nb_sous_consommation > 0)
@@ -103,8 +107,8 @@ function Sentence({ s }: { s: EnveloppesSynthese }) {
       : `${fmtEurShort(Math.abs(s.ecart))} ${s.ecart > 0 ? 'au-dessus' : 'en dessous'} ${one ? 'de son enveloppe' : 'de leurs enveloppes au net'}`;
   return (
     <p className="pil-card-head__sub">
-      Atterrissage {one ? 'du CT avec enveloppe' : `des ${nCt(s.nb_configures)} avec enveloppe`} : {fmtEurShort(s.atterrissage)} pour{' '}
-      {fmtEurShort(s.montant)} d’enveloppe{one ? '' : 's'}, soit {net}
+      Atterrissage sécurisé {one ? 'du CT avec enveloppe' : `des ${nCt(s.nb_configures)} avec enveloppe`}
+      {enAnnee(annee)} : {fmtEurShort(s.atterrissage)} pour {fmtEurShort(s.montant)} d’enveloppe{one ? '' : 's'}, soit {net}
       {parts.length > 0 ? ` · ${parts.join(' · ')}` : ''}
       {todo > 0 && (
         <>
@@ -124,9 +128,11 @@ export interface EnveloppesCardProps {
   /** Prévisions par CT (seuls les CT configurés sont tracés). */
   parCt: PrevisionCT[];
   onOpen: (ct: string) => void;
+  /** Année du filtre (DECISIONS n° 24), 0 = Tout. */
+  annee?: number;
 }
 
-export default function EnveloppesCard({ synthese, parCt, onOpen }: EnveloppesCardProps) {
+export default function EnveloppesCard({ synthese, parCt, onOpen, annee = 0 }: EnveloppesCardProps) {
   const c = useTokenColors(TOKENS);
   const configured = parCt.filter((p) => p.enveloppe && p.ecart_plan != null);
   const ecartOf = (p: PrevisionCT) => p.ecart_plan ?? 0;
@@ -205,12 +211,12 @@ export default function EnveloppesCard({ synthese, parCt, onOpen }: EnveloppesCa
   return (
     <Card>
       <div className="pil-card-head">
-        <h2 className="pil-card-head__title">Plan de charge face aux enveloppes</h2>
+        <h2 className="pil-card-head__title">Plan de charge face aux enveloppes{annee > 0 ? ` ${annee}` : ''}</h2>
         <Link to="/enveloppes" size="sm">
           Enveloppes
         </Link>
       </div>
-      <Sentence s={synthese} />
+      <Sentence s={synthese} annee={annee} />
       {shown.length > 0 && (
         <div
           className="pil-env-chart"

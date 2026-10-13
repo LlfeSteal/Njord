@@ -264,17 +264,6 @@ const EDITOR_TITLE: Record<ListEditor, string> = {
   mo_types: MO_TYPES_LABEL,
 };
 
-/**
- * Retire les listes `securise` / `non_securise` (classification du réalisé supprimée, DECISIONS n° 23) :
- * ni comparées pour « modifié », ni renvoyées à l'enregistrement.
- */
-function withoutDeprecated(s: Settings): Settings {
-  const out = { ...s };
-  delete out.securise;
-  delete out.non_securise;
-  return out;
-}
-
 /** Ligne de réglage dont la description cède la place à l'erreur de validation. */
 function rowDescription(description: string | undefined, error: string | null | undefined) {
   if (!error) return description;
@@ -292,12 +281,12 @@ export default function SettingsForm() {
   const [weekError, setWeekError] = useState<string | null>(null);
   const [editor, setEditor] = useState<ListEditor | null>(null);
 
-  const saved = settingsQ.data ? { ...SOUS_CONSO_DEFAULTS, ...withoutDeprecated(settingsQ.data) } : undefined;
+  const saved = settingsQ.data ? { ...SOUS_CONSO_DEFAULTS, ...settingsQ.data } : undefined;
   const current = draft ?? saved;
   const dirty = !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
   const save = useMutation({
-    mutationFn: (s: Settings) => settingsApi.put(withoutDeprecated(s)),
+    mutationFn: (s: Settings) => settingsApi.put(s),
     onSuccess: (s) => {
       qc.setQueryData(qk.settings(), s);
       qc.invalidateQueries({ queryKey: ['settings'] });

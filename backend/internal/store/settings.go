@@ -30,8 +30,6 @@ func DefaultSettings() domain.Settings {
 		SemainesVerrouillees:  []int{51, 52},
 		JoursFeries:           feries,
 		MOTypes:               []string{"MAIN D'OEUVRE SUR SITE", "CAPACITE SUR SITE"},
-		Securise:              []string{"MAIN D'OEUVRE SUR SITE", "CAPACITE SUR SITE", "FRAIS ACHATS CAPACITE SUR SITE", "FRAIS DE MISSION"},
-		NonSecurise:           []string{"PROVISIONS POUR ALEAS", "Stockage"},
 	}
 }
 

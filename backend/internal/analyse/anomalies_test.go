@@ -386,6 +386,7 @@ func TestAnomaliesBudget(t *testing.T) {
 func TestAnomaliesSeed(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
+	e.seedProvisions() // CT à risque = provisions pour aléas (DECISIONS n° 23)
 	res := decode[domain.AnalyseResult](t, e.do("GET", "/api/analyse", nil))
 	checkAnomalies(t, res.Anomalies)
 	want := map[string]bool{
@@ -413,7 +414,7 @@ func TestAnomaliesSeed(t *testing.T) {
 				t.Errorf("hors plan BARBIER : %+v", a)
 			}
 		case "ct_risque|Y99F900012":
-			if a.Gravite != 3 || *a.Montant != 15000 || a.Lien != "/budget?ct=Y99F900012" {
+			if a.Gravite != 3 || *a.Montant != 100000 || a.Lien != "/budget?ct=Y99F900012" {
 				t.Errorf("ct_risque : %+v", a)
 			}
 		case "derive|Y99F900012|5":

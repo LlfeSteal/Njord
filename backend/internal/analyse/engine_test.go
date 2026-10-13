@@ -373,29 +373,33 @@ func TestHeuresMO(t *testing.T) {
 		qte, eur       float64
 		mo             bool
 		heures, e      float64
-		class          domain.Classification
 	}{
-		{"MO sur site", "MAIN D'OEUVRE SUR SITE", "MAIN D'OEUVRE", 7, 700, true, 7, 0, domain.ClassSecurise},
-		{"capacité MO (casse/trim)", " capacite sur site ", "main d’oeuvre ", 3.5, 300, true, 3.5, 0, domain.ClassSecurise},
-		{"capacité PRESTATION (démo)", "CAPACITE SUR SITE", "PRESTATION", 11000.89, 11000.89, false, 0, 11000.89, domain.ClassSecurise},
-		{"frais de mission", "FRAIS DE MISSION", "FRAIS DE MISSION", 1, -301.66, false, 0, -301.66, domain.ClassSecurise},
-		{"provision", "PROVISIONS POUR ALEAS", "AUTRES DEPENSES", 1, 5000, false, 0, 5000, domain.ClassNonSecurise},
-		{"stockage (casse)", "STOCKAGE", "MATIERE", 1, 10, false, 0, 10, domain.ClassNonSecurise},
-		{"non classé", "MATIERE", "MATIERE", 4, 40, false, 0, 40, domain.ClassNonClasse},
+		{"MO sur site", "MAIN D'OEUVRE SUR SITE", "MAIN D'OEUVRE", 7, 700, true, 7, 0},
+		{"capacité MO (casse/trim)", " capacite sur site ", "main d’oeuvre ", 3.5, 300, true, 3.5, 0},
+		{"capacité PRESTATION (démo)", "CAPACITE SUR SITE", "PRESTATION", 11000.89, 11000.89, false, 0, 11000.89},
+		{"frais de mission", "FRAIS DE MISSION", "FRAIS DE MISSION", 1, -301.66, false, 0, -301.66},
+		{"provision", "PROVISIONS POUR ALEAS", "AUTRES DEPENSES", 1, 5000, false, 0, 5000},
+		{"stockage (casse)", "STOCKAGE", "MATIERE", 1, 10, false, 0, 10},
+		{"autre", "MATIERE", "MATIERE", 4, 40, false, 0, 40},
 	}
 	for _, c := range cases {
 		e := domain.RealiseEntry{Type: c.typ, Categorie: c.cat, Quantite: c.qte, TotalEur: c.eur, DateDepense: "2026-09-08"}
 		x := en.Enrich(&e)
-		if x.MO != c.mo || x.Heures != c.heures || x.Eur != c.e || x.Classification != c.class || x.ISOWeek != "2026-W37" {
+		if x != (Enrichment{MO: c.mo, Heures: c.heures, Eur: c.e, ISOWeek: "2026-W37"}) {
 			t.Errorf("%s: %+v", c.name, x)
 		}
 	}
 }
 
+// TestBudgetAvoirsEtAlertes: classification prévisionnelle (DECISIONS n° 23) —
+// sécurisé = plan de charge restant + provisions sécurisées comptées, non
+// sécurisé = provisions pour aléas ; le TYPE des écritures n'y entre plus.
 func TestBudgetAvoirsEtAlertes(t *testing.T) {
 	in := baseInput()
-	onePlan(&in, planLine("CTX", "R1", "Un Nom", nil, 10))
-	in.Plans[0].Lines[0].PPS = 9000
+	// CTX : 9 000 € planifiés sur W37..W46 (900 €/sem.) ; as_of W37 → reste 8 100 €.
+	l := planLine("CTX", "R1", "Un Nom", nil, 0)
+	l.PPS, l.LigneCout, l.DateFin = 9000, "FRAIS", "2026-11-13"
+	onePlan(&in, l)
 	in.Entries = []domain.RealiseEntry{
 		cost("CTX", "FRAIS DE MISSION", "FRAIS DE MISSION", 1000),
 		cost("CTX", "FRAIS DE MISSION", "FRAIS DE MISSION", -300), // avoir
@@ -405,40 +409,57 @@ func TestBudgetAvoirsEtAlertes(t *testing.T) {
 		cost("CTY", "Stockage", "MATIERE", 12000),
 		cost("CTY", "CAPACITE SUR SITE", "PRESTATION", 3000),
 	}
-	res := Run(in, store.DefaultSettings())
+	in.Provisions = []domain.ProvisionLine{
+		provLine("CTX", "CAPACITE SUR SITE", "P > X", 1900),     // sécurisée (sans enveloppe : comptée)
+		provLine("CTX", "PROVISIONS POUR ALEAS", "P > X", 2000), // aléas
+		provLine("CTY", "PROVISIONS POUR ALEAS", "P > Y", 12000),
+		provLine("CTY", "FRAIS DE MISSION", "P > Y", 3000),
+	}
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	res := Run(in, s)
 	b := map[string]domain.BudgetCT{}
 	for _, x := range res.Budget.ParCT {
 		b[x.CT] = x
 	}
+	px := findCT(t, res.Previsions, "CTX")
 	x := b["CTX"]
-	if x.Securise != 700 || x.NonSecurise != 500 || x.NonClasse != 200 || x.PPSPlan != 9000 || x.HeuresMO != 10 || x.CoutMOEur != 1000 || x.Risque {
-		t.Errorf("CTX: %+v", x)
+	if px.ResteAFaire != 8100 || px.ProvisionsSecurisees != 1900 || px.ProvisionsAleas != 2000 ||
+		x.Securise != 10000 || x.NonSecurise != 2000 || x.PPSPlan != 9000 || x.Provisions != 3900 || x.HeuresMO != 10 || x.CoutMOEur != 1000 || x.Risque {
+		t.Errorf("CTX: %+v (prévision %+v)", x, px)
 	}
-	if x.PctSecurite == nil || *x.PctSecurite != 58.33 {
+	if x.PctSecurite == nil || *x.PctSecurite != 83.33 {
 		t.Errorf("CTX %% sécurité = %v", x.PctSecurite)
 	}
 	y := b["CTY"]
-	if y.NonSecurise != 12000 || !y.Risque || *y.PctSecurite != 20 {
+	if y.Securise != 3000 || y.NonSecurise != 12000 || !y.Risque || *y.PctSecurite != 20 {
 		t.Errorf("CTY: %+v", y)
 	}
 	g := res.Budget.Global
-	// sécurisé 3700, non sécurisé 12500 → 22.84 % / 77.16 %
-	if g.Securise != 3700 || g.NonSecurise != 12500 || g.NonClasse != 200 || *g.PctSecurite != 22.84 || *g.PctNonSecurise != 77.16 {
+	// sécurisé 13 000, non sécurisé 14 000 → 48,15 % / 51,85 %
+	if g.Securise != 13000 || g.NonSecurise != 14000 || *g.PctSecurite != 48.15 || *g.PctNonSecurise != 51.85 {
 		t.Errorf("global: %+v %v %v", g, *g.PctSecurite, *g.PctNonSecurise)
 	}
-	if !res.Alertes.AlerteGlobale || len(res.Alertes.CTRisque) != 1 || res.Alertes.CTRisque[0].CT != "CTY" || res.KPIs.NbCTRisque != 1 {
+	if !res.Alertes.AlerteGlobale || len(res.Alertes.CTRisque) != 1 || res.Alertes.CTRisque[0].CT != "CTY" ||
+		res.Alertes.CTRisque[0].NonSecurise != 12000 || res.KPIs.NbCTRisque != 1 || fv(res.Alertes.PctNonSecurise) != 51.85 {
 		t.Errorf("alertes: %+v", res.Alertes)
 	}
-	if *res.KPIs.PctSecurise != 22.84 {
+	if *res.KPIs.PctSecurise != 48.15 {
 		t.Errorf("kpi pct sécurisé %v", *res.KPIs.PctSecurise)
 	}
 
 	// Seuils relevés → plus d'alerte.
-	s := store.DefaultSettings()
 	s.SeuilCTRisqueEur, s.SeuilNonSecurisePct = 20000, 80
 	res = Run(in, s)
-	if res.Alertes.AlerteGlobale || len(res.Alertes.CTRisque) != 0 {
+	if res.Alertes.AlerteGlobale || len(res.Alertes.CTRisque) != 0 || res.KPIs.NbCTRisque != 0 {
 		t.Errorf("alertes avec seuils relevés: %+v", res.Alertes)
+	}
+
+	// Sans plan restant ni provision : rien de classé, % nuls.
+	in.Provisions, in.Plans = nil, nil
+	res = Run(in, s)
+	if g := res.Budget.Global; g.Securise != 0 || g.NonSecurise != 0 || g.PctSecurite != nil || res.KPIs.PctSecurise != nil || res.Alertes.AlerteGlobale {
+		t.Errorf("sans plan ni provision : %+v", g)
 	}
 }
 
@@ -966,9 +987,13 @@ func TestBudgetProvisions(t *testing.T) {
 		}
 	}
 
-	// Avec une enveloppe sur CTR : règle 1 et anomalie face au montant, provisions ignorées.
+	// Avec une enveloppe sur CTR : règle 1 et anomalie face au montant ; la provision
+	// sécurisée datée dans la période entre dans l'atterrissage (DECISIONS n° 23), pas dans le budget.
 	in.Enveloppes = map[string]domain.Enveloppe{"CTR": fcEnv("2026-01-01", "2026-12-31", 1000)}
 	res = Run(in, store.DefaultSettings())
+	if p := findCT(t, res.Previsions, "CTR"); fv(p.Budget) != 1000 || p.ProvisionsSecurisees != 1000 || p.AtterrissagePlan != 61000 {
+		t.Errorf("CTR : %+v", p)
+	}
 	q := findQual(res, "tg_ecart_budget")
 	if q == nil || q.Count != 1 || len(q.Details) != 1 || q.Details[0] != "CTR : réalisé 60000 € / enveloppe 1000 €" {
 		t.Errorf("tg_ecart_budget : %+v", q)
@@ -977,7 +1002,7 @@ func TestBudgetProvisions(t *testing.T) {
 	for _, a := range res.Anomalies {
 		if a.Categorie == domain.AnomalieBudget && a.CT == "CTR" && a.Key == "budget|CTR" {
 			found = true
-			if !strings.Contains(a.Detail, "pour une enveloppe de "+fmtEur(1000)+" (") || strings.Contains(a.Detail, "provisions") {
+			if !strings.Contains(a.Detail, "pour une enveloppe de "+fmtEur(1000)+" (") {
 				t.Errorf("détail : %q", a.Detail)
 			}
 		}

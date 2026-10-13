@@ -82,8 +82,14 @@ func checkSansBudget(t *testing.T, p domain.PrevisionCT) {
 // checkInvariants verifies the cross-field consistency of one forecast.
 func checkInvariants(t *testing.T, p domain.PrevisionCT, asOf string) {
 	t.Helper()
-	if !near(p.AtterrissagePlan, p.Consomme+p.ResteAFaire, 0.02) {
-		t.Errorf("%s : atterrissage plan %v ≠ consommé %v + reste %v", p.CT, p.AtterrissagePlan, p.Consomme, p.ResteAFaire)
+	// Atterrissage sécurisé (DECISIONS n° 23) = consommé + reste + provisions sécurisées comptées.
+	if !near(p.AtterrissagePlan, p.Consomme+p.ResteAFaire+p.ProvisionsSecurisees, 0.02) {
+		t.Errorf("%s : atterrissage plan %v ≠ consommé %v + reste %v + provisions sécurisées %v", p.CT, p.AtterrissagePlan,
+			p.Consomme, p.ResteAFaire, p.ProvisionsSecurisees)
+	}
+	if !near(p.Provisions, p.ProvisionsSecurisees+p.ProvisionsAleas+p.ProvisionsHorsEnveloppe, 0.02) {
+		t.Errorf("%s : provisions %v ≠ sécurisées %v + aléas %v + hors enveloppe %v", p.CT, p.Provisions,
+			p.ProvisionsSecurisees, p.ProvisionsAleas, p.ProvisionsHorsEnveloppe)
 	}
 	if p.Budget == nil {
 		checkSansBudget(t, p)
@@ -436,14 +442,16 @@ func TestPrevisionsSansEnveloppe(t *testing.T) {
 	res := Run(in, s)
 	pv := res.Previsions
 	p := findCT(t, pv, "S")
-	// Sans réalisé : 4 semaines W01..W04, plan 4 000 €, tendance 0.
-	if p.PPS != 4000 || p.Provisions != 3000 || p.ResteAFaire != 4000 || p.AtterrissagePlan != 4000 || p.AtterrissageTendance != 0 ||
-		p.SemainesRestantes != 4 || len(p.Series) != 4 {
+	// Sans réalisé : 4 semaines W01..W04, plan 4 000 € + provision sécurisée 3 000 € (sans
+	// enveloppe : toutes comptées, DECISIONS n° 23), tendance 0. La provision, datée avant
+	// l'axe, entre dans la première semaine projetée.
+	if p.PPS != 4000 || p.Provisions != 3000 || p.ProvisionsSecurisees != 3000 || p.ResteAFaire != 4000 || p.AtterrissagePlan != 7000 ||
+		p.AtterrissageTendance != 0 || p.SemainesRestantes != 4 || len(p.Series) != 4 || fv(p.Series[0].PlanCumul) != 4000 {
 		t.Errorf("S = %+v", p)
 	}
 	checkInvariants(t, p, "")
 	checkInvariants(t, pv.Global, "")
-	if pv.HorsEnveloppe != (domain.HorsEnveloppe{NbCT: 1, AtterrissagePlan: 4000}) {
+	if pv.HorsEnveloppe != (domain.HorsEnveloppe{NbCT: 1, AtterrissagePlan: 7000}) {
 		t.Errorf("hors enveloppe = %+v", pv.HorsEnveloppe)
 	}
 	for _, a := range res.Anomalies {
@@ -476,8 +484,9 @@ func provLine(ct, ligneCout, groupe string, montant float64) domain.ProvisionLin
 		StatutParsing: domain.ParsingOK}
 }
 
-// TestPrevisionsProvisions: les provisions sont informatives (marge) et ne
-// changent ni budget, ni statut, ni atterrissage (DECISIONS n° 20).
+// TestPrevisionsProvisions: provisions sécurisées et aléas (DECISIONS n° 23) —
+// les sécurisées comptées entrent dans l'atterrissage (et la courbe plan), les
+// aléas jamais ; le budget reste l'enveloppe.
 func TestPrevisionsProvisions(t *testing.T) {
 	in := baseInput()
 	onePlan(&in,
@@ -499,7 +508,7 @@ func TestPrevisionsProvisions(t *testing.T) {
 	drop.StatutParsing = domain.ParsingDrop
 	in.ProvisionVersion = &domain.Version{ID: "prov1", Kind: domain.KindProvision, Statut: domain.StatutActive}
 	in.Provisions = []domain.ProvisionLine{
-		provLine("D", "CAPACITE SUR SITE", "Proj > Squad D", 600),
+		provLine("D", "CAPACITE SUR SITE", "Proj > Squad D", 600), // 30/12/2026 : dans la période
 		provLine("B", "PROVISIONS POUR ALEAS", "Proj > Squad B", 1000),
 		provLine("X", "FRAIS DE MISSION", "Proj > Missions", 1000),
 		provLine("P", "CAPACITE SUR SITE", "Réserve > Fonds de transformation", 1500),
@@ -513,42 +522,49 @@ func TestPrevisionsProvisions(t *testing.T) {
 		t.Errorf("meta.provision_version = %+v", res.Meta.ProvisionVersion)
 	}
 
+	// D : 1 500 consommés + 600 de provision sécurisée datée dans la période.
 	d := findCT(t, pv, "D")
-	if d.PPS != 1000 || d.Provisions != 600 || fv(d.Budget) != 1000 || d.AtterrissagePlan != 1500 || d.ResteAFaire != 0 ||
-		fv(d.EcartPlan) != 500 || fs(d.Statut) != domain.PrevisionDepassement || fv(d.PctConsomme) != 150 {
+	if d.PPS != 1000 || d.Provisions != 600 || d.ProvisionsSecurisees != 600 || d.ProvisionsAleas != 0 || fv(d.Budget) != 1000 ||
+		d.AtterrissagePlan != 2100 || d.ProjectionPlanEcheance != 2100 || d.ResteAFaire != 0 ||
+		fv(d.EcartPlan) != 1100 || fs(d.Statut) != domain.PrevisionDepassement || fv(d.PctConsomme) != 150 || fv(d.NonConsomme) != 0 {
 		t.Errorf("D = %+v", d)
 	}
-	if x := findCT(t, pv, "X"); x.PPS != 0 || x.Provisions != 1000 || x.Budget != nil || x.Consomme != 300 || x.Statut != nil {
+	// Courbe plan : la provision s'ajoute dans sa semaine (W53), la courbe finit sur l'atterrissage.
+	if pt := fcPoint(t, d, "2026-W52"); fv(pt.PlanCumul) != 1500 || pt.BudgetCumul != 1000 {
+		t.Errorf("D W52 = %+v", pt)
+	}
+	if pt := fcPoint(t, d, "2026-W53"); fv(pt.PlanCumul) != 2100 || pt.BudgetCumul != 1000 {
+		t.Errorf("D W53 = %+v", pt)
+	}
+	// Sans enveloppe : toutes les sécurisées comptées.
+	if x := findCT(t, pv, "X"); x.PPS != 0 || x.Provisions != 1000 || x.ProvisionsSecurisees != 1000 || x.Budget != nil ||
+		x.Consomme != 300 || x.AtterrissagePlan != 1300 || x.Statut != nil {
 		t.Errorf("X = %+v", x)
+	}
+	// Aléas : jamais dans l'atterrissage.
+	if b, bs := findCT(t, pv, "B"), findCT(t, sans, "B"); b.ProvisionsAleas != 1000 || b.ProvisionsSecurisees != 0 ||
+		b.AtterrissagePlan != bs.AtterrissagePlan || b.Provisions != 1000 {
+		t.Errorf("B = %+v", b)
 	}
 	// CT présent seulement dans les provisions : libellé = sous-projet de la 1re ligne, sans budget.
 	p := findCT(t, pv, "P")
-	if p.CTLibelle != "Fonds de transformation" || p.PPS != 0 || p.Provisions != 2000 || p.Budget != nil || p.Consomme != 0 ||
-		p.ResteAFaire != 0 || p.AtterrissagePlan != 0 || p.Statut != nil || p.FinPlan != "" || p.SemainesRestantes != 0 {
+	if p.CTLibelle != "Fonds de transformation" || p.PPS != 0 || p.Provisions != 2000 || p.ProvisionsSecurisees != 2000 || p.Budget != nil ||
+		p.Consomme != 0 || p.ResteAFaire != 0 || p.AtterrissagePlan != 2000 || p.Statut != nil || p.FinPlan != "" || p.SemainesRestantes != 0 {
 		t.Errorf("P = %+v", p)
 	}
 	for _, c := range append(pv.ParCT, pv.Global) {
 		checkInvariants(t, c, pv.AsOf)
 		checkBudget(t, c, s)
 	}
-	// Global = D seul (seul CT avec enveloppe) : provisions comprises à titre d'info.
+	checkSynthese(t, pv)
+	// Global = D seul (seul CT avec enveloppe).
 	gl := pv.Global
-	if gl.PPS != 1000 || gl.Provisions != 600 || fv(gl.Budget) != 1000 || sans.Global.Provisions != 0 {
-		t.Errorf("global = pps %v provisions %v budget %v (sans : %v)", gl.PPS, gl.Provisions, fv(gl.Budget), sans.Global.Provisions)
-	}
-	// Hormis le champ provisions, tout est identique avec ou sans provisions.
-	for _, c := range append(sans.ParCT, sans.Global) {
-		w := pv.Global
-		if c.CT != "" {
-			w = findCT(t, pv, c.CT)
-		}
-		w.Provisions, w.CTLibelle = 0, c.CTLibelle // libellé repris du sous-projet des provisions
-		if !reflect.DeepEqual(w, c) {
-			t.Errorf("%q : provisions influentes\n%+v\n%+v", c.CT, w, c)
-		}
+	if gl.PPS != 1000 || gl.Provisions != 600 || gl.ProvisionsSecurisees != 600 || fv(gl.Budget) != 1000 || gl.AtterrissagePlan != 2100 ||
+		sans.Global.Provisions != 0 || pv.Enveloppes.Atterrissage != 2100 || pv.Enveloppes.Depassement != 1100 {
+		t.Errorf("global = %+v, synthèse %+v", gl, pv.Enveloppes)
 	}
 	if pv.HorsEnveloppe != (domain.HorsEnveloppe{NbCT: sans.HorsEnveloppe.NbCT + 1, Consomme: sans.HorsEnveloppe.Consomme,
-		AtterrissagePlan: sans.HorsEnveloppe.AtterrissagePlan, AtterrissageTendance: sans.HorsEnveloppe.AtterrissageTendance}) {
+		AtterrissagePlan: sans.HorsEnveloppe.AtterrissagePlan + 3000, AtterrissageTendance: sans.HorsEnveloppe.AtterrissageTendance}) {
 		t.Errorf("hors enveloppe = %+v (sans : %+v)", pv.HorsEnveloppe, sans.HorsEnveloppe)
 	}
 	// Anomalies budget : D seulement (seul CT avec enveloppe).
@@ -584,7 +600,11 @@ func TestPrevisionsEcheance(t *testing.T) {
 		"T": fcEnv("2026-01-01", "2026-12-31", 10000),
 	}
 	in.ProvisionVersion = &domain.Version{ID: "prov1", Kind: domain.KindProvision, Statut: domain.StatutActive}
-	in.Provisions = []domain.ProvisionLine{provLine("S", "CAPACITE SUR SITE", "Proj > S", 3000), provLine("S", "PROVISIONS POUR ALEAS", "Proj > S", 5000)}
+	// Provisions de S : sécurisée datée après la fin de l'enveloppe (hors enveloppe) et aléas :
+	// ni l'une ni l'autre n'entre dans l'atterrissage (DECISIONS n° 23).
+	horsPeriode := provLine("S", "CAPACITE SUR SITE", "Proj > S", 3000)
+	horsPeriode.DateDebut, horsPeriode.DateFin = "2027-01-15", "2027-01-31"
+	in.Provisions = []domain.ProvisionLine{horsPeriode, provLine("S", "PROVISIONS POUR ALEAS", "Proj > S", 5000)}
 	res := Run(in, s)
 	pv := res.Previsions
 	if pv.AsOf != "2026-10-02" {
@@ -594,7 +614,7 @@ func TestPrevisionsEcheance(t *testing.T) {
 	// S : fin de l'enveloppe 31/12/2026 (W53) → 13 semaines W41..W53.
 	sc := findCT(t, pv, "S")
 	if fv(sc.Budget) != 14500 || sc.PPS != 12500 || sc.Provisions != 8000 || sc.PlanHorsEnveloppe != 2500 || sc.AtterrissagePlan != 8000 ||
-		fs(sc.Statut) != domain.PrevisionOK {
+		sc.ProvisionsSecurisees != 0 || sc.ProvisionsAleas != 5000 || sc.ProvisionsHorsEnveloppe != 3000 || fs(sc.Statut) != domain.PrevisionOK {
 		t.Errorf("S = %+v", sc)
 	}
 	if sc.Echeance != "2026-12-31" || fv(sc.BudgetEcheance) != 14500 || sc.SemainesEcheance != 13 || sc.ProjectionPlanEcheance != 8000 ||
@@ -620,7 +640,7 @@ func TestPrevisionsEcheance(t *testing.T) {
 		gl.SemainesEcheance != 13 || gl.ProjectionPlanEcheance != 18400 || gl.ProjectionTendanceEcheance != 10200 ||
 		fv(gl.NonConsomme) != 6500 || !gl.SousConsommation || fs(gl.Statut) != domain.PrevisionOK ||
 		fv(gl.EcartPlan) != -6100 || fv(gl.PctConsomme) != 9.8 || fv(gl.RythmeNecessaire) != 1700 || fv(gl.CibleMin) != 19500 ||
-		gl.Provisions != 8000 || gl.PPS != 22500 {
+		gl.Provisions != 8000 || gl.PPS != 22500 || gl.ProvisionsAleas != 5000 || gl.ProvisionsHorsEnveloppe != 3000 || gl.ProvisionsSecurisees != 0 {
 		t.Errorf("global échéance = %+v", gl)
 	}
 	if pv.HorsEnveloppe != (domain.HorsEnveloppe{NbCT: 1, Consomme: 400, AtterrissagePlan: 10400, AtterrissageTendance: 1400}) {
@@ -648,7 +668,7 @@ func TestPrevisionsEcheance(t *testing.T) {
 	nb := func(s string) string { return strings.ReplaceAll(s, " ", " ") }
 	if !ok || a.Categorie != domain.AnomalieBudget || a.Gravite != 2 || a.Montant == nil || *a.Montant != 6500 ||
 		a.Lien != "/previsions?ct=S" || a.CT != "S" ||
-		nb(a.Titre) != "Sous-consommation · S : 6 500 € non consommés par le plan de charge à la fin de l'enveloppe, le 31/12/2026 (45 %)" ||
+		nb(a.Titre) != "Sous-consommation · S : 6 500 € non consommés par le plan de charge et les provisions sécurisées à la fin de l'enveloppe, le 31/12/2026 (45 %)" ||
 		nb(a.Detail) != "Enveloppe 14 500 € (01/01/2026 → 31/12/2026) ; atterrissage plan 8 000 € (tendance 8 500 €, repère) ; il faudrait 962 €/sem contre 500 €/sem" {
 		t.Errorf("anomalie S = %+v", a)
 	}
@@ -1021,7 +1041,7 @@ func TestEnveloppesQualiteEtAnomalies(t *testing.T) {
 		nb(a.Detail) != "Atterrissage prévu 300 € pour une enveloppe de 0 € (01/01/2026 → 31/12/2026) (tendance 1 275 €)" {
 		t.Errorf("anomalie Z = %+v", a)
 	}
-	if a := byKey["budget_sous_conso|B"]; nb(a.Titre) != "Sous-consommation · B : 14 000 € non consommés par le plan de charge à la fin de l'enveloppe, le 30/10/2026 (47 %)" ||
+	if a := byKey["budget_sous_conso|B"]; nb(a.Titre) != "Sous-consommation · B : 14 000 € non consommés par le plan de charge et les provisions sécurisées à la fin de l'enveloppe, le 30/10/2026 (47 %)" ||
 		nb(a.Detail) != "Enveloppe 30 000 € (07/09/2026 → 30/10/2026) ; atterrissage plan 16 000 € (tendance 16 000 €, repère) ; il faudrait 5 500 €/sem contre 2 000 €/sem" ||
 		a.Montant == nil || *a.Montant != 14000 {
 		t.Errorf("anomalie B = %+v", a)

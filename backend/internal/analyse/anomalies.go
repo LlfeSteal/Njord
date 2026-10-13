@@ -550,15 +550,17 @@ func fmtPeriode(e *domain.Enveloppe) string {
 	return f(e.DateDebut) + " → " + f(e.DateFin)
 }
 
-// sousConsoAnomalie: part de l'enveloppe qui ne sera pas consommée à sa fin
-// (DECISIONS n° 17 et 19), en plus d'une éventuelle anomalie de dépassement / vigilance.
+// sousConsoAnomalie: part de l'enveloppe que le plan de charge ne consommera
+// pas à sa fin (DECISIONS n° 17, 19 et 21), en plus d'une éventuelle
+// anomalie de dépassement / vigilance. La tendance n'est qu'un repère du détail :
+// elle n'entre ni dans le montant ni dans l'empreinte.
 func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 	echeance := p.Echeance
 	if t, ok := ParseDate(p.Echeance); ok {
 		echeance = t.Format("02/01/2006")
 	}
 	budget, nc := *p.BudgetEcheance, *p.NonConsomme
-	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(nc) + " non consommés à la fin de l'enveloppe, le " + echeance
+	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(nc) + " non consommés par le plan de charge à la fin de l'enveloppe, le " + echeance
 	if pc := pct(nc, budget); pc != nil {
 		titre += " (" + strconv.FormatFloat(math.Round(*pc), 'f', 0, 64) + "\u00a0%)"
 	}
@@ -566,21 +568,20 @@ func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 	if p.RythmeNecessaire != nil {
 		necessaire = *p.RythmeNecessaire
 	}
-	detail := "Enveloppe " + fmtEur(budget) + " (" + fmtPeriode(p.Enveloppe) + ") ; projection plan " +
-		fmtEur(p.ProjectionPlanEcheance) + ", tendance " + fmtEur(p.ProjectionTendanceEcheance) +
+	detail := "Enveloppe " + fmtEur(budget) + " (" + fmtPeriode(p.Enveloppe) + ") ; atterrissage plan " +
+		fmtEur(p.ProjectionPlanEcheance) + " (tendance " + fmtEur(p.ProjectionTendanceEcheance) + ", repère)" +
 		" ; il faudrait " + fmtEur(necessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
 	return domain.Anomalie{
-		Key:       anomalieKey("budget_sous_conso", p.CT),
-		Categorie: domain.AnomalieBudget,
-		Gravite:   2,
-		Titre:     titre,
-		Detail:    detail,
-		CT:        p.CT,
-		CTLibelle: p.CTLibelle,
-		Montant:   ptrF(nc),
-		Lien:      query("/previsions", "ct", p.CT),
-		Fingerprint: fingerprint(fpE(budget), fpE(p.ProjectionPlanEcheance),
-			fpE(p.ProjectionTendanceEcheance)),
+		Key:         anomalieKey("budget_sous_conso", p.CT),
+		Categorie:   domain.AnomalieBudget,
+		Gravite:     2,
+		Titre:       titre,
+		Detail:      detail,
+		CT:          p.CT,
+		CTLibelle:   p.CTLibelle,
+		Montant:     ptrF(nc),
+		Lien:        query("/previsions", "ct", p.CT),
+		Fingerprint: fingerprint(fpE(budget), fpE(p.ProjectionPlanEcheance)),
 	}
 }
 

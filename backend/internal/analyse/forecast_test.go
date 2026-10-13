@@ -72,7 +72,7 @@ func checkSansBudget(t *testing.T, p domain.PrevisionCT) {
 	t.Helper()
 	if p.BudgetSource != "aucun" || p.Budget != nil || p.Statut != nil || p.EcartPlan != nil || p.EcartTendance != nil ||
 		p.PctConsomme != nil || p.BudgetEcheance != nil || p.NonConsomme != nil || p.RythmeNecessaire != nil || p.CibleMin != nil ||
-		p.Enveloppe != nil || p.Echeance != "" || p.SousConsommation || p.NonConsommeSource != "" ||
+		p.Enveloppe != nil || p.Echeance != "" || p.SousConsommation ||
 		p.ProjectionPlanEcheance != 0 || p.ProjectionTendanceEcheance != 0 || p.SemainesEcheance != 0 ||
 		p.PlanHorsEnveloppe != 0 || p.ConsommeHorsEnveloppe != 0 {
 		t.Errorf("%q sans budget : champs de budget renseignés %+v", p.CT, p)
@@ -163,17 +163,14 @@ func checkBudget(t *testing.T, p domain.PrevisionCT, s domain.Settings) {
 		if !near(p.ProjectionTendanceEcheance, p.Consomme+p.RythmeHebdo*float64(p.SemainesEcheance), 0.02+0.005*float64(p.SemainesEcheance)) {
 			t.Errorf("%s : projection tendance %v incohérente", p.CT, p.ProjectionTendanceEcheance)
 		}
-		worst := math.Min(p.ProjectionPlanEcheance, p.ProjectionTendanceEcheance)
-		if !near(fv(p.NonConsomme), math.Max(0, b-worst), 0.03) {
-			t.Errorf("%s : non consommé %v ≠ %v − %v", p.CT, fv(p.NonConsomme), b, worst)
+		// Non consommé = plan de charge seul (DECISIONS n° 21), jamais la tendance.
+		if !near(fv(p.NonConsomme), math.Max(0, b-p.ProjectionPlanEcheance), 0.03) {
+			t.Errorf("%s : non consommé %v ≠ %v − %v", p.CT, fv(p.NonConsomme), b, p.ProjectionPlanEcheance)
 		}
 	case p.CT != "":
 		t.Errorf("%s : budget sans enveloppe", p.CT)
 	}
 	nc := fv(p.NonConsomme)
-	if (nc == 0) != (p.NonConsommeSource == "") {
-		t.Errorf("%s : source %q pour non consommé %v", p.CT, p.NonConsommeSource, nc)
-	}
 	if p.SousConsommation != (nc > s.SeuilSousConsoPct/100*b+fcTolerance && nc > s.SeuilSousConsoEur+fcTolerance) {
 		t.Errorf("%s : sous-consommation %v incohérente (%v / %v)", p.CT, p.SousConsommation, nc, b)
 	}
@@ -411,7 +408,7 @@ func TestPrevisionsSansRealise(t *testing.T) {
 	gl := pv.Global
 	if gl.Consomme != 0 || gl.ResteAFaire != 2000 || gl.AtterrissagePlan != 2000 || gl.AtterrissageTendance != 0 ||
 		gl.SemainesRestantes != 2 || len(gl.Series) != 2 || gl.Series[1].HeuresPlan != 20 || fv(gl.Budget) != 2000 ||
-		fs(gl.Statut) != domain.PrevisionVigilance || fv(gl.NonConsomme) != 2000 || gl.NonConsommeSource != "tendance" {
+		fs(gl.Statut) != domain.PrevisionVigilance || fv(gl.NonConsomme) != 0 || gl.SousConsommation {
 		t.Errorf("global = %+v", gl)
 	}
 	checkInvariants(t, gl, "")
@@ -571,7 +568,7 @@ func TestPrevisionsEcheance(t *testing.T) {
 		fcLine("S", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS"),
 		fcLine("S", 0, 2000, "2027-01-11", "2027-01-22", "FRAIS"),
 		fcLine("S", 0, 500, "", "", "FRAIS"),
-		// T : 10 000 € sur W41..W50, consommation récente faible → tendance la plus basse.
+		// T : 10 000 € sur W41..W50, consommation récente faible → tendance basse, sans effet sur le non consommé.
 		fcLine("T", 0, 10000, "2026-10-05", "2026-12-11", "FRAIS"),
 		// U : mêmes chiffres que T, sans enveloppe → aucun budget ni anomalie.
 		fcLine("U", 0, 10000, "2026-10-05", "2026-12-11", "FRAIS"),
@@ -601,26 +598,27 @@ func TestPrevisionsEcheance(t *testing.T) {
 		t.Errorf("S = %+v", sc)
 	}
 	if sc.Echeance != "2026-12-31" || fv(sc.BudgetEcheance) != 14500 || sc.SemainesEcheance != 13 || sc.ProjectionPlanEcheance != 8000 ||
-		sc.ProjectionTendanceEcheance != 8500 || fv(sc.NonConsomme) != 6500 || sc.NonConsommeSource != "plan" ||
+		sc.ProjectionTendanceEcheance != 8500 || fv(sc.NonConsomme) != 6500 ||
 		fv(sc.RythmeNecessaire) != 961.54 || !sc.SousConsommation || fv(sc.CibleMin) != 9500 {
 		t.Errorf("S échéance = %+v", sc)
 	}
-	// T : tendance 400 + 100 × 13 = 1 700 < plan 10 400 → non consommé 8 300 (tendance).
+	// T : tendance 400 + 100 × 13 = 1 700, plan 10 400 > enveloppe → dépassement, rien de
+	// non consommé (DECISIONS n° 21 ; l'ancienne règle donnait 8 300 € sur la tendance).
 	tc := findCT(t, pv, "T")
 	if fs(tc.Statut) != domain.PrevisionDepassement || fv(tc.BudgetEcheance) != 10000 || tc.ProjectionPlanEcheance != 10400 ||
-		tc.ProjectionTendanceEcheance != 1700 || fv(tc.NonConsomme) != 8300 || tc.NonConsommeSource != "tendance" ||
-		fv(tc.RythmeNecessaire) != 738.46 || !tc.SousConsommation || fv(tc.CibleMin) != 5000 {
+		tc.ProjectionTendanceEcheance != 1700 || fv(tc.NonConsomme) != 0 || fv(tc.EcartPlan) != 400 ||
+		fv(tc.RythmeNecessaire) != 738.46 || tc.SousConsommation || fv(tc.CibleMin) != 5000 {
 		t.Errorf("T échéance = %+v", tc)
 	}
 	if u := findCT(t, pv, "U"); u.AtterrissagePlan != 10400 || u.AtterrissageTendance != 1400 || u.SemainesRestantes != 10 {
 		t.Errorf("U = %+v", u) // horizon = fin du plan (W50) : 10 semaines
 	}
-	// Global = S + T : non consommé = Σ des CT (6 500 + 8 300), sans compensation ;
+	// Global = S + T : non consommé = Σ des CT (6 500 + 0), sans compensation ;
 	// statut et seuils sur les sommes.
 	gl := pv.Global
 	if gl.BudgetSource != "enveloppe" || fv(gl.Budget) != 24500 || gl.Echeance != "2026-12-31" || fv(gl.BudgetEcheance) != 24500 ||
 		gl.SemainesEcheance != 13 || gl.ProjectionPlanEcheance != 18400 || gl.ProjectionTendanceEcheance != 10200 ||
-		fv(gl.NonConsomme) != 14800 || gl.NonConsommeSource != "tendance" || !gl.SousConsommation || fs(gl.Statut) != domain.PrevisionOK ||
+		fv(gl.NonConsomme) != 6500 || !gl.SousConsommation || fs(gl.Statut) != domain.PrevisionOK ||
 		fv(gl.EcartPlan) != -6100 || fv(gl.PctConsomme) != 9.8 || fv(gl.RythmeNecessaire) != 1700 || fv(gl.CibleMin) != 19500 ||
 		gl.Provisions != 8000 || gl.PPS != 22500 {
 		t.Errorf("global échéance = %+v", gl)
@@ -628,12 +626,13 @@ func TestPrevisionsEcheance(t *testing.T) {
 	if pv.HorsEnveloppe != (domain.HorsEnveloppe{NbCT: 1, Consomme: 400, AtterrissagePlan: 10400, AtterrissageTendance: 1400}) {
 		t.Errorf("hors enveloppe = %+v", pv.HorsEnveloppe)
 	}
+	checkSynthese(t, pv)
 	for _, p := range append(pv.ParCT, gl) {
 		checkBudget(t, p, s)
 		checkInvariants(t, p, pv.AsOf)
 	}
 
-	// Anomalies : sous-consommation en plus du dépassement de T ; rien pour U.
+	// Anomalies : sous-consommation de S, dépassement de T (sans sous-consommation) ; rien pour U.
 	byKey := map[string]domain.Anomalie{}
 	for _, a := range res.Anomalies {
 		byKey[a.Key] = a
@@ -649,19 +648,36 @@ func TestPrevisionsEcheance(t *testing.T) {
 	nb := func(s string) string { return strings.ReplaceAll(s, " ", " ") }
 	if !ok || a.Categorie != domain.AnomalieBudget || a.Gravite != 2 || a.Montant == nil || *a.Montant != 6500 ||
 		a.Lien != "/previsions?ct=S" || a.CT != "S" ||
-		nb(a.Titre) != "Sous-consommation · S : 6 500 € non consommés à la fin de l'enveloppe, le 31/12/2026 (45 %)" ||
-		nb(a.Detail) != "Enveloppe 14 500 € (01/01/2026 → 31/12/2026) ; projection plan 8 000 €, tendance 8 500 € ; il faudrait 962 €/sem contre 500 €/sem" {
+		nb(a.Titre) != "Sous-consommation · S : 6 500 € non consommés par le plan de charge à la fin de l'enveloppe, le 31/12/2026 (45 %)" ||
+		nb(a.Detail) != "Enveloppe 14 500 € (01/01/2026 → 31/12/2026) ; atterrissage plan 8 000 € (tendance 8 500 €, repère) ; il faudrait 962 €/sem contre 500 €/sem" {
 		t.Errorf("anomalie S = %+v", a)
 	}
-	if a, ok := byKey["budget_sous_conso|T"]; !ok || strings.Contains(a.Detail, "provisions") ||
-		nb(a.Titre) != "Sous-consommation · T : 8 300 € non consommés à la fin de l'enveloppe, le 31/12/2026 (83 %)" {
-		t.Errorf("anomalie T = %+v", a)
+	if a, ok := byKey["budget_sous_conso|T"]; ok {
+		t.Errorf("sous-consommation de T portée par la tendance : %+v", a)
 	}
-	// L'empreinte suit budget et projections.
+	// L'empreinte suit budget et atterrissage plan, pas la tendance : déplacer
+	// une écriture de S hors des 4 dernières semaines (même période, même
+	// consommé) ne change que le rythme.
+	moved := append([]domain.RealiseEntry(nil), in.Entries...)
+	moved[0] = fcEntry("S", 500, "2026-08-31") // W36 au lieu de W37
+	inMoved := in
+	inMoved.Entries = moved
+	var tendOnly domain.Anomalie
+	resMoved := Run(inMoved, s)
+	for _, a2 := range resMoved.Anomalies {
+		if a2.Key == "budget_sous_conso|S" {
+			tendOnly = a2
+		}
+	}
+	if sm := findCT(t, resMoved.Previsions, "S"); sm.ProjectionTendanceEcheance == sc.ProjectionTendanceEcheance ||
+		sm.ProjectionPlanEcheance != sc.ProjectionPlanEcheance || tendOnly.Fingerprint != a.Fingerprint {
+		t.Errorf("empreinte S sensible à la seule tendance : %s ≠ %s (tendance %v → %v)", tendOnly.Fingerprint, a.Fingerprint,
+			sc.ProjectionTendanceEcheance, sm.ProjectionTendanceEcheance)
+	}
 	in.Entries = append(in.Entries, fcEntry("S", 100, "2026-09-30"))
 	for _, a2 := range Run(in, s).Anomalies {
-		if a2.Key == "budget_sous_conso|S" && a2.Fingerprint == byKey["budget_sous_conso|S"].Fingerprint {
-			t.Error("empreinte inchangée malgré des projections modifiées")
+		if a2.Key == "budget_sous_conso|S" && a2.Fingerprint == a.Fingerprint {
+			t.Error("empreinte inchangée malgré un atterrissage plan modifié")
 		}
 	}
 }
@@ -679,7 +695,7 @@ func TestPrevisionsEcheancePassee(t *testing.T) {
 	// Consommé de la période = 500 € (1 500 € après la fin) ; le reste (1 500 €) est perdu, sous les 5 000 €.
 	if p.Echeance != "2026-09-20" || p.SemainesEcheance != 0 || p.Consomme != 500 || p.ConsommeHorsEnveloppe != 1500 ||
 		p.PlanHorsEnveloppe != 8000 || p.ProjectionPlanEcheance != 500 || p.ProjectionTendanceEcheance != 500 ||
-		fv(p.RythmeNecessaire) != 0 || fv(p.NonConsomme) != 1500 || p.NonConsommeSource != "plan" || p.SousConsommation ||
+		fv(p.RythmeNecessaire) != 0 || fv(p.NonConsomme) != 1500 || p.SousConsommation ||
 		fv(p.CibleMin) != 0 || fs(p.Statut) != domain.PrevisionOK {
 		t.Errorf("échéance passée = %+v", p)
 	}
@@ -694,26 +710,26 @@ func TestFcBudgetSeuils(t *testing.T) {
 		name            string
 		budget, plan, t float64
 		nc              float64
-		source          string
 		sous            bool
 	}{
-		{"pct seul", 20000, 16000, 30000, 4000, "plan", false},      // 20 % mais 4 000 €
-		{"eur seul", 100000, 92000, 95000, 8000, "plan", false},     // 8 000 € mais 8 %
-		{"les deux", 50000, 60000, 42000, 8000, "tendance", true},   // 16 % et 8 000 €
-		{"égalité", 50000, 40000, 40000, 10000, "plan", true},       // plan retenu à égalité
-		{"au-delà", 10000, 12000, 11000, 0, "", false},              // projections au-delà du budget
-		{"tolérance", 50000, 45000.4, 46000, 4999.6, "plan", false}, // ≤ 5 000 € + tolérance
+		{"pct seul", 20000, 16000, 30000, 4000, false},      // 20 % mais 4 000 €
+		{"eur seul", 100000, 92000, 95000, 8000, false},     // 8 000 € mais 8 %
+		{"les deux", 50000, 42000, 60000, 8000, true},       // 16 % et 8 000 €
+		{"tendance basse", 50000, 60000, 42000, 0, false},   // plan au-delà : la tendance ne compte pas (n° 21)
+		{"égalité", 50000, 40000, 40000, 10000, true},       // plan = tendance
+		{"au-delà", 10000, 12000, 11000, 0, false},          // projections au-delà du budget
+		{"tolérance", 50000, 45000.4, 46000, 4999.6, false}, // ≤ 5 000 € + tolérance
 	}
 	for _, c := range cases {
 		var p domain.PrevisionCT
 		fc := fcCalc{budgeted: true, budget: c.budget, atterPlan: c.plan, atterTend: c.t, sr: 1, echeance: "2026-12-31"}
-		fc.nc, fc.ncSrc = fcNonConsomme(c.budget, c.plan, c.t)
+		fc.nc = fcNonConsomme(c.budget, c.plan)
 		fcBudget(&p, fc, s)
-		if fv(p.NonConsomme) != c.nc || p.NonConsommeSource != c.source || p.SousConsommation != c.sous {
-			t.Errorf("%s : non consommé %v (%q), sous-conso %v", c.name, fv(p.NonConsomme), p.NonConsommeSource, p.SousConsommation)
+		if fv(p.NonConsomme) != c.nc || p.SousConsommation != c.sous {
+			t.Errorf("%s : non consommé %v, sous-conso %v", c.name, fv(p.NonConsomme), p.SousConsommation)
 		}
-		// Atterrir sous cible_min = sous-consommation (mêmes seuils), hors tolérance.
-		if worst := math.Min(c.plan, c.t); c.name != "tolérance" && (worst < fv(p.CibleMin)) != c.sous {
+		// Atterrir (plan) sous cible_min = sous-consommation (mêmes seuils), hors tolérance.
+		if c.name != "tolérance" && (c.plan < fv(p.CibleMin)) != c.sous {
 			t.Errorf("%s : cible_min %v incohérente avec la sous-consommation %v", c.name, fv(p.CibleMin), c.sous)
 		}
 	}
@@ -852,7 +868,7 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 	}
 	if b.Echeance != "2026-10-30" || fv(b.BudgetEcheance) != 30000 || b.SemainesEcheance != 4 ||
 		b.ProjectionPlanEcheance != 16000 || b.ProjectionTendanceEcheance != 16000 || fv(b.NonConsomme) != 14000 ||
-		b.NonConsommeSource != "plan" || fv(b.RythmeNecessaire) != 5500 || !b.SousConsommation || fv(b.CibleMin) != 25000 {
+		fv(b.RythmeNecessaire) != 5500 || !b.SousConsommation || fv(b.CibleMin) != 25000 {
 		t.Errorf("B échéance = %+v", b)
 	}
 	// 0 avant la période (le réalisé de W34 n'y est pas), plat après W44 ; heures réelles inchangées.
@@ -872,10 +888,11 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 		t.Errorf("C = %+v", c)
 	}
 
-	// N : pas encore commencée — consommé 0, reste = prévu de la période, 13 semaines jusqu'au 31/12.
+	// N : pas encore commencée — consommé 0, reste = prévu de la période, 13 semaines jusqu'au 31/12 ;
+	// non consommé = 5 000 − 4 000 du plan (la tendance nulle n'y entre pas, n° 21).
 	n := findCT(t, pv, "N")
 	if n.Consomme != 0 || n.ResteAFaire != 4000 || n.AtterrissagePlan != 4000 || n.AtterrissageTendance != 0 || fs(n.Statut) != domain.PrevisionOK ||
-		n.SemainesEcheance != 13 || fv(n.NonConsomme) != 5000 || n.NonConsommeSource != "tendance" || n.SousConsommation ||
+		n.SemainesEcheance != 13 || fv(n.NonConsomme) != 1000 || n.SousConsommation ||
 		fv(n.RythmeNecessaire) != 384.62 || fv(n.CibleMin) != 0 {
 		t.Errorf("N = %+v", n)
 	}
@@ -915,9 +932,9 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 		fv(gl.EcartPlan) != -20450 || fv(gl.EcartTendance) != -16475 || fs(gl.Statut) != domain.PrevisionOK || fv(gl.PctConsomme) != 27.45 {
 		t.Errorf("global = %+v", gl)
 	}
-	// Échéance = fin la plus tardive ; non consommé = Σ des CT (0 + 14 000 + 5 000 + 8 000 + 0).
+	// Échéance = fin la plus tardive ; non consommé = Σ des CT (0 + 14 000 + 1 000 + 8 000 + 0).
 	if gl.Echeance != "2026-12-31" || gl.SemainesEcheance != 13 || fv(gl.BudgetEcheance) != 53000 || gl.ProjectionPlanEcheance != 32550 ||
-		gl.ProjectionTendanceEcheance != 36525 || fv(gl.NonConsomme) != 27000 || gl.NonConsommeSource != "plan" ||
+		gl.ProjectionTendanceEcheance != 36525 || fv(gl.NonConsomme) != 23000 ||
 		fv(gl.RythmeNecessaire) != 2957.69 || !gl.SousConsommation || fv(gl.CibleMin) != 47700 {
 		t.Errorf("global échéance = %+v", gl)
 	}
@@ -939,10 +956,11 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 	}
 
 	want := domain.EnveloppesSynthese{NbCT: 6, NbConfigures: 5, Montant: 53000, Atterrissage: 32550, Ecart: -20450,
-		Depassement: 2550, NbDepassement: 2, NonConsomme: 27000, NbSousConsommation: 2, PlanHorsEnveloppe: 6500}
+		Depassement: 2550, NbDepassement: 2, NonConsomme: 23000, NbSousConsommation: 2, PlanHorsEnveloppe: 6500}
 	if pv.Enveloppes != want {
 		t.Errorf("synthèse = %+v, attendu %+v", pv.Enveloppes, want)
 	}
+	checkSynthese(t, pv)
 }
 
 func TestPrevisionsEnveloppesSources(t *testing.T) {
@@ -1003,8 +1021,8 @@ func TestEnveloppesQualiteEtAnomalies(t *testing.T) {
 		nb(a.Detail) != "Atterrissage prévu 300 € pour une enveloppe de 0 € (01/01/2026 → 31/12/2026) (tendance 1 275 €)" {
 		t.Errorf("anomalie Z = %+v", a)
 	}
-	if a := byKey["budget_sous_conso|B"]; nb(a.Titre) != "Sous-consommation · B : 14 000 € non consommés à la fin de l'enveloppe, le 30/10/2026 (47 %)" ||
-		nb(a.Detail) != "Enveloppe 30 000 € (07/09/2026 → 30/10/2026) ; projection plan 16 000 €, tendance 16 000 € ; il faudrait 5 500 €/sem contre 2 000 €/sem" ||
+	if a := byKey["budget_sous_conso|B"]; nb(a.Titre) != "Sous-consommation · B : 14 000 € non consommés par le plan de charge à la fin de l'enveloppe, le 30/10/2026 (47 %)" ||
+		nb(a.Detail) != "Enveloppe 30 000 € (07/09/2026 → 30/10/2026) ; atterrissage plan 16 000 € (tendance 16 000 €, repère) ; il faudrait 5 500 €/sem contre 2 000 €/sem" ||
 		a.Montant == nil || *a.Montant != 14000 {
 		t.Errorf("anomalie B = %+v", a)
 	}
@@ -1030,5 +1048,192 @@ func TestEnveloppesQualiteEtAnomalies(t *testing.T) {
 		if a.Categorie == domain.AnomalieBudget {
 			t.Errorf("anomalie budget sans enveloppe : %+v", a)
 		}
+	}
+}
+
+// checkSynthese: dépassement agrégé = Σ ecart_plan des seuls CT en dépassement,
+// d'où dépassement > 0 ⇔ nb_depassement > 0 (DECISIONS n° 22) ; non consommé =
+// Σ des CT, sans compensation (n° 21).
+func checkSynthese(t *testing.T, pv domain.Previsions) {
+	t.Helper()
+	e := pv.Enveloppes
+	dep, nc, nb := 0.0, 0.0, 0
+	for _, p := range pv.ParCT {
+		if p.Enveloppe == nil {
+			continue
+		}
+		nc += fv(p.NonConsomme)
+		if fs(p.Statut) == domain.PrevisionDepassement {
+			dep += fv(p.EcartPlan)
+			nb++
+		}
+	}
+	if (e.Depassement > 0) != (e.NbDepassement > 0) || e.NbDepassement != nb || !near(e.Depassement, dep, 0.02) {
+		t.Errorf("synthèse : dépassement %v pour %d CT, attendu %v pour %d CT", e.Depassement, e.NbDepassement, dep, nb)
+	}
+	if !near(e.NonConsomme, nc, 0.02) || (pv.Global.NonConsomme != nil && fv(pv.Global.NonConsomme) != e.NonConsomme) {
+		t.Errorf("synthèse : non consommé %v, Σ CT %v, global %v", e.NonConsomme, nc, fv(pv.Global.NonConsomme))
+	}
+}
+
+// TestPrevisionsNonConsommePlanSeul: le non consommé est la part de l'enveloppe
+// que le plan de charge ne consommera pas, jamais la tendance (DECISIONS n° 21).
+// as_of 01/10/2026 (W40), enveloppes jusqu'au 31/12 (W53) : 13 semaines restantes.
+func TestPrevisionsNonConsommePlanSeul(t *testing.T) {
+	s := store.DefaultSettings() // 10 % et 5 000 €
+	s.JoursFeries = nil
+	in := baseInput()
+	onePlan(&in,
+		// T : 10 000 € planifiés sur W41..W50 + 100 € consommés = enveloppe ; rythme 25 €/sem.
+		fcLine("T", 0, 10000, "2026-10-05", "2026-12-11", "FRAIS"),
+		// U : 10 000 € planifiés sur W41..W50 + 1 000 € consommés > enveloppe de 8 000 € ; rythme 250 €/sem.
+		fcLine("U", 0, 10000, "2026-10-05", "2026-12-11", "FRAIS"),
+		// V : plan terminé en W39, rien de planifié après as_of.
+		fcLine("V", 0, 3000, "2026-09-07", "2026-09-25", "FRAIS"),
+	)
+	in.Entries = []domain.RealiseEntry{
+		fcEntry("T", 100, "2026-10-01"),
+		fcEntry("U", 250, "2026-09-08"), fcEntry("U", 250, "2026-09-15"),
+		fcEntry("U", 250, "2026-09-22"), fcEntry("U", 250, "2026-09-29"),
+		fcEntry("V", 1000, "2026-09-08"), fcEntry("V", 1000, "2026-09-15"), fcEntry("V", 1000, "2026-09-22"),
+		fcEntry("W", 500, "2026-09-29"), // W : aucun plan importé pour ce CT
+	}
+	in.Enveloppes = map[string]domain.Enveloppe{
+		"T": fcEnv("2026-09-01", "2026-12-31", 10100),
+		"U": fcEnv("2026-09-01", "2026-12-31", 8000),
+		"V": fcEnv("2026-09-01", "2026-12-31", 20000),
+		"W": fcEnv("2026-09-01", "2026-12-31", 6000),
+	}
+	res := Run(in, s)
+	pv := res.Previsions
+	if pv.AsOf != "2026-10-01" {
+		t.Fatalf("as_of = %q", pv.AsOf)
+	}
+	for _, p := range append(pv.ParCT, pv.Global) {
+		checkInvariants(t, p, pv.AsOf)
+		checkBudget(t, p, s)
+	}
+	checkSynthese(t, pv)
+	byKey := map[string]domain.Anomalie{}
+	for _, a := range res.Anomalies {
+		byKey[a.Key] = a
+	}
+
+	// (a) Plan dans la zone cible (= enveloppe), tendance très basse (100 + 25 × 13 = 425) :
+	// rien de non consommé (l'ancienne règle donnait 10 100 − 425 = 9 675 €).
+	tc := findCT(t, pv, "T")
+	if tc.ProjectionPlanEcheance != 10100 || tc.ProjectionTendanceEcheance != 425 || fv(tc.CibleMin) != 5100 ||
+		fv(tc.NonConsomme) != 0 || tc.SousConsommation || fs(tc.Statut) != domain.PrevisionVigilance {
+		t.Errorf("T = %+v", tc)
+	}
+	if a, ok := byKey["budget_sous_conso|T"]; ok {
+		t.Errorf("sous-consommation de T portée par la tendance : %+v", a)
+	}
+
+	// (b) Plan au-dessus de l'enveloppe (1 000 + 10 000), tendance dedans (1 000 + 250 × 13 = 4 250,
+	// dans la zone cible [3 000, 8 000]) : non consommé nul, dépassement = ecart_plan.
+	u := findCT(t, pv, "U")
+	if u.ProjectionPlanEcheance != 11000 || u.ProjectionTendanceEcheance != 4250 || fv(u.NonConsomme) != 0 ||
+		fv(u.EcartPlan) != 3000 || fs(u.Statut) != domain.PrevisionDepassement || u.SousConsommation {
+		t.Errorf("U = %+v", u)
+	}
+
+	// (c) Rien de planifié après as_of : atterrissage plan = consommé, non consommé =
+	// enveloppe − consommé, que le plan soit terminé (V) ou absent (W) ; série plan plate.
+	v := findCT(t, pv, "V")
+	if v.ResteAFaire != 0 || v.ProjectionPlanEcheance != 3000 || fv(v.NonConsomme) != 20000-v.Consomme ||
+		fv(v.NonConsomme) != 17000 || !v.SousConsommation || v.ProjectionTendanceEcheance != 12750 {
+		t.Errorf("V = %+v", v)
+	}
+	if pt := fcPoint(t, v, "2026-W53"); pt.PlanCumul == nil || *pt.PlanCumul != 3000 {
+		t.Errorf("V W53 = %+v", pt)
+	}
+	w := findCT(t, pv, "W")
+	if w.PPS != 0 || w.ResteAFaire != 0 || w.ProjectionPlanEcheance != 500 || fv(w.NonConsomme) != 5500 || !w.SousConsommation {
+		t.Errorf("W = %+v", w)
+	}
+	if a := byKey["budget_sous_conso|V"]; a.Montant == nil || *a.Montant != 17000 {
+		t.Errorf("anomalie V = %+v", a)
+	}
+
+	// Global : Σ des CT (0 + 0 + 17 000 + 5 500), sans compensation.
+	if fv(pv.Global.NonConsomme) != 22500 || pv.Enveloppes.NonConsomme != 22500 || pv.Enveloppes.NbSousConsommation != 2 {
+		t.Errorf("global non consommé %v, synthèse %+v", fv(pv.Global.NonConsomme), pv.Enveloppes)
+	}
+}
+
+// TestPrevisionsGlobalNonConsommeSansCompensation: un CT en dépassement ne
+// finance pas un CT qui ne consomme pas (DECISIONS n° 21).
+func TestPrevisionsGlobalNonConsommeSansCompensation(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	in := baseInput()
+	onePlan(&in,
+		fcLine("A", 0, 8000, "2026-10-05", "2026-10-30", "FRAIS"), // W41..W44
+		fcLine("B", 0, 2000, "2026-10-05", "2026-10-16", "FRAIS"), // W41..W42
+	)
+	in.Entries = []domain.RealiseEntry{fcEntry("X", 100, "2026-10-01")} // as_of, CT sans enveloppe
+	in.Enveloppes = map[string]domain.Enveloppe{
+		"A": fcEnv("2026-09-01", "2026-12-31", 5000),
+		"B": fcEnv("2026-09-01", "2026-12-31", 10000),
+	}
+	pv := Run(in, s).Previsions
+	for _, p := range append(pv.ParCT, pv.Global) {
+		checkInvariants(t, p, pv.AsOf)
+		checkBudget(t, p, s)
+	}
+	checkSynthese(t, pv)
+	a, b := findCT(t, pv, "A"), findCT(t, pv, "B")
+	if fs(a.Statut) != domain.PrevisionDepassement || fv(a.EcartPlan) != 3000 || fv(a.NonConsomme) != 0 {
+		t.Errorf("A = %+v", a)
+	}
+	if fv(b.NonConsomme) != 8000 || !b.SousConsommation {
+		t.Errorf("B = %+v", b)
+	}
+	// Global = non consommé de B seul (8 000), pas l'écart net Σ enveloppes − Σ plan (15 000 − 10 000 = 5 000).
+	gl := pv.Global
+	if fv(gl.Budget) != 15000 || gl.ProjectionPlanEcheance != 10000 || fv(gl.NonConsomme) != fv(b.NonConsomme) ||
+		pv.Enveloppes.NonConsomme != fv(b.NonConsomme) || !gl.SousConsommation {
+		t.Errorf("global = non consommé %v (B %v), synthèse %+v", fv(gl.NonConsomme), fv(b.NonConsomme), pv.Enveloppes)
+	}
+	if pv.Enveloppes.Depassement != 3000 || pv.Enveloppes.NbDepassement != 1 || pv.Enveloppes.Ecart != -5000 {
+		t.Errorf("synthèse = %+v", pv.Enveloppes)
+	}
+}
+
+// TestPrevisionsDepassementAgregue: le dépassement agrégé ne somme que les CT
+// en dépassement (DECISIONS n° 22) ; un résidu sous fcTolerance reste lisible
+// sur sa ligne mais n'est jamais agrégé (cas « 1 € / 0 CT »).
+func TestPrevisionsDepassementAgregue(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries = nil
+	in := baseInput()
+	onePlan(&in, fcLine("R", 0, 10000.10, "2026-10-05", "2026-10-16", "FRAIS")) // W41..W42
+	in.Entries = []domain.RealiseEntry{fcEntry("X", 100, "2026-10-01")}         // as_of, CT sans enveloppe
+	in.Enveloppes = map[string]domain.Enveloppe{"R": fcEnv("2026-09-01", "2026-12-31", 10000)}
+
+	pv := Run(in, s).Previsions
+	checkSynthese(t, pv)
+	r := findCT(t, pv, "R")
+	if fv(r.EcartPlan) != 0.1 || fs(r.Statut) == domain.PrevisionDepassement {
+		t.Errorf("R = écart %v, statut %s", fv(r.EcartPlan), fs(r.Statut))
+	}
+	if e := pv.Enveloppes; e.Depassement != 0 || e.NbDepassement != 0 || e.Ecart != 0.1 {
+		t.Errorf("résidu seul : synthèse %+v", e)
+	}
+
+	// + un CT à +4 000 € : seul celui-ci compte.
+	in.Plans[0].Lines = append(in.Plans[0].Lines, fcLine("D", 0, 10000, "2026-10-05", "2026-10-16", "FRAIS"))
+	in.Enveloppes["D"] = fcEnv("2026-09-01", "2026-12-31", 6000)
+	pv = Run(in, s).Previsions
+	checkSynthese(t, pv)
+	if r := findCT(t, pv, "R"); fv(r.EcartPlan) != 0.1 || fs(r.Statut) == domain.PrevisionDepassement {
+		t.Errorf("R = écart %v, statut %s", fv(r.EcartPlan), fs(r.Statut))
+	}
+	if d := findCT(t, pv, "D"); fv(d.EcartPlan) != 4000 || fs(d.Statut) != domain.PrevisionDepassement {
+		t.Errorf("D = écart %v, statut %s", fv(d.EcartPlan), fs(d.Statut))
+	}
+	if e := pv.Enveloppes; e.Depassement != 4000 || e.NbDepassement != 1 || e.Ecart != 4000.1 {
+		t.Errorf("synthèse %+v, attendu dépassement 4 000 pour 1 CT", e)
 	}
 }

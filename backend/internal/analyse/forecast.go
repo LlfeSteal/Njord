@@ -32,7 +32,8 @@ import (
 //   - reste à faire = prévu des semaines ]as_of, WE] ∩ ≥ WD ; tendance =
 //     consommé + rythme (réel de la période) × semaines ]as_of, WE] ;
 //   - échéance = E, budget de l'échéance = montant, projections = atterrissages ;
-//     non consommé = montant − la plus basse des deux, plancher 0 ;
+//     non consommé = montant − atterrissage plan, plancher 0 (DECISIONS n° 21) :
+//     la tendance ne sert qu'aux tracés et à la vigilance ;
 //     sous-consommation si non consommé > seuil % du montant et > seuil €
 //     (indicateur séparé du statut, n° 17) ; zone cible [cible_min, montant] ;
 //   - séries cumulées sur la période seule (0 avant WD, plates après WE) ;
@@ -42,9 +43,14 @@ import (
 // plan ; consommé, atterrissages et séries restent calculés.
 //
 // Global = périmètre des CT avec enveloppe, chacun sur son budget et son
-// horizon : sommes, puis mêmes formules (statut, écarts, seuils) sur les sommes ;
+// horizon : sommes, puis mêmes formules (statut, écarts, seuils) sur les sommes,
+// sauf le non consommé = Σ des CT, sans compensation avec les dépassements (n° 21) ;
 // séries sur l'union des périodes. Les CT sans enveloppe sont résumés à part
 // (Previsions.HorsEnveloppe).
+//
+// Synthèse des enveloppes (Previsions.Enveloppes) : dépassement = Σ ecart_plan
+// des seuls CT en statut dépassement (DECISIONS n° 22), d'où dépassement > 0 ⇔
+// nb_depassement > 0 ; non consommé = Σ des CT, sans compensation.
 
 // fcTolerance absorbe les arrondis dans la comparaison atterrissage / budget.
 const fcTolerance = 0.5
@@ -105,7 +111,6 @@ type fcCalc struct {
 	budget   float64
 	echeance string  // fin de l'enveloppe (global : la plus tardive)
 	nc       float64 // non consommé (global : Σ des CT, sans compensation)
-	ncSrc    string  // plan | tendance | ""
 	// Enveloppe (DECISIONS n° 19).
 	env                 *domain.Enveloppe
 	planHors, consoHors float64
@@ -299,7 +304,6 @@ func (r *run) previsions() domain.Previsions {
 	lo, hi := 0, -1
 	if g.budgeted {
 		g.sr = fcRemaining(axis, asOfWeek, g.echeance)
-		g.ncSrc = fcSource(g.atterPlan, g.atterTend, g.nc)
 		lo, hi = n, -1
 		for i, w := range axis {
 			if w >= envMin && w <= envMax {
@@ -416,7 +420,7 @@ func (r *run) fcCompute(b *fcBucket, axis []string, asIdx int, asOfWeek string, 
 	c.atterPlan = c.consomme + c.reste
 	c.atterTend = c.consomme + c.rythme*float64(c.sr)
 	if c.budgeted {
-		c.nc, c.ncSrc = fcNonConsomme(c.budget, c.atterPlan, c.atterTend)
+		c.nc = fcNonConsomme(c.budget, c.atterPlan)
 	}
 
 	budgetCum, reelCum := 0.0, b.undated
@@ -482,23 +486,11 @@ func fcRemaining(axis []string, asOfWeek, fin string) int {
 	return int(z.Sub(a).Hours()/24/7+0.5) + extra
 }
 
-// fcNonConsomme: budget − la plus basse des deux projections à l'échéance (la
-// pire), plancher 0, et la projection retenue.
-func fcNonConsomme(budget, projPlan, projTend float64) (float64, string) {
-	nc := math.Max(0, budget-math.Min(projPlan, projTend))
-	return nc, fcSource(projPlan, projTend, nc)
-}
-
-// fcSource names the projection retained for the non consommé : la plus
-// basse des deux (la pire) ; "" s'il n'y a rien de non consommé.
-func fcSource(projPlan, projTend, nc float64) string {
-	switch {
-	case round2(nc) == 0:
-		return ""
-	case round2(projTend) < round2(projPlan):
-		return "tendance"
-	}
-	return "plan"
+// fcNonConsomme: part du budget que le plan de charge ne consommera pas =
+// budget − atterrissage plan à l'échéance, plancher 0 (DECISIONS n° 21). La
+// tendance n'y entre jamais.
+func fcNonConsomme(budget, atterPlan float64) float64 {
+	return math.Max(0, budget-atterPlan)
 }
 
 // fcStatut: dépassement si atterrissage plan > budget ; vigilance si tendance
@@ -526,8 +518,8 @@ func fcPtr(v float64) *float64 {
 }
 
 // fcBudget fills the budget fields (DECISIONS n° 19 et 20) : écarts, statut,
-// % consommé, échéance (fin de l'enveloppe), non consommé face à la pire des
-// deux projections (= atterrissages), seuils % et €, zone cible.
+// % consommé, échéance (fin de l'enveloppe), non consommé face à l'atterrissage
+// plan (n° 21), seuils % et €, zone cible.
 func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
 	statut := fcStatut(c)
 	necessaire := 0.0
@@ -545,7 +537,6 @@ func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
 	p.ProjectionPlanEcheance = round2(c.atterPlan)
 	p.ProjectionTendanceEcheance = round2(c.atterTend)
 	p.NonConsomme = fcPtr(c.nc)
-	p.NonConsommeSource = c.ncSrc
 	p.RythmeNecessaire = fcPtr(necessaire)
 	p.SemainesEcheance = c.sr
 	p.SousConsommation = c.nc > s.SeuilSousConsoPct/100*c.budget+fcTolerance && c.nc > s.SeuilSousConsoEur+fcTolerance
@@ -598,7 +589,9 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, axis []string, cov []domain.
 }
 
 // fcSynthese: lecture brute des CT configurés de par_ct (DECISIONS n° 19),
-// sans compensation entre CT pour le dépassement et le non consommé.
+// sans compensation entre CT pour le dépassement et le non consommé. Le
+// dépassement ne somme que les CT en statut dépassement (n° 22) : un résidu
+// d'arrondi (≤ fcTolerance) reste lisible sur sa ligne mais n'est pas agrégé.
 func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
 	out := domain.EnveloppesSynthese{NbCT: len(par)}
 	for _, p := range par {
@@ -608,11 +601,11 @@ func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
 		out.NbConfigures++
 		out.Montant += p.Enveloppe.Montant
 		out.Atterrissage += p.AtterrissagePlan
-		out.Depassement += math.Max(0, *p.EcartPlan)
 		out.NonConsomme += *p.NonConsomme
 		out.PlanHorsEnveloppe += p.PlanHorsEnveloppe
 		if *p.Statut == domain.PrevisionDepassement {
 			out.NbDepassement++
+			out.Depassement += *p.EcartPlan
 		}
 		if p.SousConsommation {
 			out.NbSousConsommation++

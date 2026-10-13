@@ -120,12 +120,12 @@ func TestAnomaliesDemo(t *testing.T) {
 		t.Errorf("hors enveloppe : %+v", he)
 	}
 	body := w.Body.String()
-	for _, f := range []string{`"cible_min"`, `"hors_enveloppe"`, `"non_consomme_source"`, `"prevu"`} {
+	for _, f := range []string{`"cible_min"`, `"hors_enveloppe"`, `"non_consomme"`, `"prevu"`} {
 		if !strings.Contains(body, f) {
 			t.Errorf("champ %s absent du JSON", f)
 		}
 	}
-	for _, f := range []string{`"charge_max"`, `"pps_echeance"`, `"provisions_echeance"`, `"mixte"`} {
+	for _, f := range []string{`"charge_max"`, `"pps_echeance"`, `"provisions_echeance"`, `"mixte"`, `"non_consomme_source"`} {
 		if strings.Contains(body, f) {
 			t.Errorf("champ supprimé %s présent dans le JSON", f)
 		}

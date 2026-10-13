@@ -272,7 +272,7 @@ func (r *run) previsions() domain.Previsions {
 		// Global = périmètre des enveloppes, chaque CT sur son budget et son horizon.
 		g.budgeted = true
 		g.budget += c.budget
-		g.nc += c.nc
+		g.nc += round2(c.nc) // Σ des montants affichés par CT : global = synthèse au centime (n° 21)
 		if c.echeance > g.echeance {
 			g.echeance = c.echeance
 		}

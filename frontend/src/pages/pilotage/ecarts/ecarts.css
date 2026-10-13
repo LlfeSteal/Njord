@@ -171,3 +171,8 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+/* Écart traité affiché (DECISIONS n° 26) : « traité » / « ignoré » en texte secondaire, jamais tronqué. */
+.ecarts-ressource > :not(:first-child) {
+  flex: none;
+}

@@ -1,5 +1,6 @@
 // Page Pilotage « Écarts d'imputation » (/ecarts) : tuples ressource × CT × semaine (prévu / réel / écart).
-// Filtres dans l'URL (ct, ressource, flag, squad, q, vue) ; détail d'une ligne dans l'Inspector.
+// Filtres dans l'URL (ct, ressource, flag, squad, q, vue, traites) ; détail d'une ligne dans l'Inspector.
+// Écarts traités (DECISIONS n° 26) : tuples dont toutes les anomalies sont traitées / ignorées, masqués par défaut.
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import {
   ActiveFilters,
@@ -16,7 +17,9 @@ import {
   Select,
   SortHeader,
   Stack,
+  Switch,
   Table,
+  Link,
   Text,
   Tooltip,
   toast,
@@ -40,6 +43,9 @@ import { aRegulariser, actionsMarkdown } from './actions';
 import { useSquads } from '../../referentiels/hooks';
 import {
   DEFAULT_SORT,
+  TRAITEMENT_LABEL,
+  anomaliesByKey,
+  citedKeys,
   cmp,
   ecartTone,
   groupByRessource,
@@ -50,12 +56,15 @@ import {
   sortGroups,
   sortRows,
   synthese,
+  traitement,
+  traitementKeys,
   useEcartsUrl,
   type EcartsVue,
   type GroupKey,
   type ListKey,
   type RessourceRow,
   type Sort,
+  type Traitement,
 } from './model';
 import './ecarts.css';
 
@@ -109,6 +118,16 @@ export default function EcartsPage() {
   // Valeur d'URL absente des données (lien entrant) : reste sélectionnable.
   const withValue = (data: { value: string; label: string }[], v?: string) =>
     v && !data.some((d) => d.value === v) ? [{ value: v, label: v }, ...data] : data;
+  // Écarts traités (DECISIONS n° 26) : tuples dont toutes les anomalies citées sont traitées / ignorées.
+  const byKey = useMemo(() => anomaliesByKey(result?.anomalies), [result]);
+  const traites = useMemo(() => {
+    const m = new Map<EcartRow, Traitement>();
+    for (const e of ecarts) {
+      const t = traitement(e, byKey);
+      if (t) m.set(e, t);
+    }
+    return m;
+  }, [ecarts, byKey]);
   const labelOf = (data: { value: string; label: string }[], v: string) => data.find((d) => d.value === v)?.label ?? v;
 
   // Filtre squad : le squad choisi et tous ses sous-squads (un parent agrège ses enfants, cf. Capacité).
@@ -129,8 +148,9 @@ export default function EcartsPage() {
   const squadName = (id: string) => squadsQ.data?.find((s) => s.id === id)?.nom_canonique ?? id;
 
   // ---------------------------------------------------------------- Filtrage, tri, regroupement
-  // La synthèse suit tous les filtres sauf le flag (sinon une seule part) ; le tableau, tous.
-  const filteredSansFlag = useMemo(() => {
+  // La synthèse suit tous les filtres sauf le flag (sinon une seule part) ; le tableau, tous. Les écarts
+  // traités sont retirés avant la synthèse, le tableau et l'export des actions (sauf interrupteur).
+  const filteredBase = useMemo(() => {
     const nq = norm(state.q.trim());
     return ecarts.filter(
       (e) =>
@@ -140,10 +160,18 @@ export default function EcartsPage() {
         (!nq || norm(`${e.ressource} ${e.ressource_label} ${e.ct} ${e.ct_libelle}`).includes(nq)),
     );
   }, [ecarts, state.ct, state.ressource, squadScope, state.q]);
+  const filteredSansFlag = useMemo(
+    () => (state.traites || traites.size === 0 ? filteredBase : filteredBase.filter((e) => !traites.has(e))),
+    [filteredBase, state.traites, traites],
+  );
+  const matchFlag = (e: EcartRow) => state.flags.length === 0 || state.flags.includes(e.flag);
   const filtered = useMemo(
     () => (state.flags.length === 0 ? filteredSansFlag : filteredSansFlag.filter((e) => state.flags.includes(e.flag))),
     [filteredSansFlag, state.flags],
   );
+  // Tuples traités masqués du tableau (mêmes filtres, flag compris).
+  const nbMasques = state.traites ? 0 : filteredBase.filter((e) => traites.has(e) && matchFlag(e)).length;
+  const showTraites = () => update({ traites: true });
   const syntheseData = useMemo(() => synthese(filteredSansFlag), [filteredSansFlag]);
   // Clic sur une part : filtre sur ce seul flag, ou le retire s'il est déjà le seul filtré.
   const selectFlag = (f: Flag) => update({ flags: state.flags.length === 1 && state.flags[0] === f ? [] : [f] });
@@ -155,7 +183,7 @@ export default function EcartsPage() {
   );
 
   // Page courante, revenue à 1 dès que les filtres, la vue ou le tri changent.
-  const sig = `${state.vue}|${state.ct}|${state.ressource}|${state.squad}|${state.flags.join(',')}|${state.q}|${listSort.key}${listSort.dir}|${groupSort.key}${groupSort.dir}`;
+  const sig = `${state.vue}|${state.ct}|${state.ressource}|${state.squad}|${state.flags.join(',')}|${state.q}|${state.traites}|${listSort.key}${listSort.dir}|${groupSort.key}${groupSort.dir}`;
   const [pageState, setPageState] = useState({ sig, page: 1 });
   const total = byRessource ? groups.length : rows.length;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -170,7 +198,8 @@ export default function EcartsPage() {
   const weekLabel = (w: string) => (sameYear ? shortWeek(w) : fmtWeek(w));
 
   // ---------------------------------------------------------------- Filtres actifs
-  const filterCount = [state.ct, state.ressource, state.squad].filter(Boolean).length + (state.flags.length ? 1 : 0);
+  const filterCount =
+    [state.ct, state.ressource, state.squad].filter(Boolean).length + (state.flags.length ? 1 : 0) + (state.traites ? 1 : 0);
   const active: ActiveFilter[] = [];
   if (state.ct) active.push({ key: 'ct', label: `CT : ${state.ct}`, onRemove: () => update({ ct: null }) });
   if (state.ressource)
@@ -178,7 +207,9 @@ export default function EcartsPage() {
   if (state.flags.length)
     active.push({ key: 'flag', label: state.flags.map((f) => FLAG_META[f].label).join(', '), onRemove: () => update({ flags: [] }) });
   if (state.squad) active.push({ key: 'squad', label: `Squad : ${opts.squads.some((d) => d.value === state.squad) ? labelOf(opts.squads, state.squad) : squadName(state.squad)}`, onRemove: () => update({ squad: null }) });
-  const clearFilters = () => update({ ct: null, ressource: null, squad: null, flags: [] });
+  if (state.traites)
+    active.push({ key: 'traites', label: 'Écarts traités affichés', onRemove: () => update({ traites: false }) });
+  const clearFilters = () => update({ ct: null, ressource: null, squad: null, flags: [], traites: false });
 
   // ---------------------------------------------------------------- Export
   const exportCsv = () => {
@@ -191,6 +222,7 @@ export default function EcartsPage() {
         ressource: state.ressource,
         flag: state.flags.length ? state.flags.join(',') : undefined,
         squad_id: state.squad,
+        masquer_traites: state.traites ? undefined : true,
       }),
     );
     if (state.q.trim())
@@ -204,7 +236,10 @@ export default function EcartsPage() {
           periode: `${weekLabel(result.meta.week_from)} → ${weekLabel(result.meta.week_to)}`,
           plan: result.meta.plan_version ? `${result.meta.plan_version.intitule} (timeline)` : 'Dernier plan',
           realise: result.meta.realise_version?.intitule ?? 'Réalisé',
-          filtres: active.map((a) => (typeof a.label === 'string' ? a.label : a.key)),
+          filtres: [
+            ...active.map((a) => (typeof a.label === 'string' ? a.label : a.key)),
+            ...(nbMasques > 0 ? ['hors écarts traités'] : []),
+          ],
           recherche: state.q.trim() || undefined,
           weekLabel,
         })
@@ -282,6 +317,12 @@ export default function EcartsPage() {
             disabled={opts.squads.length === 0 && !state.squad}
             width="100%"
           />
+          <Switch
+            checked={state.traites}
+            onChange={(v) => update({ traites: v })}
+            label="Afficher les écarts traités"
+            disabled={traites.size === 0 && !state.traites}
+          />
         </Stack>
       </FilterButton>
       <ActiveFilters items={active} onClearAll={active.length > 1 ? clearFilters : undefined} />
@@ -317,13 +358,14 @@ export default function EcartsPage() {
       group={selectedGroup}
       planId={planId}
       onClose={close}
+      byKey={byKey}
       onShowWeeks={(g) => {
         setSelected(null);
         update({ vue: 'liste', ressource: g.head.ressource, ct: g.ct, q: null });
       }}
     />
   ) : (
-    <EcartRowInspector row={selectedRow} planId={planId} onClose={close} />
+    <EcartRowInspector row={selectedRow} planId={planId} byKey={byKey} onClose={close} />
   );
 
   let content;
@@ -333,6 +375,12 @@ export default function EcartsPage() {
       <EmptyState title="Aucun tuple à comparer">
         Le plan et le réalisé ne se recoupent pas sur la période.
         {heuresNonCouvertes(result) > 0 && ` ${uncoveredSentence(heuresNonCouvertes(result))}.`}
+      </EmptyState>
+    );
+  else if (total === 0 && nbMasques > 0)
+    content = (
+      <EmptyState title="Aucun écart à traiter" action={<Button onClick={showTraites}>Afficher les écarts traités</Button>}>
+        {masquesSentence(nbMasques)} pour ces filtres.
       </EmptyState>
     );
   else if (total === 0)
@@ -356,9 +404,20 @@ export default function EcartsPage() {
   else
     content = (
       <Stack gap={12} className="ecarts-content" aria-busy={analyse.result.isPlaceholderData || undefined}>
+        {nbMasques > 0 && (
+          <Group gap={6}>
+            <Text as="span" size="sm" tone="secondary">
+              {masquesSentence(nbMasques)}
+            </Text>
+            <Link size="sm" onClick={showTraites}>
+              Afficher
+            </Link>
+          </Group>
+        )}
         {byRessource ? (
           <GroupTable
             groups={paginate(groups, page, PAGE_SIZE)}
+            traiteOf={(g) => (state.traites ? traitementKeys(citedKeys(g.rows), byKey) : null)}
             sort={groupSort}
             onSort={(k, first) => setGroupSort((s) => nextSort(s, k, first))}
             selected={selected}
@@ -367,6 +426,7 @@ export default function EcartsPage() {
         ) : (
           <ListTable
             rows={paginate(rows, page, PAGE_SIZE)}
+            traiteOf={(e) => (state.traites ? (traites.get(e) ?? null) : null)}
             sort={listSort}
             onSort={(k, first) => setListSort((s) => nextSort(s, k, first))}
             selected={selected}
@@ -412,6 +472,9 @@ export default function EcartsPage() {
   );
 }
 
+/** « 3 écarts traités masqués ». */
+const masquesSentence = (n: number) => (n > 1 ? `${n} écarts traités masqués` : '1 écart traité masqué');
+
 // ------------------------------------------------------------------ Tableaux
 /** Entrée ou Espace sur une ligne focalisée : l'ouvre dans l'inspecteur. */
 function activate(ev: KeyboardEvent, open: () => void) {
@@ -442,13 +505,21 @@ function Th<K extends string>({
   );
 }
 
-function RessourceCell({ e }: { e: EcartRow }) {
+/** Ressource sur une ligne, puis « inactif » et, si l'écart traité est affiché, « traité » / « ignoré ». */
+function RessourceCell({ e, traite }: { e: EcartRow; traite?: Traitement | null }) {
   return (
     <span className="ecarts-ressource">
       <Text as="span" truncate>
         {e.ressource_label || e.ressource}
       </Text>
       {e.inactive && <InactiveBadge />}
+      {traite && (
+        <Tooltip label={traite === 'traitee' ? 'Anomalie traitée : masqué par défaut' : 'Anomalie ignorée : masqué par défaut'}>
+          <Text as="span" size="sm" tone="secondary">
+            {TRAITEMENT_LABEL[traite]}
+          </Text>
+        </Tooltip>
+      )}
     </span>
   );
 }
@@ -475,6 +546,8 @@ function EcartCell({ flag, value }: { flag: Flag; value: number }) {
 
 interface ListTableProps {
   rows: EcartRow[];
+  /** Traitement à marquer (écarts traités affichés), null sinon. */
+  traiteOf: (e: EcartRow) => Traitement | null;
   sort: Sort<ListKey>;
   onSort: (k: ListKey, first: 'asc' | 'desc') => void;
   selected: string | null;
@@ -482,7 +555,7 @@ interface ListTableProps {
   weekLabel: (w: string) => string;
 }
 
-function ListTable({ rows, sort, onSort, selected, onSelect, weekLabel }: ListTableProps) {
+function ListTable({ rows, traiteOf, sort, onSort, selected, onSelect, weekLabel }: ListTableProps) {
   return (
     <Table hover minWidth={720} caption="Écarts d'imputation par ressource, CT et semaine">
       <thead>
@@ -525,7 +598,7 @@ function ListTable({ rows, sort, onSort, selected, onSelect, weekLabel }: ListTa
                 <FlagGlyph flag={e.flag} />
               </td>
               <td>
-                <RessourceCell e={e} />
+                <RessourceCell e={e} traite={traiteOf(e)} />
               </td>
               <CtCell ct={e.ct} libelle={e.ct_libelle} />
               <td data-nowrap>{weekLabel(e.semaine)}</td>
@@ -542,13 +615,14 @@ function ListTable({ rows, sort, onSort, selected, onSelect, weekLabel }: ListTa
 
 interface GroupTableProps {
   groups: RessourceRow[];
+  traiteOf: (g: RessourceRow) => Traitement | null;
   sort: Sort<GroupKey>;
   onSort: (k: GroupKey, first: 'asc' | 'desc') => void;
   selected: string | null;
   onSelect: (id: string) => void;
 }
 
-function GroupTable({ groups, sort, onSort, selected, onSelect }: GroupTableProps) {
+function GroupTable({ groups, traiteOf, sort, onSort, selected, onSelect }: GroupTableProps) {
   return (
     <Table hover minWidth={720} caption="Écarts d'imputation par ressource et CT sur la période">
       <thead>
@@ -589,7 +663,7 @@ function GroupTable({ groups, sort, onSort, selected, onSelect }: GroupTableProp
               <FlagGlyph flag={g.flag} />
             </td>
             <td>
-              <RessourceCell e={g.head} />
+              <RessourceCell e={g.head} traite={traiteOf(g)} />
             </td>
             <CtCell ct={g.ct} libelle={g.ct_libelle} />
             <td data-align="right">

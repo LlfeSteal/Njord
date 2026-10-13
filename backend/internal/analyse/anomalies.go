@@ -131,6 +131,12 @@ func pluriel(n int, sing, plur string) string {
 // anomalies builds the controller's inbox from the computed result (SPEC_analyse §7.8).
 // Statut = a_traiter ; la fusion avec anomalie_suivi est faite par mergeSuivi.
 func (r *run) anomalies(res *domain.AnalyseResult) []domain.Anomalie {
+	// DECISIONS n° 26 : EcartRow.Anomalies est (re)calculé ici, jamais null —
+	// [] pour un conforme ou un tuple qu'aucune anomalie ne cite ; ecartAnomalies
+	// et erreurCTAnomalies y ajoutent les clés des anomalies qu'elles émettent.
+	for i := range res.Ecarts {
+		res.Ecarts[i].Anomalies = []string{}
+	}
 	out := []domain.Anomalie{}
 	out = append(out, ecartAnomalies(res)...)
 	out = append(out, erreurCTAnomalies(res)...)
@@ -186,6 +192,18 @@ func residualEcart(row domain.EcartRow) float64 {
 	return row.Ecart + row.Reaffecte
 }
 
+// addRowKey ajoute la clé d'une anomalie qui cite le tuple (DECISIONS n° 26),
+// en gardant EcartRow.Anomalies trié et sans doublon.
+func addRowKey(row *domain.EcartRow, k string) {
+	i := sort.SearchStrings(row.Anomalies, k)
+	if i < len(row.Anomalies) && row.Anomalies[i] == k {
+		return
+	}
+	row.Anomalies = append(row.Anomalies, "")
+	copy(row.Anomalies[i+1:], row.Anomalies[i:])
+	row.Anomalies[i] = k
+}
+
 // sortedKeys returns the keys of a set, sorted.
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
@@ -209,7 +227,7 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	}
 	groups := map[string]*group{}
 	var order []string
-	for _, row := range res.Ecarts {
+	for i, row := range res.Ecarts {
 		if row.Flag == domain.FlagErreurCT {
 			continue
 		}
@@ -226,6 +244,8 @@ func ecartAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			groups[k] = g
 			order = append(order, k)
 		}
+		// Chaque groupe émet son anomalie : le tuple la cite (DECISIONS n° 26).
+		addRowKey(&res.Ecarts[i], k)
 		g.ecart += residualEcart(row)
 		g.prevu += row.Prevu
 		g.reel += row.Reel
@@ -311,7 +331,7 @@ func erreurCTAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	}
 	groups := map[string]*group{}
 	var order []string
-	for _, row := range res.Ecarts {
+	for i, row := range res.Ecarts {
 		if row.Prevu != 0 || row.Reaffecte <= 0 || !resolue[[2]string{row.Ressource, row.Semaine}] {
 			continue
 		}
@@ -325,6 +345,9 @@ func erreurCTAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			groups[k] = g
 			order = append(order, k)
 		}
+		// Côté CT imputé à tort, erreur de CT pleine ou sur-imputation résiduelle
+		// (cas partiel, qui porte aussi sa propre clé) : DECISIONS n° 26.
+		addRowKey(&res.Ecarts[i], k)
 		g.reaff += row.Reaffecte
 		g.weeks[row.Semaine] = true
 		if g.row.RessourceLabel == "" {
@@ -342,13 +365,17 @@ func erreurCTAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 		// mêmes semaines, liés à B et non conformes (erreur de CT, ou sous-imputation
 		// résiduelle) ; un CT resté conforme n'a reçu qu'une part du transfert.
 		var prevu float64
-		for _, row := range res.Ecarts {
+		for i, row := range res.Ecarts {
 			if row.Ressource != g.row.Ressource || row.Prevu <= 0 || row.Reaffecte <= 0 || !g.weeks[row.Semaine] ||
 				row.Flag == domain.FlagConforme || !liee(row, b) {
 				continue
 			}
 			prevu += row.Prevu
 			g.lies[row.CT] = true
+			// Le tuple côté CT planifié est cité (« au lieu de ») : il porte la clé
+			// de l'erreur de CT de B, en plus de sa sous-imputation résiduelle
+			// éventuelle (DECISIONS n° 26).
+			addRowKey(&res.Ecarts[i], k)
 		}
 		weeks := sortedKeys(g.weeks)
 		lies := sortedKeys(g.lies)
@@ -377,6 +404,9 @@ func erreurCTAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 	return out
 }
 
+// ctRisqueAnomalies: un CT dont les provisions pour aléas (non sécurisées,
+// DECISIONS n° 23 : CTRisque.NonSecurise = provisions_aleas) dépassent
+// seuil_ct_risque_eur. Clé et empreinte inchangées.
 func ctRisqueAnomalies(res *domain.AnalyseResult, seuil float64) []domain.Anomalie {
 	out := []domain.Anomalie{}
 	for _, a := range res.Alertes.CTRisque {
@@ -384,8 +414,8 @@ func ctRisqueAnomalies(res *domain.AnalyseResult, seuil float64) []domain.Anomal
 			Key:       anomalieKey("ct_risque", a.CT),
 			Categorie: domain.AnomalieCTRisque,
 			Gravite:   3,
-			Titre:     "CT à risque · " + a.CT + " : " + fmtEur(a.NonSecurise) + " non sécurisés",
-			Detail: fmtEur(a.NonSecurise) + " de dépenses non sécurisées sur le CT, au-delà du seuil de " +
+			Titre:     "CT à risque · " + a.CT + " : " + fmtEur(a.NonSecurise) + " de provisions pour aléas",
+			Detail: fmtEur(a.NonSecurise) + " de provisions pour aléas (non sécurisées) sur le CT, au-delà du seuil de " +
 				fmtEur(seuil),
 			CT:          a.CT,
 			CTLibelle:   a.CTLibelle,
@@ -511,11 +541,16 @@ func budgetAnomalies(res *domain.AnalyseResult) []domain.Anomalie {
 			montant = *p.EcartTendance
 			titre += " (tendance +" + fmtEur(montant) + ")"
 		}
-		// Budget = enveloppe du CT (DECISIONS n° 19), sur sa période.
-		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + " pour une enveloppe de " +
+		// Budget = enveloppe du CT (DECISIONS n° 19), sur sa période. Atterrissage
+		// sécurisé = consommé + plan de charge restant + provisions sécurisées
+		// comptées (DECISIONS n° 23) : leur part est citée quand il y en a.
+		detail := "Atterrissage prévu " + fmtEur(p.AtterrissagePlan) + provisionsDont(p) + " pour une enveloppe de " +
 			fmtEur(*p.Budget) + " (" + fmtPeriode(p.Enveloppe) + ") (tendance " + fmtEur(p.AtterrissageTendance) + ")"
 		if p.PlanHorsEnveloppe >= 0.5 {
 			detail += " · " + fmtEur(p.PlanHorsEnveloppe) + " planifiés hors enveloppe"
+		}
+		if p.ProvisionsHorsEnveloppe >= 0.5 {
+			detail += " · " + fmtEur(p.ProvisionsHorsEnveloppe) + " de provisions sécurisées hors enveloppe"
 		}
 		out = append(out, domain.Anomalie{
 			Key:       anomalieKey("budget", p.CT),
@@ -550,17 +585,27 @@ func fmtPeriode(e *domain.Enveloppe) string {
 	return f(e.DateDebut) + " → " + f(e.DateFin)
 }
 
-// sousConsoAnomalie: part de l'enveloppe que le plan de charge ne consommera
-// pas à sa fin (DECISIONS n° 17, 19 et 21), en plus d'une éventuelle
-// anomalie de dépassement / vigilance. La tendance n'est qu'un repère du détail :
-// elle n'entre ni dans le montant ni dans l'empreinte.
+// provisionsDont: « (dont X € de provisions sécurisées) » quand l'atterrissage
+// sécurisé en compte (DECISIONS n° 23), "" sinon.
+func provisionsDont(p domain.PrevisionCT) string {
+	if p.ProvisionsSecurisees < 0.5 {
+		return ""
+	}
+	return " (dont " + fmtEur(p.ProvisionsSecurisees) + " de provisions sécurisées)"
+}
+
+// sousConsoAnomalie: part de l'enveloppe que le plan de charge et les provisions
+// sécurisées ne consommeront pas à sa fin (DECISIONS n° 17, 19, 21 et 23), en
+// plus d'une éventuelle anomalie de dépassement / vigilance. L'empreinte suit
+// ProjectionPlanEcheance (= atterrissage sécurisé). La tendance n'est qu'un
+// repère du détail : elle n'entre ni dans le montant ni dans l'empreinte.
 func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 	echeance := p.Echeance
 	if t, ok := ParseDate(p.Echeance); ok {
 		echeance = t.Format("02/01/2006")
 	}
 	budget, nc := *p.BudgetEcheance, *p.NonConsomme
-	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(nc) + " non consommés par le plan de charge à la fin de l'enveloppe, le " + echeance
+	titre := "Sous-consommation · " + p.CT + " : " + fmtEur(nc) + " non consommés par le plan de charge et les provisions sécurisées à la fin de l'enveloppe, le " + echeance
 	if pc := pct(nc, budget); pc != nil {
 		titre += " (" + strconv.FormatFloat(math.Round(*pc), 'f', 0, 64) + "\u00a0%)"
 	}
@@ -569,7 +614,7 @@ func sousConsoAnomalie(p domain.PrevisionCT) domain.Anomalie {
 		necessaire = *p.RythmeNecessaire
 	}
 	detail := "Enveloppe " + fmtEur(budget) + " (" + fmtPeriode(p.Enveloppe) + ") ; atterrissage plan " +
-		fmtEur(p.ProjectionPlanEcheance) + " (tendance " + fmtEur(p.ProjectionTendanceEcheance) + ", repère)" +
+		fmtEur(p.ProjectionPlanEcheance) + provisionsDont(p) + " (tendance " + fmtEur(p.ProjectionTendanceEcheance) + ", repère)" +
 		" ; il faudrait " + fmtEur(necessaire) + "/sem contre " + fmtEur(p.RythmeHebdo) + "/sem"
 	return domain.Anomalie{
 		Key:         anomalieKey("budget_sous_conso", p.CT),

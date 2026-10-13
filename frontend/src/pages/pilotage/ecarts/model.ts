@@ -1,7 +1,7 @@
 // Page Écarts : état d'URL (mêmes clés que l'ancienne page Analyse), tri, regroupement par ressource × CT.
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FLAG_SEVERITY, type Confidence, type EcartRow, type Flag } from '../../../api/types';
+import { FLAG_SEVERITY, type Anomalie, type Confidence, type EcartRow, type Flag } from '../../../api/types';
 import type { TextTone } from '../../../ui';
 
 // ------------------------------------------------------------------ URL
@@ -15,8 +15,13 @@ export interface EcartsUrl {
   ressource?: string;
   flags: Flag[];
   squad?: string;
+  /** Affiche les écarts traités (DECISIONS n° 26) ; masqués par défaut. URL : `traites=1`. */
+  traites: boolean;
 }
-export type EcartsPatch = Partial<Record<'vue' | 'q' | 'ct' | 'ressource' | 'squad', string | null>> & { flags?: Flag[] };
+export type EcartsPatch = Partial<Record<'vue' | 'q' | 'ct' | 'ressource' | 'squad', string | null>> & {
+  flags?: Flag[];
+  traites?: boolean;
+};
 
 export function useEcartsUrl() {
   const [sp, setSp] = useSearchParams();
@@ -28,6 +33,7 @@ export function useEcartsUrl() {
       ressource: sp.get('ressource') || undefined,
       flags: (sp.get('flag') ?? '').split(',').filter((f): f is Flag => (FLAGS as string[]).includes(f)),
       squad: sp.get('squad') || undefined,
+      traites: sp.get('traites') === '1',
     }),
     [sp],
   );
@@ -41,6 +47,9 @@ export function useEcartsUrl() {
               const list = v as Flag[];
               if (list.length) n.set('flag', list.join(','));
               else n.delete('flag');
+            } else if (k === 'traites') {
+              if (v) n.set('traites', '1');
+              else n.delete('traites');
             } else if (v == null || v === '' || (k === 'vue' && v === 'liste')) n.delete(k);
             else n.set(k, String(v));
           }
@@ -52,6 +61,39 @@ export function useEcartsUrl() {
   );
   return { state, update };
 }
+
+// ------------------------------------------------------------------ Écarts traités (DECISIONS n° 26)
+/** Statut réglé de toutes les anomalies d'un tuple : « traitee » dès qu'une est traitée, « ignoree » si toutes le sont. */
+export type Traitement = 'traitee' | 'ignoree';
+
+/** Anomalies du résultat par clé. */
+export const anomaliesByKey = (anomalies: Anomalie[] | undefined) => new Map((anomalies ?? []).map((a) => [a.key, a]));
+
+/**
+ * Traitement d'un tuple : null s'il ne cite aucune anomalie (conforme, ancien backend sans `anomalies`)
+ * ou si l'une d'elles reste à traiter (ou est absente du résultat) ; sinon le tuple est masqué par défaut.
+ */
+export function traitement(e: EcartRow, byKey: Map<string, Anomalie>): Traitement | null {
+  return traitementKeys(e.anomalies ?? [], byKey);
+}
+
+/** Même règle sur une liste de clés (regroupement ressource × CT : clés de ses tuples). */
+export function traitementKeys(keys: string[], byKey: Map<string, Anomalie>): Traitement | null {
+  if (!keys.length) return null;
+  let out: Traitement = 'ignoree';
+  for (const k of keys) {
+    const s = byKey.get(k)?.statut;
+    if (s !== 'traitee' && s !== 'ignoree') return null;
+    if (s === 'traitee') out = 'traitee';
+  }
+  return out;
+}
+
+/** Clés d'anomalies citées par des tuples, dédoublonnées et triées. */
+export const citedKeys = (rows: EcartRow[]) => [...new Set(rows.flatMap((r) => r.anomalies ?? []))].sort();
+
+/** Marqueur d'un tuple affiché malgré son traitement. */
+export const TRAITEMENT_LABEL: Record<Traitement, string> = { traitee: 'traité', ignoree: 'ignoré' };
 
 // ------------------------------------------------------------------ Tons
 /**

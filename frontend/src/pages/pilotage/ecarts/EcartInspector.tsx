@@ -1,5 +1,6 @@
 // Inspecteur de la page Écarts : un tuple ressource × CT × semaine, ou un regroupement ressource × CT.
 // Erreur de CT (DECISIONS n° 14) : note « heures imputées ici au lieu de… » avec lien vers les CT liés.
+// Écarts traités (DECISIONS n° 26) : note « Anomalie traitée / ignorée » ; liens par clé de `EcartRow.anomalies`.
 import { Fragment, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -15,11 +16,11 @@ import {
   type KeyValueItem,
   type StatusTone,
 } from '../../../ui';
-import type { EcartRow, Flag } from '../../../api/types';
+import type { Anomalie, EcartRow, Flag } from '../../../api/types';
 import { FLAG_META, FlagBadge, FlagGlyph } from '../../../components/badges';
 import { fmtHours, fmtHoursSigned, fmtWeek } from '../../../lib/format';
-import { ecartAnomalieLink } from '../anomalies/meta';
-import { CONFIDENCE_LABEL, ecartTone, type RessourceRow } from './model';
+import { STATUT_LABEL, anomalieLink, ecartAnomalieLink, parseEcartKey } from '../anomalies/meta';
+import { CONFIDENCE_LABEL, citedKeys, ecartTone, traitementKeys, type RessourceRow } from './model';
 
 function Ecart({ flag, value }: { flag: Flag; value: number }) {
   return (
@@ -115,6 +116,51 @@ function AnomalyLinks({ ct, ressource, flag, rows, suffix }: { ct: string; resso
   );
 }
 
+// ------------------------------------------------------------------ Anomalies citées (DECISIONS n° 26)
+const isFlag = (f: string | undefined): f is Flag => !!f && f in FLAG_META;
+
+/**
+ * Liens « Voir l'anomalie » par clé citée : suffixés du flag (et du CT s'il diffère de `ct`) quand il y en a
+ * plusieurs ou si `suffix`, et du statut quand il est réglé.
+ */
+function KeyLinks({ keys, byKey, ct, suffix }: { keys: string[]; byKey: Map<string, Anomalie>; ct: string; suffix?: boolean }) {
+  return (
+    <>
+      {keys.map((k) => {
+        const a = byKey.get(k);
+        const parsed = parseEcartKey(k);
+        const flag = a?.flag ?? parsed?.flag;
+        const kct = a?.ct ?? parsed?.ct;
+        const parts = ["Voir l'anomalie"];
+        if ((suffix || keys.length > 1) && isFlag(flag)) parts.push(FLAG_META[flag].label);
+        let label = parts.join(' · ');
+        if (kct && kct !== ct) label += ` (${kct})`;
+        if (a && a.statut !== 'a_traiter') label += ` · ${STATUT_LABEL[a.statut].toLowerCase()}`;
+        return (
+          <Link key={k} to={anomalieLink(k)}>
+            {label}
+          </Link>
+        );
+      })}
+    </>
+  );
+}
+
+/** « Anomalie traitée » (+ commentaire) quand toutes les anomalies citées sont réglées : le tuple est masqué par défaut. */
+function TraitementNote({ keys, byKey }: { keys: string[]; byKey: Map<string, Anomalie> }) {
+  const t = traitementKeys(keys, byKey);
+  if (!t) return null;
+  const n = keys.length;
+  const mixed = t === 'traitee' && keys.some((k) => byKey.get(k)?.statut === 'ignoree');
+  const statut = mixed ? 'traitées ou ignorées' : t === 'traitee' ? (n > 1 ? 'traitées' : 'traitée') : n > 1 ? 'ignorées' : 'ignorée';
+  const commentaire = n === 1 ? byKey.get(keys[0])?.suivi?.commentaire?.trim() : undefined;
+  return (
+    <Note glyph="success" tone="success">
+      {n > 1 ? 'Anomalies' : 'Anomalie'} {statut}.{commentaire ? ` « ${commentaire} »` : ''}
+    </Note>
+  );
+}
+
 /** Lien vers la page Écarts filtrée sur un CT lié et la même ressource (vue et squad conservées). */
 function useLinkedCtHref() {
   const [sp] = useSearchParams();
@@ -177,14 +223,19 @@ const planLink = (fallbackPlanId: string | undefined, e: EcartRow, planId = e.pl
       ).toString()}`
     : null;
 
+const NO_ANOMALIES = new Map<string, Anomalie>();
+
 interface RowProps {
   row: EcartRow | null;
   planId?: string;
+  /** Anomalies du résultat par clé (statut des anomalies citées). */
+  byKey?: Map<string, Anomalie>;
   onClose: () => void;
 }
 
-export function EcartRowInspector({ row, planId, onClose }: RowProps) {
+export function EcartRowInspector({ row, planId, byKey = NO_ANOMALIES, onClose }: RowProps) {
   const plan = row && row.prevu > 0 ? planLink(planId, row) : null;
+  const keys = row ? citedKeys([row]) : [];
   return (
     <Inspector
       opened={!!row}
@@ -208,9 +259,14 @@ export function EcartRowInspector({ row, planId, onClose }: RowProps) {
             <KeyValue items={identity(row)} />
           </InspectorSection>
           <ReaffectationNotes rows={[row]} ressource={row.ressource} />
+          <TraitementNote keys={keys} byKey={byKey} />
           <Notes e={row} />
           <Stack gap={4} align="start">
-            {row.flag !== 'conforme' && <AnomalyLinks ct={row.ct} ressource={row.ressource} flag={row.flag} rows={[row]} />}
+            {keys.length > 0 ? (
+              <KeyLinks keys={keys} byKey={byKey} ct={row.ct} />
+            ) : (
+              row.flag !== 'conforme' && <AnomalyLinks ct={row.ct} ressource={row.ressource} flag={row.flag} rows={[row]} />
+            )}
             {plan && <Link to={plan}>Voir la ligne du plan</Link>}
           </Stack>
         </Stack>
@@ -222,12 +278,14 @@ export function EcartRowInspector({ row, planId, onClose }: RowProps) {
 interface GroupProps {
   group: RessourceRow | null;
   planId?: string;
+  byKey?: Map<string, Anomalie>;
   onClose: () => void;
   /** Bascule sur la liste filtrée sur cette ressource et ce CT. */
   onShowWeeks: (g: RessourceRow) => void;
 }
 
-export function RessourceInspector({ group, planId, onClose, onShowWeeks }: GroupProps) {
+export function RessourceInspector({ group, planId, byKey = NO_ANOMALIES, onClose, onShowWeeks }: GroupProps) {
+  const keys = group ? citedKeys(group.rows) : [];
   const flags = group ? [...new Set(group.rows.map((r) => r.flag))].filter((f) => f !== 'conforme') : [];
   // Semaines régies par plusieurs versions : la plus récente semaine prévue désigne la version à ouvrir.
   const planned = group ? [...group.rows].reverse().find((r) => r.prevu > 0) : undefined;
@@ -267,12 +325,17 @@ export function RessourceInspector({ group, planId, onClose, onShowWeeks }: Grou
             <KeyValue items={identity(group.head)} />
           </InspectorSection>
           <ReaffectationNotes rows={group.rows} ressource={group.head.ressource} />
+          <TraitementNote keys={keys} byKey={byKey} />
           <Notes e={group.head} />
           <Stack gap={4} align="start">
             <Link onClick={() => onShowWeeks(group)}>Voir les semaines dans la liste</Link>
-            {flags.map((f) => (
-              <AnomalyLinks key={f} ct={group.ct} ressource={group.head.ressource} flag={f} rows={group.rows} suffix />
-            ))}
+            {keys.length > 0 ? (
+              <KeyLinks keys={keys} byKey={byKey} ct={group.ct} suffix />
+            ) : (
+              flags.map((f) => (
+                <AnomalyLinks key={f} ct={group.ct} ressource={group.head.ressource} flag={f} rows={group.rows} suffix />
+              ))
+            )}
             {plan && <Link to={plan}>Voir la ligne du plan</Link>}
           </Stack>
         </Stack>

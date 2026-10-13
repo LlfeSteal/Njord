@@ -80,9 +80,30 @@ export function fmtWeeks(weeks: string[] | undefined): string | null {
   return contiguous ? `${shortWeek(s[0])} → ${shortWeek(s[s.length - 1])}` : s.map(shortWeek).join(', ');
 }
 
-/** Lien vers une anomalie d'écart (clé stable « ecart|CT|ressource|flag »), visible quel que soit son statut. */
+/**
+ * Partie de clé d'anomalie, comme le backend (`keyPart`, backend/internal/analyse/anomalies.go) :
+ * espaces de bord retirés, puis « / » et « | » remplacés par « _ ».
+ */
+export const keyPart = (s: string) => s.trim().replace(/[/|]/g, '_');
+
+/** Clé d'anomalie (`anomalieKey` du backend) : parties assainies, jointes par « | ». */
+export const anomalieKey = (...parts: string[]) => parts.map(keyPart).join('|');
+
+/** Lien vers une anomalie par sa clé, visible quel que soit son statut. */
+export const anomalieLink = (key: string) => `/anomalies?vue=toutes&key=${encodeURIComponent(key)}`;
+
+/**
+ * Lien vers une anomalie d'écart (clé stable « ecart|CT|ressource|flag »). Préférer `anomalieLink` sur
+ * `EcartRow.anomalies` quand le backend l'envoie (DECISIONS n° 26).
+ */
 export const ecartAnomalieLink = (ct: string, ressource: string, flag: string) =>
-  `/anomalies?vue=toutes&key=${encodeURIComponent(`ecart|${ct}|${ressource}|${flag}`)}`;
+  anomalieLink(anomalieKey('ecart', ct, ressource, flag));
+
+/** Parties d'une clé d'anomalie d'écart (« ecart|CT|ressource|flag »), null pour une autre catégorie. */
+export function parseEcartKey(key: string): { ct: string; ressource: string; flag: string } | null {
+  const p = key.split('|');
+  return p.length === 4 && p[0] === 'ecart' ? { ct: p[1], ressource: p[2], flag: p[3] } : null;
+}
 
 /** Le résultat peut être affiché (aucun état d'AnalyseGate en cours). */
 export const isAnalyseShown = (a: UseAnalyse) =>

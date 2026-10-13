@@ -613,3 +613,224 @@ func TestAnomaliesErreurCTPartielle(t *testing.T) {
 		t.Errorf("sans réaffectation : %+v", as)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// EcartRow.Anomalies (DECISIONS n° 26)
+
+// checkRowKeys: chaque tuple a des clés non nulles, triées, sans doublon, et
+// chaque clé est celle d'une anomalie émise.
+func checkRowKeys(t *testing.T, rows []domain.EcartRow, as []domain.Anomalie) {
+	t.Helper()
+	emises := map[string]bool{}
+	for _, a := range as {
+		emises[a.Key] = true
+	}
+	for _, r := range rows {
+		if r.Anomalies == nil {
+			t.Errorf("%s %s %s : anomalies null", r.CT, r.Ressource, r.Semaine)
+			continue
+		}
+		for i, k := range r.Anomalies {
+			if i > 0 && r.Anomalies[i-1] >= k {
+				t.Errorf("%s %s %s : clés non triées / en double %v", r.CT, r.Ressource, r.Semaine, r.Anomalies)
+			}
+			if !emises[k] {
+				t.Errorf("%s %s %s : clé %s sans anomalie", r.CT, r.Ressource, r.Semaine, k)
+			}
+		}
+	}
+}
+
+// rowKeys runs the anomalies on rows and returns the keys of each row.
+func rowKeys(t *testing.T, includeInactive bool, rows ...domain.EcartRow) []string {
+	t.Helper()
+	res := domain.AnalyseResult{Ecarts: rows, Meta: domain.AnalyseMeta{IncludeInactive: includeInactive}}
+	as := (&run{}).anomalies(&res)
+	checkAnomalies(t, as)
+	checkRowKeys(t, res.Ecarts, as)
+	out := make([]string, len(res.Ecarts))
+	for i, r := range res.Ecarts {
+		out[i] = strings.Join(r.Anomalies, " ; ")
+	}
+	return out
+}
+
+func eqKeys(t *testing.T, what string, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("%s :\n got  %q\n want %q", what, got, want)
+	}
+}
+
+func TestAnomaliesRowKeysFlags(t *testing.T) {
+	k := func(ct, res string, f domain.Flag) string { return anomalieKey("ecart", ct, res, string(f)) }
+	sous := ectRow(ctA, "2026-W37", 35, 5, 0, domain.FlagSousImputation)
+	sous2 := ectRow(ctA, "2026-W38", 35, 10, 0, domain.FlagSousImputation)
+	sur := ectRow(ctB, "2026-W37", 10, 30, 0, domain.FlagSurImputation)
+	abs := ectRow(ctA2, "2026-W37", 14, 0, 0, domain.FlagAbsence)
+	hp := ectRow("Y99/F|1", "2026-W37", 0, 8, 0, domain.FlagHorsPlan)
+	hp.Ressource = "DUPONT Marc"
+	conf := ectRow(ctA, "2026-W39", 35, 35, 0, domain.FlagConforme)
+	got := rowKeys(t, false, sous, sous2, sur, abs, hp, conf)
+	eqKeys(t, "flags", got,
+		k(ctA, "MARTIN Théo", domain.FlagSousImputation),
+		k(ctA, "MARTIN Théo", domain.FlagSousImputation), // même anomalie regroupée sur deux semaines
+		k(ctB, "MARTIN Théo", domain.FlagSurImputation),
+		k(ctA2, "MARTIN Théo", domain.FlagAbsence),
+		"ecart|Y99_F_1|DUPONT Marc|hors_plan", // même keyPart que la clé de l'anomalie
+		"",                                    // conforme : []
+	)
+
+	// Inactive : aucune anomalie donc aucune clé, sauf hors plan ; include_inactive les rétablit.
+	for _, r := range []*domain.EcartRow{&sous, &hp} {
+		r.Inactive = true
+	}
+	eqKeys(t, "inactifs", rowKeys(t, false, sous, hp), "", "ecart|Y99_F_1|DUPONT Marc|hors_plan")
+	eqKeys(t, "include_inactive", rowKeys(t, true, sous, hp),
+		k(ctA, "MARTIN Théo", domain.FlagSousImputation), "ecart|Y99_F_1|DUPONT Marc|hors_plan")
+
+	// Recalcul : des clés d'un calcul précédent ne survivent pas.
+	rows := []domain.EcartRow{ectRow(ctA, "2026-W37", 35, 5, 0, domain.FlagSousImputation)}
+	rowKeys(t, false, rows...)
+	rows[0].Inactive = true
+	eqKeys(t, "recalcul", rowKeys(t, false, rows...), "")
+
+	// Sans tuple : rien à faire, pas de panique.
+	res := domain.AnalyseResult{}
+	(&run{}).anomalies(&res)
+}
+
+func TestAnomaliesRowKeysErreurCT(t *testing.T) {
+	ectB := anomalieKey("ecart", ctB, "MARTIN Théo", "erreur_ct")
+	// Erreur de CT pleine : les deux côtés citent l'anomalie unique du CT B.
+	eqKeys(t, "paire", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 12, 12, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 23, 12, domain.FlagErreurCT, ctB),
+	), ectB, ectB)
+
+	// Deux CT planifiés : chacun porte la clé du CT B.
+	eqKeys(t, "deux CT planifiés", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 20, 20, domain.FlagErreurCT, ctA2, ctA),
+		ectRow(ctA, "2026-W37", 35, 27, 8, domain.FlagErreurCT, ctB),
+		ectRow(ctA2, "2026-W37", 14, 2, 12, domain.FlagErreurCT, ctB),
+	), ectB, ectB, ectB)
+
+	// Deux CT imputés à tort : le CT planifié porte une clé par CT de cts_lies.
+	ectB2 := anomalieKey("ecart", ctA2, "MARTIN Théo", "erreur_ct")
+	eqKeys(t, "deux CT imputés à tort", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 10, 10, domain.FlagErreurCT, ctA),
+		ectRow(ctA2, "2026-W37", 0, 5, 5, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 20, 15, domain.FlagErreurCT, ctA2, ctB),
+	), ectB, ectB2, ectB+" ; "+ectB2)
+
+	// Reste partiel côté CT planifié : sa sous-imputation + l'erreur de CT liée.
+	eqKeys(t, "partiel planifié", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 10, 10, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 5, 10, domain.FlagSousImputation, ctB),
+	), ectB, anomalieKey("ecart", ctA, "MARTIN Théo", "sous_imputation")+" ; "+ectB) // triées : Y99F900010 < Y99F900011
+
+	// Reste partiel côté CT imputé à tort : sa sur-imputation + son erreur de CT.
+	eqKeys(t, "partiel imputé à tort", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 20, 12, domain.FlagSurImputation, ctA),
+		ectRow(ctA, "2026-W37", 35, 23, 12, domain.FlagErreurCT, ctB),
+	), ectB+" ; "+anomalieKey("ecart", ctB, "MARTIN Théo", "sur_imputation"), ectB)
+
+	// CT planifié resté conforme (part du transfert reçue) : non cité, [].
+	eqKeys(t, "planifié conforme", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 10, 10, domain.FlagErreurCT, ctA, ctA2),
+		ectRow(ctA, "2026-W37", 35, 25, 10, domain.FlagErreurCT, ctB),
+		ectRow(ctA2, "2026-W37", 14, 14, 0.5, domain.FlagConforme, ctB),
+	), ectB, ectB, "")
+
+	// Transfert sans erreur de CT dans la semaine : pas d'anomalie erreur_ct,
+	// chaque tuple ne porte que sa propre clé.
+	eqKeys(t, "semaine non résolue", rowKeys(t, false,
+		ectRow(ctB, "2026-W37", 0, 3, 3, domain.FlagSurImputation, ctA),
+		ectRow(ctA, "2026-W37", 35, 5, 3, domain.FlagSousImputation, ctB),
+	), anomalieKey("ecart", ctB, "MARTIN Théo", "sur_imputation"), anomalieKey("ecart", ctA, "MARTIN Théo", "sous_imputation"))
+
+	// Inactive sans include_inactive : aucune anomalie, aucune clé.
+	rows := []domain.EcartRow{
+		ectRow(ctB, "2026-W37", 0, 12, 12, domain.FlagErreurCT, ctA),
+		ectRow(ctA, "2026-W37", 35, 23, 12, domain.FlagErreurCT, ctB),
+	}
+	for i := range rows {
+		rows[i].Inactive = true
+	}
+	eqKeys(t, "inactive", rowKeys(t, false, rows...), "", "")
+	eqKeys(t, "include_inactive", rowKeys(t, true, rows...), ectB, ectB)
+}
+
+func TestAnomaliesRowKeysSeed(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	w := e.do("GET", "/api/analyse", nil)
+	res := decode[domain.AnalyseResult](t, w)
+	checkRowKeys(t, res.Ecarts, res.Anomalies)
+	if strings.Contains(w.Body.String(), `"anomalies":null`) {
+		t.Error("EcartRow.anomalies null dans le JSON")
+	}
+	cited := 0
+	for _, r := range res.Ecarts {
+		if r.Flag == domain.FlagConforme && len(r.Anomalies) != 0 {
+			t.Errorf("conforme avec clés : %+v", r)
+		}
+		if r.Ressource == "DURAND Claire" && r.CT == "Y99F90001" &&
+			strings.Join(r.Anomalies, ",") != "ecart|Y99F90001|DURAND Claire|sur_imputation" {
+			t.Errorf("DURAND Claire : %v", r.Anomalies)
+		}
+		cited += len(r.Anomalies)
+	}
+	if cited == 0 {
+		t.Error("aucun tuple ne cite d'anomalie")
+	}
+}
+
+// CT à risque (DECISIONS n° 23) : le montant est celui des provisions pour aléas.
+func TestAnomaliesCTRisqueAleas(t *testing.T) {
+	res := domain.AnalyseResult{Alertes: domain.Alertes{CTRisque: []domain.AlerteCT{{CT: "CT1", CTLibelle: "Socle", NonSecurise: 25000}}}}
+	as := (&run{s: domain.Settings{SeuilCTRisqueEur: 10000}}).anomalies(&res)
+	if len(as) != 1 {
+		t.Fatalf("%+v", as)
+	}
+	a := as[0]
+	if a.Key != "ct_risque|CT1" || *a.Montant != 25000 || a.Fingerprint != fingerprint(fpE(25000)) ||
+		a.Titre != "CT à risque · CT1 : "+fmtEur(25000)+" de provisions pour aléas" ||
+		a.Detail != fmtEur(25000)+" de provisions pour aléas (non sécurisées) sur le CT, au-delà du seuil de "+fmtEur(10000) {
+		t.Errorf("ct_risque : %+v", a)
+	}
+}
+
+// Atterrissage sécurisé (DECISIONS n° 23) : la part des provisions sécurisées est
+// citée, sans changer l'empreinte.
+func TestAnomaliesBudgetProvisionsSecurisees(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	st := func(v domain.PrevisionStatut) *domain.PrevisionStatut { return &v }
+	env := &domain.Enveloppe{DateDebut: "2026-01-01", DateFin: "2026-12-31", Montant: 10000}
+	p := domain.PrevisionCT{CT: "CT1", Budget: f(10000), AtterrissagePlan: 12500, AtterrissageTendance: 11000,
+		EcartPlan: f(2500), EcartTendance: f(1000), Statut: st(domain.PrevisionDepassement), Enveloppe: env}
+	res := domain.AnalyseResult{Previsions: domain.Previsions{ParCT: []domain.PrevisionCT{p}}}
+	before := (&run{}).anomalies(&res)[0]
+	res.Previsions.ParCT[0].ProvisionsSecurisees = 3000
+	res.Previsions.ParCT[0].ProvisionsHorsEnveloppe = 700
+	a := (&run{}).anomalies(&res)[0]
+	if a.Detail != "Atterrissage prévu "+fmtEur(12500)+" (dont "+fmtEur(3000)+" de provisions sécurisées) pour une enveloppe de "+
+		fmtEur(10000)+" (01/01/2026 → 31/12/2026) (tendance "+fmtEur(11000)+") · "+fmtEur(700)+" de provisions sécurisées hors enveloppe" {
+		t.Errorf("détail : %q", a.Detail)
+	}
+	if a.Fingerprint != before.Fingerprint {
+		t.Error("empreinte changée par le seul détail")
+	}
+
+	// Sous-consommation : « par le plan de charge et les provisions sécurisées ».
+	sc := domain.PrevisionCT{CT: "CT2", Budget: f(10000), BudgetEcheance: f(10000), NonConsomme: f(4000),
+		ProjectionPlanEcheance: 6000, ProjectionTendanceEcheance: 6500, ProvisionsSecurisees: 1000, RythmeHebdo: 500,
+		RythmeNecessaire: f(800), Echeance: "2026-12-31", Enveloppe: env, SousConsommation: true}
+	a = sousConsoAnomalie(sc)
+	if a.Titre != "Sous-consommation · CT2 : "+fmtEur(4000)+" non consommés par le plan de charge et les provisions sécurisées à la fin de l'enveloppe, le 31/12/2026 (40 %)" ||
+		a.Detail != "Enveloppe "+fmtEur(10000)+" (01/01/2026 → 31/12/2026) ; atterrissage plan "+fmtEur(6000)+" (dont "+fmtEur(1000)+
+			" de provisions sécurisées) (tendance "+fmtEur(6500)+", repère) ; il faudrait "+fmtEur(800)+"/sem contre "+fmtEur(500)+"/sem" ||
+		a.Fingerprint != fingerprint(fpE(10000), fpE(6000)) {
+		t.Errorf("sous-consommation : %q / %q", a.Titre, a.Detail)
+	}
+}

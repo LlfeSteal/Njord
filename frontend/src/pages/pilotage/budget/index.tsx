@@ -1,5 +1,5 @@
 // Pilotage « Budget » (/budget) : consommation et atterrissage par CT, détail dans l'inspecteur (?ct=).
-// Chiffres d'enveloppe, carte, tableau et inspecteur suivent le filtre d'année (DECISIONS n° 24) ; analyse par nature,
+// Chiffres d'enveloppe, répartition de l'atterrissage, carte, tableau et inspecteur suivent le filtre d'année (DECISIONS n° 24, 30) ; analyse par nature,
 // main-d'œuvre et repli de la classification restent « Toutes années ».
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -58,6 +58,7 @@ import {
 import { BudgetCell, Consumption, CtLabel, Reste, RowGlyph } from './cells';
 import EnveloppesCard from './EnveloppesCard';
 import NatureBars from './NatureBars';
+import RepartitionDonut from './RepartitionDonut';
 import { mergeCtRows, sumOf, type CtRow } from './model';
 import '../shared/pilotage.css';
 
@@ -667,6 +668,7 @@ export default function BudgetPage() {
             <PrevisionsError prev={prev} />
             <div className="pil-content" aria-busy={prev.isPlaceholder || undefined}>
               <BudgetMetrics result={result} fc={fc} />
+              {fc && hasEnveloppe(fc.global) && <RepartitionDonut g={fc.global} annee={annee} />}
               {fc && env && env.nb_configures > 0 ? (
                 <EnveloppesCard synthese={env} parCt={fc.par_ct} onOpen={setCt} annee={annee} />
               ) : (

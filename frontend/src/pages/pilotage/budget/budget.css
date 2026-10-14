@@ -2,3 +2,113 @@
 .pil-budget--none {
   color: var(--text-secondary);
 }
+
+/* Répartition de l'atterrissage (DECISIONS n° 30) : anneau + légende chiffrée. Empilée sous 480 px. */
+.budget-repartition {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  min-width: 0;
+}
+.budget-repartition__donut {
+  position: relative;
+  flex: none;
+  width: 156px;
+  height: 156px;
+}
+/* Pas de contour de focus au clic : règle globale `.recharts-wrapper` (styles/theme.css). */
+.budget-repartition__donut svg {
+  user-select: none;
+}
+.budget-repartition__total {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.budget-repartition__total-value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.budget-repartition__total-label {
+  max-width: 96px;
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.budget-repartition__legend {
+  flex: 1;
+  min-width: 0;
+  max-width: 520px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.budget-repartition__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  border-radius: 8px;
+  transition: background 0.15s var(--ease), opacity 0.15s var(--ease);
+}
+.budget-repartition__item[data-active] {
+  background: var(--fill);
+}
+.budget-repartition__item[data-dimmed] {
+  opacity: 0.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  .budget-repartition__item {
+    transition: none;
+  }
+}
+.budget-repartition__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.budget-repartition__dot[data-kind='mo'] {
+  background: var(--budget-mo);
+}
+.budget-repartition__dot[data-kind='securisees'] {
+  background: var(--budget-prov-secured);
+}
+.budget-repartition__dot[data-kind='aleas'] {
+  background: var(--budget-prov-risk);
+}
+.budget-repartition__item-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.budget-repartition__item-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.budget-repartition__item-value {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.budget-repartition__item-pct {
+  width: 52px;
+  text-align: right;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 480px) {
+  .budget-repartition {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .budget-repartition__donut {
+    align-self: center;
+  }
+}

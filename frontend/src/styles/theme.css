@@ -60,6 +60,10 @@
   --risk-unspent: #d9480f;
   --budget-secured: var(--green);
   --budget-unsecured: var(--orange);
+  /* Répartition de l'atterrissage (DECISIONS n° 30) : main-d'œuvre, provisions sécurisées, provisions à risque. */
+  --budget-mo: var(--green);
+  --budget-prov-secured: var(--blue);
+  --budget-prov-risk: var(--red);
   /* Période non couverte par le plan de charge (DECISIONS n° 13) : hachure neutre, jamais une couleur de flag. */
   --uncovered: color-mix(in srgb, var(--gray) 22%, transparent);
   --uncovered-hatch: repeating-linear-gradient(
@@ -152,6 +156,16 @@ p {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 6px;
+}
+/* Graphiques recharts : le clic focalise le SVG ou une part (secteur, barre) et le navigateur y trace son contour de
+   focus (`-webkit-focus-ring-color auto`) en grand rectangle. Aucun graphique ne se pilote au clavier : pas de contour. */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-wrapper:focus,
+.recharts-wrapper :focus,
+.recharts-wrapper :focus-visible {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
 }
 ::selection {
   background: var(--accent-tint);

@@ -3,10 +3,10 @@
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, GroupedList, Link, ListRow, Metric, Page, PageToolbar, ProgressBar, StatusGlyph } from '../../../ui';
 import type { AnalyseResult, PrevisionCT, Previsions } from '../../../api/types';
-import { fmtDate, fmtEur, fmtPct } from '../../../lib/format';
+import { fmtEur, fmtPct } from '../../../lib/format';
 import { EnveloppesOverviewChart } from '../shared/charts';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag, UncoveredNote } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, ReferenceText, UncoveredNote } from '../shared/ContextControl';
 import PeriodeControl, { PrevisionsError } from '../shared/PeriodeControl';
 import { usePrevisions } from '../shared/usePrevisions';
 import {
@@ -24,7 +24,7 @@ import {
 } from '../shared/pilotage';
 import '../shared/pilotage.css';
 
-/** Avancement attendu à date (plan cumulé à l'arrêté ÷ Σ enveloppes), en %. */
+/** Avancement attendu à la référence (plan cumulé à la semaine d'as_of ÷ Σ enveloppes, DECISIONS n° 31), en %. */
 function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
   if (!p.budget) return undefined;
   const pt = p.series.find((s) => s.week === asOfWeek);
@@ -192,7 +192,8 @@ export default function OverviewPage() {
   const a = useAnalyse();
   const prev = usePrevisions();
   const r = a.result.data;
-  const asOf = r?.previsions?.as_of;
+  // Date de référence (DECISIONS n° 31) : celle des prévisions « Tout », indépendante du filtre d'année.
+  const ref = r?.previsions?.as_of ? r.previsions : null;
   return (
     <Page
       toolbar={
@@ -201,7 +202,7 @@ export default function OverviewPage() {
           subtitle={
             r && (
               <>
-                {asOf ? `Données arrêtées au ${fmtDate(asOf)}` : `${r.budget.par_ct.length} CT`}{' '}
+                {ref ? <ReferenceText fc={ref} /> : `${r.budget.par_ct.length} CT`}{' '}
                 <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )

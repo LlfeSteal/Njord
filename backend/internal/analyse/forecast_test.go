@@ -208,6 +208,7 @@ func checkTri(t *testing.T, par []domain.PrevisionCT) {
 
 func TestPrevisionsDemo(t *testing.T) {
 	in := demoInput(t)
+	refApresRealise(&in) // plan en effet au lendemain du dernier réalisé (DECISIONS n° 31)
 	res := Run(in, store.DefaultSettings())
 	pv := res.Previsions
 
@@ -275,6 +276,40 @@ func fcEntry(ct string, eur float64, date string) domain.RealiseEntry {
 	return e
 }
 
+// refPlan makes ref the reference date (DECISIONS n° 31) without changing the
+// plan : la dernière version de in.Plans est dédoublée en une version de même
+// contenu en effet à ref (ses lignes aux dates valides, coupées à ref par la
+// timeline), la timeline couvre donc toujours tout le plan.
+func refPlan(in *Input, ref string) {
+	if len(in.Plans) == 0 {
+		return
+	}
+	src := in.Plans[len(in.Plans)-1]
+	v := src.Version
+	v.ID, v.DateEffet = v.ID+"-ref", ref
+	var lines []domain.PlanLine
+	for _, l := range src.Lines {
+		if d, f := day(l.DateDebut), day(l.DateFin); d != "" && f >= d {
+			lines = append(lines, l)
+		}
+	}
+	in.Plans = append(in.Plans, PlanSource{Version: v, Lines: lines})
+}
+
+// refApresRealise: date de référence = lendemain du dernier réalisé (as_of =
+// dernier réalisé, comme avant le n° 31).
+func refApresRealise(in *Input) {
+	last := ""
+	for _, e := range in.Entries {
+		if d := day(e.DateDepense); e.StatutParsing != domain.ParsingDrop && d > last {
+			last = d
+		}
+	}
+	if last != "" {
+		refPlan(in, addDays(last, 1))
+	}
+}
+
 func findCT(t *testing.T, pv domain.Previsions, ct string) domain.PrevisionCT {
 	t.Helper()
 	for _, p := range pv.ParCT {
@@ -309,6 +344,7 @@ func TestPrevisionsSynthetique(t *testing.T) {
 		fcEntry("E", 2000, "2026-09-22"), // W39
 		fcEntry("X", 300, "2026-10-03"),  // CT hors plan, as_of
 	}
+	refApresRealise(&in) // date de référence 04/10 (DECISIONS n° 31)
 	pv := Run(in, store.DefaultSettings()).Previsions
 	if pv.AsOf != "2026-10-03" || pv.AsOfWeek != "2026-W40" {
 		t.Fatalf("as_of = %q / %q", pv.AsOf, pv.AsOfWeek)
@@ -373,6 +409,7 @@ func TestPrevisionsTendance(t *testing.T) {
 	for _, d := range []string{"2026-09-14", "2026-09-21", "2026-09-28", "2026-10-02"} {
 		in.Entries = append(in.Entries, fcEntry("T", 2000, d))
 	}
+	refApresRealise(&in) // date de référence 03/10 : rythme sur [05/09, 02/10]
 	pv := Run(in, s).Previsions
 	p := findCT(t, pv, "T")
 	// W38..W40 consommées (4 écritures, W40 deux fois) : 8 000 € ; rythme = 8 000 / 4 = 2 000 ; 6 semaines restantes.
@@ -395,6 +432,8 @@ func TestPrevisionsTendance(t *testing.T) {
 	for _, d := range []string{"2026-10-06", "2026-10-13", "2026-10-20", "2026-10-30"} {
 		in.Entries = append(in.Entries, fcEntry("T", 1750, d))
 	}
+	in.Plans = in.Plans[:1]
+	refApresRealise(&in) // date de référence 31/10
 	p = findCT(t, Run(in, s).Previsions, "T")
 	if p.AtterrissagePlan != 9000 || p.RythmeHebdo != 1750 || p.SemainesRestantes != 2 || p.AtterrissageTendance != 10500 ||
 		fs(p.Statut) != domain.PrevisionVigilance {
@@ -408,8 +447,9 @@ func TestPrevisionsSansRealise(t *testing.T) {
 	in.Enveloppes = map[string]domain.Enveloppe{"A": fcEnv("2026-09-07", "2026-09-18", 2000)}
 	s := store.DefaultSettings()
 	pv := Run(in, s).Previsions
-	if pv.AsOf != "" || pv.AsOfWeek != "" {
-		t.Fatalf("as_of = %q", pv.AsOf)
+	// Sans réalisé, la date de référence reste la date d'effet du plan (DECISIONS n° 31).
+	if pv.DateReference != "2026-09-07" || pv.AsOf != "2026-09-06" || pv.AsOfWeek != "2026-W36" || pv.DernierRealise != "" {
+		t.Fatalf("référence = %q, as_of = %q / %q, dernier réalisé %q", pv.DateReference, pv.AsOf, pv.AsOfWeek, pv.DernierRealise)
 	}
 	gl := pv.Global
 	if gl.Consomme != 0 || gl.ResteAFaire != 2000 || gl.AtterrissagePlan != 2000 || gl.AtterrissageTendance != 0 ||
@@ -417,7 +457,7 @@ func TestPrevisionsSansRealise(t *testing.T) {
 		fs(gl.Statut) != domain.PrevisionVigilance || fv(gl.NonConsomme) != 0 || gl.SousConsommation {
 		t.Errorf("global = %+v", gl)
 	}
-	checkInvariants(t, gl, "")
+	checkInvariants(t, gl, pv.AsOf)
 	checkBudget(t, gl, s)
 
 	// Ni plan ni réalisé : structures vides mais jamais nil, global sans budget.
@@ -501,6 +541,7 @@ func TestPrevisionsProvisions(t *testing.T) {
 		fcEntry("X", 300, "2026-10-03"), // hors plan
 	}
 	in.Enveloppes = map[string]domain.Enveloppe{"D": fcEnv("2026-09-01", "2026-12-31", 1000)}
+	refApresRealise(&in)
 	s := store.DefaultSettings()
 	sans := Run(in, s).Previsions
 
@@ -605,6 +646,7 @@ func TestPrevisionsEcheance(t *testing.T) {
 	horsPeriode := provLine("S", "CAPACITE SUR SITE", "Proj > S", 3000)
 	horsPeriode.DateDebut, horsPeriode.DateFin = "2027-01-15", "2027-01-31"
 	in.Provisions = []domain.ProvisionLine{horsPeriode, provLine("S", "PROVISIONS POUR ALEAS", "Proj > S", 5000)}
+	refApresRealise(&in) // date de référence 03/10
 	res := Run(in, s)
 	pv := res.Previsions
 	if pv.AsOf != "2026-10-02" {
@@ -710,6 +752,7 @@ func TestPrevisionsEcheancePassee(t *testing.T) {
 	onePlan(&in, fcLine("S", 0, 10000, "2026-09-07", "2026-11-13", "FRAIS"))
 	in.Entries = []domain.RealiseEntry{fcEntry("S", 500, "2026-09-08"), fcEntry("S", 1500, "2026-10-02")}
 	in.Enveloppes = map[string]domain.Enveloppe{"S": fcEnv("2026-09-07", "2026-09-20", 2000)} // W37..W38 < as_of W40
+	refApresRealise(&in)
 	pv := Run(in, s).Previsions
 	p := findCT(t, pv, "S")
 	// Consommé de la période = 500 € (1 500 € après la fin) ; le reste (1 500 €) est perdu, sous les 5 000 €.
@@ -801,7 +844,8 @@ func fcPoint(t *testing.T, p domain.PrevisionCT, w string) domain.PrevisionPoint
 	return domain.PrevisionPoint{}
 }
 
-// enveloppesScenario: as_of 01/10/2026 (W40), semaines pleines.
+// enveloppesScenario: dernier réalisé 01/10/2026 (W40), semaines pleines ; plan
+// en effet au lundi suivant (date de référence 05/10, as_of 04/10, DECISIONS n° 31).
 //   - A : enveloppe couvrante 8 000 € en dépassement, 1 500 € planifiés en 2027 ;
 //   - B : enveloppe W37..W44 de 30 000 € en sous-consommation, réalisé et plan hors période ;
 //   - C : sans enveloppe (aucun budget) ;
@@ -839,6 +883,7 @@ func enveloppesScenario() (Input, domain.Settings) {
 		"Z": fcEnv("2026-01-01", "2026-12-31", 0),
 		"Q": fcEnv("2026-01-01", "2026-12-31", 99999),
 	}
+	refPlan(&in, "2026-10-05")
 	return in, s
 }
 
@@ -846,8 +891,8 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 	in, s := enveloppesScenario()
 	res := Run(in, s)
 	pv := res.Previsions
-	if pv.AsOf != "2026-10-01" || pv.AsOfWeek != "2026-W40" {
-		t.Fatalf("as_of = %q / %q", pv.AsOf, pv.AsOfWeek)
+	if pv.DateReference != "2026-10-05" || pv.AsOf != "2026-10-04" || pv.AsOfWeek != "2026-W40" || pv.DernierRealise != "2026-10-01" {
+		t.Fatalf("référence %q, as_of = %q / %q, dernier réalisé %q", pv.DateReference, pv.AsOf, pv.AsOfWeek, pv.DernierRealise)
 	}
 	for _, p := range append(pv.ParCT, pv.Global) {
 		checkInvariants(t, p, pv.AsOf)
@@ -1124,9 +1169,10 @@ func TestPrevisionsNonConsommePlanSeul(t *testing.T) {
 		"V": fcEnv("2026-09-01", "2026-12-31", 20000),
 		"W": fcEnv("2026-09-01", "2026-12-31", 6000),
 	}
+	refPlan(&in, "2026-10-05") // plan en effet au lundi qui suit le dernier réalisé (DECISIONS n° 31)
 	res := Run(in, s)
 	pv := res.Previsions
-	if pv.AsOf != "2026-10-01" {
+	if pv.AsOf != "2026-10-04" {
 		t.Fatalf("as_of = %q", pv.AsOf)
 	}
 	for _, p := range append(pv.ParCT, pv.Global) {

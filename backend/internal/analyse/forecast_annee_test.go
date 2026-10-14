@@ -121,7 +121,8 @@ func TestBudgetClassificationEnveloppe(t *testing.T) {
 	}
 }
 
-// anneeScenario: as_of 01/10/2026 (W40), sans fériés ni semaine verrouillée.
+// anneeScenario: dernier réalisé 01/10/2026 (W40), plan en effet au lundi suivant
+// (date de référence 05/10, as_of 04/10, DECISIONS n° 31), sans fériés ni semaine verrouillée.
 //   - Y : enveloppe 01/07/2026 → 30/06/2027 (365 j, 36 500 €) à cheval sur 2026 / 2027 ;
 //     plan 1 000 €/sem. de 2026-W28 à 2027-W25 + 2 000 € en 2027-W27..W28 (hors période) ;
 //   - Z : enveloppe 2026 seule ; N : sans enveloppe, en 2026 et 2027 ; O : plan 2025 seul.
@@ -153,6 +154,7 @@ func anneeScenario() (Input, domain.Settings) {
 		provDated("Y", "PROVISIONS POUR ALEAS", 2000, "2026-11-02", ""),
 		provDated("Y", "CAPACITE SUR SITE", 400, "2027-08-01", ""), // hors période, en 2027
 	}
+	refPlan(&in, "2026-10-05")
 	return in, s
 }
 
@@ -292,10 +294,21 @@ func TestPrevisionsAnnees(t *testing.T) {
 	if a := Run(in, s).Previsions.Annees; !reflect.DeepEqual(a, []int{2026, 2027, 2028}) {
 		t.Errorf("annees = %v", a)
 	}
-	// as_of en 2027 : on part de 2027.
-	in.Entries = []domain.RealiseEntry{fcEntry("A", 10, "2027-02-10")}
+	// Date de référence en 2027 (DECISIONS n° 31 : plan réactualisé en effet au
+	// 01/02/2027) : on part de 2027, quel que soit le réalisé.
+	plan := in.Plans
+	reprev := PlanSource{Version: domain.Version{ID: "plan2027", Kind: domain.KindPlan, DateEffet: "2027-02-01"},
+		Lines: []domain.PlanLine{fcLine("A", 0, 1000, "2027-02-01", "2027-02-05", "FRAIS")}}
+	in.Plans = append(plan, reprev)
+	in.Entries = []domain.RealiseEntry{fcEntry("A", 10, "2026-09-10")}
 	if a := Run(in, s).Previsions.Annees; !reflect.DeepEqual(a, []int{2027, 2028}) {
-		t.Errorf("annees (as_of 2027) = %v", a)
+		t.Errorf("annees (référence 2027) = %v", a)
+	}
+	// Réalisé en 2027 mais plan en effet en 2026 : on part de 2026.
+	in.Plans = plan
+	in.Entries = []domain.RealiseEntry{fcEntry("A", 10, "2027-02-10")}
+	if a := Run(in, s).Previsions.Annees; !reflect.DeepEqual(a, []int{2026, 2027, 2028}) {
+		t.Errorf("annees (référence 2026) = %v", a)
 	}
 	// Année ISO : le 03/01/2027 appartient à 2026-W53.
 	in.Entries = nil
@@ -303,8 +316,8 @@ func TestPrevisionsAnnees(t *testing.T) {
 	if a := Run(in, s).Previsions.Annees; !reflect.DeepEqual(a, []int{2026}) {
 		t.Errorf("annees (fin 03/01/2027) = %v", a)
 	}
-	// Toutes les enveloppes finies avant l'année d'as_of : aucune année proposée.
-	in.Entries = []domain.RealiseEntry{fcEntry("A", 10, "2027-02-10")}
+	// Toutes les enveloppes finies avant l'année de la date de référence : aucune année proposée.
+	in.Plans = append(plan, reprev)
 	in.Enveloppes = map[string]domain.Enveloppe{"A": fcEnv("2026-01-01", "2026-06-30", 1)}
 	if a := Run(in, s).Previsions.Annees; a == nil || len(a) != 0 {
 		t.Errorf("enveloppes passées : %v", a)

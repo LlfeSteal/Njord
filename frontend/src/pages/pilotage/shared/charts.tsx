@@ -4,6 +4,8 @@
 // Semaines non couvertes par le plan de charge (DECISIONS n° 13) : hachure neutre + entrée de légende.
 // Projection = atterrissage sécurisé : plan de charge restant + provisions sécurisées (DECISIONS n° 23).
 // Bulle de chaque semaine : ETP planifiés (`series[].etp`, DECISIONS n° 25).
+// Repère vertical « Référence JJ/MM » à la semaine d'`as_of` (veille de la date d'effet du dernier plan, DECISIONS n° 31) :
+// les projections en partent, le réel continue au-delà jusqu'au dernier réalisé importé (suivi, hors atterrissage).
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
   Area,
@@ -23,7 +25,7 @@ import {
 import type { Couverture, PrevisionCT, PrevisionPoint, Previsions } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
 import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
-import { fmtEtp, fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
+import { fmtDayMonth, fmtEtp, fmtEurShort, fmtEurSigned, REALISE_DEPUIS_REF_LABEL, useTokenColors, weekShort } from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -143,6 +145,13 @@ function etpRow(etp: number | null | undefined): { label: string; value: string 
   return typeof etp === 'number' && Number.isFinite(etp) ? [{ label: 'ETP planifiés', value: fmtEtp(etp) }] : [];
 }
 
+/** Libellé du repère de la date de référence (DECISIONS n° 31) : « Référence 01/10 », « Référence » sans date. */
+const referenceMark = (dateReference: string | null | undefined) =>
+  dateReference ? `Référence ${fmtDayMonth(dateReference)}` : 'Référence';
+
+/** Mention de bulle d'une semaine après la référence qui porte du réel (DECISIONS n° 31). */
+const AFTER_REF_NOTE = `${REALISE_DEPUIS_REF_LABEL} : suivi, hors atterrissage`;
+
 /** Suite de semaines consécutives non couvertes, en pas d'axe autour de la zone à hachurer. */
 interface UncoveredRun {
   x1: string;
@@ -240,8 +249,8 @@ const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 // ------------------------------------------------------------------ Trajectoire vers l'enveloppe (DECISIONS n° 20)
 // Une question : l'enveloppe sera-t-elle consommée en entier, sans surconsommation ? Axe = période de l'enveloppe
 // (périmètre : union des périodes ; année choisie : la tranche de l'année, DECISIONS n° 24), zone cible
-// [cible_min, enveloppe], ligne d'enveloppe, éventail projection sécurisée ↔ tendance, réalisé jusqu'à
-// « Aujourd'hui » et point d'arrivée sur la projection sécurisée (plan de charge + provisions sécurisées,
+// [cible_min, enveloppe], ligne d'enveloppe, éventail projection sécurisée ↔ tendance partant de la « Référence »
+// (DECISIONS n° 31), réalisé jusqu'au dernier réalisé importé et point d'arrivée sur la projection sécurisée (plan de charge + provisions sécurisées,
 // DECISIONS n° 23), glyphé et libellé selon le statut.
 
 const FORECAST_SERIES: ChartSeries[] = [
@@ -380,8 +389,10 @@ interface AreaLabelProps {
 export interface ForecastChartProps {
   /** Prévision d'un CT avec enveloppe, ou du périmètre des enveloppes (`ct` = ''). Sans budget : rien n'est rendu. */
   prevision: PrevisionCT;
-  /** Semaine de l'arrêté des données (repère « Aujourd'hui »). */
+  /** Semaine d'`as_of`, veille de la date de référence (repère « Référence », départ des projections, DECISIONS n° 31). */
   asOfWeek: string;
+  /** Date de référence (`Previsions.date_reference`) : libellé du repère « Référence 01/10 ». */
+  dateReference?: string;
   height?: number;
   /** Légende HTML sous le graphique (défaut : sauf en format compact). */
   legend?: boolean;
@@ -390,7 +401,7 @@ export interface ForecastChartProps {
 }
 
 /** Trajectoire cumulée vers l'enveloppe : zone cible, enveloppe, réalisé, éventail plan ↔ tendance, point d'arrivée. */
-export function ForecastChart({ prevision, asOfWeek, height = 260, legend, annee = 0 }: ForecastChartProps) {
+export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260, legend, annee = 0 }: ForecastChartProps) {
   const c = useTokenColors(FORECAST_TOKENS);
   const budget = prevision.budget;
   const series = budget == null ? [] : trajectoryOf(prevision);
@@ -487,20 +498,23 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend, annee
     );
   };
 
-  const tooltipNote = (d: TrajPoint) => (d.extension ? 'Après la fin du plan : projections seules' : couvertureNote(d.couverture));
+  const tooltipNote = (d: TrajPoint) =>
+    d.extension
+      ? 'Après la fin du plan : projections seules'
+      : (couvertureNote(d.couverture) ?? (d.week > asOfWeek && d.reel_cumul != null ? AFTER_REF_NOTE : null));
   const tooltipExtra = (d: TrajPoint) => [
     ...etpRow(d.etp),
     ...(d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []),
   ];
   const legendSeries = [...FORECAST_SERIES, ...(hasZone ? [TARGET_SERIES] : []), OVER_SERIES];
-  // « Aujourd'hui » sur la dernière semaine (enveloppe terminée) : marge pour que son libellé centré ne soit pas coupé.
+  // « Référence » sur la dernière semaine (enveloppe terminée) : marge pour que son libellé centré ne soit pas coupé.
   const todayAtEnd = hasToday && last.week === asOfWeek;
   const lineProps = { type: 'monotone' as const, dot: false, connectNulls: false, isAnimationActive: false };
 
   return (
     <div>
       <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={series} margin={{ top: 20, right: todayAtEnd && !compact ? 36 : 12, bottom: 0, left: 0 }}>
+        <ComposedChart data={series} margin={{ top: 20, right: todayAtEnd && !compact ? 48 : 12, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           <ReferenceArea y1={budget} y2={yMax} fill={c['--danger']} fillOpacity={0.06} ifOverflow="hidden" />
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
@@ -540,7 +554,7 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend, annee
               x={asOfWeek}
               stroke={c['--text-secondary']}
               strokeWidth={1}
-              label={compact ? undefined : { value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
+              label={compact ? undefined : { value: referenceMark(dateReference), position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
           <Area dataKey="fan" type="monotone" stroke="none" fill={c['--blue']} fillOpacity={0.15} activeDot={false} connectNulls={false} isAnimationActive={false} />
@@ -557,8 +571,8 @@ export function ForecastChart({ prevision, asOfWeek, height = 260, legend, annee
 
 // ------------------------------------------------------------------ Vue d'ensemble : Σ enveloppes (DECISIONS n° 20)
 // Σ des enveloppes actives chaque semaine (lissée), face à la consommation cumulée du périmètre des enveloppes :
-// réalisé jusqu'à « Aujourd'hui », puis projection sécurisée (plan de charge + provisions sécurisées, DECISIONS n° 23)
-// en pointillé. Année choisie (DECISIONS n° 24) : tranches de l'année, montants au prorata.
+// réalisé jusqu'au dernier réalisé importé, projection sécurisée (plan de charge + provisions sécurisées, DECISIONS n° 23)
+// en pointillé à partir de la « Référence » (DECISIONS n° 31). Année choisie (DECISIONS n° 24) : tranches de l'année, montants au prorata.
 
 const OVERVIEW_SERIES: ChartSeries[] = [
   { key: 'env', label: 'Σ enveloppes actives', token: '--text-secondary', shape: 'line' },
@@ -651,6 +665,7 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
                 series={OVERVIEW_SERIES.filter((s) => s.key !== 'env')}
                 format={(v) => fmtEur(v)}
                 title={(d) => fmtWeek(d.week)}
+                note={(d) => (d.week > previsions.as_of_week && d.reel_cumul != null ? AFTER_REF_NOTE : null)}
                 extra={(d) => [{ label: 'Σ enveloppes actives', value: fmtEur(d.envRaw) }, ...etpRow(d.etp)]}
               />
             }
@@ -672,7 +687,7 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
               x={previsions.as_of_week}
               stroke={c['--text-secondary']}
               strokeWidth={1}
-              label={{ value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
+              label={{ value: referenceMark(previsions.date_reference), position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
           <Line dataKey="plan_cumul" {...lineProps} stroke={c['--blue']} strokeDasharray="4 3" strokeWidth={2} activeDot={{ r: 3 }} />
@@ -693,8 +708,21 @@ const LOAD_SERIES: ChartSeries[] = [
 
 const LOAD_TOKENS = ['--blue', '--text-secondary', '--separator', '--fill'] as const;
 
-/** Heures par semaine : passé = réalisé (plein), à venir = plan (piste), repère « Aujourd'hui » ; ETP planifiés en bulle. */
-export function LoadChart({ series, asOfWeek, height = 200 }: { series: PrevisionPoint[]; asOfWeek: string; height?: number }) {
+/**
+ * Heures par semaine : jusqu'à la référence = réalisé (plein) ; après = plan (piste), avec le réalisé importé depuis la
+ * reprev (plein) posé sur sa piste (DECISIONS n° 31) ; repère « Référence » ; ETP planifiés en bulle.
+ */
+export function LoadChart({
+  series,
+  asOfWeek,
+  dateReference,
+  height = 200,
+}: {
+  series: PrevisionPoint[];
+  asOfWeek: string;
+  dateReference?: string;
+  height?: number;
+}) {
   const c = useTokenColors(LOAD_TOKENS);
   const hatch = useTokenColors(HATCH_TOKENS);
   const patternId = usePatternId();
@@ -703,7 +731,7 @@ export function LoadChart({ series, asOfWeek, height = 200 }: { series: Previsio
     week: p.week,
     couverture: p.couverture,
     etp: p.etp,
-    passe: p.week <= asOfWeek ? (p.heures_reel ?? 0) : null,
+    passe: p.week <= asOfWeek ? (p.heures_reel ?? 0) : p.heures_reel,
     avenir: p.week > asOfWeek ? p.heures_plan : null,
   }));
   const hasToday = data.some((p) => p.week === asOfWeek);
@@ -716,17 +744,19 @@ export function LoadChart({ series, asOfWeek, height = 200 }: { series: Previsio
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           {uncoveredAreas(runs, patternId)}
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
+          {/* Axe jumeau masqué : la piste du plan et le réalisé se superposent dans la même bande (pas côte à côte). */}
+          <XAxis xAxisId="track" dataKey="week" hide />
           <YAxis {...AXIS} width={56} tick={tick} tickFormatter={(v: number) => fmtHours(v)} />
           <RTooltip
             cursor={{ fill: c['--fill'] }}
             wrapperStyle={{ outline: 'none' }}
             isAnimationActive={false}
             content={
-              <ChartTooltip<{ week: string; couverture?: Couverture; etp?: number }>
+              <ChartTooltip<{ week: string; couverture?: Couverture; etp?: number; passe: number | null }>
                 series={LOAD_SERIES}
                 format={fmtHours}
                 title={(d) => fmtWeek(d.week)}
-                note={(d) => couvertureNote(d.couverture)}
+                note={(d) => couvertureNote(d.couverture) ?? (d.week > asOfWeek && d.passe != null ? AFTER_REF_NOTE : null)}
                 extra={(d) => etpRow(d.etp)}
               />
             }
@@ -735,11 +765,11 @@ export function LoadChart({ series, asOfWeek, height = 200 }: { series: Previsio
             <ReferenceLine
               x={asOfWeek}
               stroke={c['--text-secondary']}
-              label={{ value: 'Aujourd’hui', position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
+              label={{ value: referenceMark(dateReference), position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
-          <Bar dataKey="passe" stackId="h" fill={c['--blue']} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
-          <Bar dataKey="avenir" stackId="h" fill={c['--blue']} fillOpacity={0.3} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
+          <Bar dataKey="avenir" xAxisId="track" fill={c['--blue']} fillOpacity={0.3} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
+          <Bar dataKey="passe" fill={c['--blue']} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
       <ChartLegend series={runs.length > 0 ? [...LOAD_SERIES, UNCOVERED_SERIES] : LOAD_SERIES} />

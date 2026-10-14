@@ -657,10 +657,13 @@ type PrevisionCT struct {
 	// seuil_sous_conso_eur), plancher 0 ; null sans budget.
 	CibleMin *float64 `json:"cible_min"`
 	// Enveloppe (DECISIONS n° 19) : tout le prévisionnel porte sur [date_debut, date_fin].
-	Enveloppe             *Enveloppe       `json:"enveloppe"`               // nil = CT sans enveloppe (global : toujours nil)
-	PlanHorsEnveloppe     float64          `json:"plan_hors_enveloppe"`     // PPS prévu hors des semaines de la période (+ PPS hors série)
-	ConsommeHorsEnveloppe float64          `json:"consomme_hors_enveloppe"` // € réalisés datés hors de la période (exclus du consommé)
-	Series                []PrevisionPoint `json:"series"`
+	Enveloppe             *Enveloppe `json:"enveloppe"`               // nil = CT sans enveloppe (global : toujours nil)
+	PlanHorsEnveloppe     float64    `json:"plan_hors_enveloppe"`     // PPS prévu hors des semaines de la période (+ PPS hors série)
+	ConsommeHorsEnveloppe float64    `json:"consomme_hors_enveloppe"` // € réalisés datés hors de la période (exclus du consommé)
+	// DECISIONS n° 31 : € réalisés datés à partir de date_reference (dans la période
+	// de l'enveloppe ou de la tranche) : affichés, hors consommé, rythme et atterrissage.
+	RealiseDepuisReference float64          `json:"realise_depuis_reference"`
+	Series                 []PrevisionPoint `json:"series"`
 }
 
 // PrevisionStatut: depassement si atterrissage plan > budget ; vigilance si
@@ -676,22 +679,28 @@ const (
 type Previsions struct {
 	// Filtre d'année (DECISIONS n° 24) : 0 = Tout ; N = enveloppes coupées aux
 	// semaines ISO de l'année N, montants au prorata (GET /analyse/previsions?annee=N).
-	Annee         int                `json:"annee"`
-	Annees        []int              `json:"annees"`         // années proposées : année d'as_of → année de la fin d'enveloppe la plus tardive (jamais null)
-	AsOf          string             `json:"as_of"`          // dernière date de dépense du réalisé (YYYY-MM-DD), "" si aucune
-	AsOfWeek      string             `json:"as_of_week"`     // semaine ISO de as_of
-	Global        PrevisionCT        `json:"global"`         // agrégat des CT avec enveloppe (CT = ""), chacun sur sa période (DECISIONS n° 20)
-	ParCT         []PrevisionCT      `json:"par_ct"`         // tri : statut (dépassement d'abord) puis ecart_plan desc ; CT sans enveloppe en dernier (atterrissage desc)
-	Enveloppes    EnveloppesSynthese `json:"enveloppes"`     // plan de charge face aux enveloppes (DECISIONS n° 19)
-	HorsEnveloppe HorsEnveloppe      `json:"hors_enveloppe"` // CT sans enveloppe : hors du global, rien n'est caché
+	Annee  int   `json:"annee"`
+	Annees []int `json:"annees"` // années proposées : année d'as_of → année de la fin d'enveloppe la plus tardive (jamais null)
+	// Date de référence (DECISIONS n° 31) : date d'effet de la dernière version de
+	// la timeline (fenêtre non vide) ; consommé = réalisé ≤ as_of, reste à faire =
+	// plan des segments datés ≥ date_reference.
+	DateReference  string             `json:"date_reference"`  // YYYY-MM-DD
+	AsOf           string             `json:"as_of"`           // veille de date_reference (dernier jour « réalisé »)
+	AsOfWeek       string             `json:"as_of_week"`      // semaine ISO de as_of
+	DernierRealise string             `json:"dernier_realise"` // dernière date de dépense du réalisé (YYYY-MM-DD), "" si aucune
+	Global         PrevisionCT        `json:"global"`          // agrégat des CT avec enveloppe (CT = ""), chacun sur sa période (DECISIONS n° 20)
+	ParCT          []PrevisionCT      `json:"par_ct"`          // tri : statut (dépassement d'abord) puis ecart_plan desc ; CT sans enveloppe en dernier (atterrissage desc)
+	Enveloppes     EnveloppesSynthese `json:"enveloppes"`      // plan de charge face aux enveloppes (DECISIONS n° 19)
+	HorsEnveloppe  HorsEnveloppe      `json:"hors_enveloppe"`  // CT sans enveloppe : hors du global, rien n'est caché
 }
 
 // HorsEnveloppe : CT de par_ct sans enveloppe (aucun budget, DECISIONS n° 20).
 type HorsEnveloppe struct {
-	NbCT                 int     `json:"nb_ct"`
-	Consomme             float64 `json:"consomme"`
-	AtterrissagePlan     float64 `json:"atterrissage_plan"`
-	AtterrissageTendance float64 `json:"atterrissage_tendance"`
+	NbCT                   int     `json:"nb_ct"`
+	Consomme               float64 `json:"consomme"`
+	RealiseDepuisReference float64 `json:"realise_depuis_reference"` // DECISIONS n° 31
+	AtterrissagePlan       float64 `json:"atterrissage_plan"`
+	AtterrissageTendance   float64 `json:"atterrissage_tendance"`
 }
 
 // EnveloppesSynthese : lecture brute (sans compensation entre CT) des CT de

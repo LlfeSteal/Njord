@@ -44,12 +44,15 @@ func day(s string) string {
 	return ""
 }
 
-func dayBefore(d string) string {
+func dayBefore(d string) string { return addDays(d, -1) }
+
+// addDays returns the date d (YYYY-MM-DD) shifted by n days ("" if d is invalid).
+func addDays(d string, n int) string {
 	t, ok := ParseDate(d)
 	if !ok {
 		return ""
 	}
-	return t.AddDate(0, 0, -1).Format(dateLayout)
+	return t.AddDate(0, 0, n).Format(dateLayout)
 }
 
 // BuildTimeline merges the plan versions (SPEC_analyse §4.3). Pure and
@@ -178,6 +181,17 @@ func (t Timeline) Span() (string, string) {
 		return "", ""
 	}
 	return t.spans[0].from, t.spans[len(t.spans)-1].to
+}
+
+// DateReference returns the date d'effet of the last version in force
+// (DECISIONS n° 31) : plus grande date_effet des fenêtres non vides (= début de
+// la dernière fenêtre, les fenêtres étant disjointes et triées) ; un plan
+// rétroactif importé ensuite ne la déplace donc pas. "" sans fenêtre.
+func (t Timeline) DateReference() string {
+	if len(t.spans) == 0 {
+		return ""
+	}
+	return t.spans[len(t.spans)-1].from
 }
 
 // VersionAt returns the plan version governing a date ("" = non couvert).

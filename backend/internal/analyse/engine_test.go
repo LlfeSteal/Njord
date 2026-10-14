@@ -415,6 +415,7 @@ func TestBudgetAvoirsEtAlertes(t *testing.T) {
 		provLine("CTY", "PROVISIONS POUR ALEAS", "P > Y", 12000),
 		provLine("CTY", "FRAIS DE MISSION", "P > Y", 3000),
 	}
+	refPlan(&in, "2026-09-14") // plan en effet au lundi qui suit le réalisé : as_of W37 (DECISIONS n° 31)
 	s := store.DefaultSettings()
 	s.JoursFeries = nil
 	res := Run(in, s)
@@ -934,6 +935,7 @@ func TestBudgetProvisions(t *testing.T) {
 		cost("CTR", "AUTRES PRESTATIONS", "PRESTATION", 60000), // écart > 50 000 € à la charge max
 		cost("CTZ", "AUTRES PRESTATIONS", "PRESTATION", 90000), // ni plan ni provision : non comparé
 	}
+	refApresRealise(&in) // réalisé antérieur à la date de référence : consommé (DECISIONS n° 31)
 	res := Run(in, store.DefaultSettings())
 
 	byCT := map[string]domain.BudgetCT{}

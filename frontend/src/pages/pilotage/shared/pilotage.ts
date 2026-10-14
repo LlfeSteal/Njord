@@ -2,7 +2,7 @@
 // statuts de prévision. Les composants partagés sont dans charts.tsx et ContextControl.tsx.
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useAppearance, type GlyphKind, type SortDir, type StatusTone } from '../../../ui';
-import { fmtHours } from '../../../lib/format';
+import { fmtDate, fmtHours } from '../../../lib/format';
 import type {
   AnalyseResult,
   Anomalie,
@@ -125,6 +125,37 @@ export function forecastFrom(p: Previsions | null | undefined): Previsions | nul
   if (!p.global.series?.length && !p.par_ct?.length) return null;
   return p;
 }
+
+// ------------------------------------------------------------------ Date de référence (DECISIONS n° 31)
+type RefDates = Partial<Pick<Previsions, 'date_reference' | 'dernier_realise' | 'as_of'>>;
+
+/**
+ * « Référence : plan en effet au 01/10/2026 · réalisé importé jusqu’au 10/10/2026 » (sans réalisé : première partie
+ * seule). `short` : dates JJ/MM (sous-titres de barre d'outils). Serveur sans date de référence : ancien libellé.
+ */
+export function referenceLabel(fc: RefDates | null | undefined, short = false): string {
+  if (!fc) return '';
+  const f = short ? fmtDayMonth : fmtDate;
+  if (!fc.date_reference) return fc.as_of ? `Données arrêtées au ${f(fc.as_of)}` : '';
+  return `Référence : plan en effet au ${f(fc.date_reference)}${fc.dernier_realise ? ` · réalisé importé jusqu’au ${f(fc.dernier_realise)}` : ''}`;
+}
+
+/** Bulle du libellé de référence : ce qui part de cette date. */
+export const REFERENCE_HELP =
+  'Consommé, rythme et atterrissage partent de la date d’effet du dernier plan ; le réalisé daté ensuite est suivi, hors atterrissage';
+
+/** Libellé du réalisé daté à partir de la date de référence (`realise_depuis_reference`). */
+export const REALISE_DEPUIS_REF_LABEL = 'Réalisé depuis la reprev';
+
+/** « Réalisé daté à partir du 01/10/2026 : suivi, hors atterrissage ». */
+export const realiseDepuisRefHint = (dateReference: string | null | undefined) =>
+  `Réalisé daté à partir du ${fmtDate(dateReference)} : suivi, hors atterrissage`;
+
+/** Montant de réalisé depuis la reprev à montrer (|v| ≥ 0,5 €), sinon null. */
+export const realiseDepuisRef = (p: { realise_depuis_reference?: number | null } | null | undefined): number | null => {
+  const v = p?.realise_depuis_reference;
+  return v != null && Number.isFinite(v) && Math.abs(v) >= 0.5 ? v : null;
+};
 
 // ------------------------------------------------------------------ Filtre d'année (DECISIONS n° 24)
 /** Année des prévisions affichées (0 = Tout), lue sur les données elles-mêmes : les mots suivent toujours les chiffres. */

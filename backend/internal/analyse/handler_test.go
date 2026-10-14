@@ -179,12 +179,16 @@ func TestHandlerAnalyse(t *testing.T) {
 	if r := byRes["BARBIER Luc"]; r.Flag != domain.FlagHorsPlan || r.Confidence != domain.ConfNone {
 		t.Errorf("BARBIER: %+v", r)
 	}
-	// Classification prévisionnelle (DECISIONS n° 23) : plan terminé à as_of (W37), aucune
-	// provision → rien de sécurisé ni d'aléas, aucun CT à risque (le TYPE du réalisé n'y entre plus).
+	// Classification prévisionnelle (DECISIONS n° 23) : date de référence = date d'effet du
+	// plan (07/09, son début : DECISIONS n° 31), tout le plan (10 000 €) reste à faire et est
+	// sécurisé ; aucune provision → aucun aléa, aucun CT à risque (le TYPE du réalisé n'y entre plus).
+	if res.Previsions.DateReference != "2026-09-07" || res.Previsions.DernierRealise != "2026-09-10" {
+		t.Errorf("référence %q, dernier réalisé %q", res.Previsions.DateReference, res.Previsions.DernierRealise)
+	}
 	if len(res.Alertes.DeriveProvision) != 2 || len(res.Alertes.CTRisque) != 0 || res.Alertes.AlerteGlobale {
 		t.Errorf("alertes: %+v", res.Alertes)
 	}
-	if res.Budget.Global.Securise != 0 || res.Budget.Global.NonSecurise != 0 || res.Budget.Global.PctSecurite != nil {
+	if res.Budget.Global.Securise != 10000 || res.Budget.Global.NonSecurise != 0 || fv(res.Budget.Global.PctSecurite) != 100 {
 		t.Errorf("budget : %+v", res.Budget.Global)
 	}
 
@@ -529,10 +533,11 @@ func TestHandlerAnalyseProvisions(t *testing.T) {
 	if b15 == nil || b15.PPSPlan != 0 || b15.Provisions != 40000 || b15.Securise != 40000 || b15.NonSecurise != 0 || b15.Risque {
 		t.Errorf("budget Y99F900015 : %+v", b15)
 	}
-	// Aléas de Y99F900012 (100 000 €) : non sécurisés, CT à risque, alerte globale.
+	// Aléas de Y99F900012 (100 000 €) : non sécurisés, CT à risque, alerte globale ; sécurisé =
+	// 40 000 € de provisions + 10 000 € de plan restant (référence = début du plan, DECISIONS n° 31).
 	if p12.ProvisionsAleas != 100000 || p12.ProvisionsSecurisees != 0 || len(res.Alertes.CTRisque) != 1 ||
 		res.Alertes.CTRisque[0].CT != "Y99F900012" || res.Alertes.CTRisque[0].NonSecurise != 100000 || !res.Alertes.AlerteGlobale ||
-		res.KPIs.NbCTRisque != 1 || fv(res.Budget.Global.PctNonSecurise) != round2(100000.0/140000*100) {
+		res.KPIs.NbCTRisque != 1 || fv(res.Budget.Global.PctNonSecurise) != round2(100000.0/150000*100) {
 		t.Errorf("classification : %+v, budget %+v", res.Alertes, res.Budget.Global)
 	}
 	nat := 0.0

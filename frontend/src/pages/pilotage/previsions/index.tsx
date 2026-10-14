@@ -21,7 +21,14 @@ import { BudgetCell, CtLabel, Reste, RowGlyph, Signed } from '../budget/cells';
 import { ForecastChart, LoadChart } from '../shared/charts';
 import { EnveloppeBars } from '../shared/EnveloppeBars';
 import { useAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, UncoveredNote } from '../shared/ContextControl';
+import ContextControl, {
+  AnalyseGate,
+  ArchivedTag,
+  NoProvisionNote,
+  RealiseDepuisRefNote,
+  ReferenceText,
+  UncoveredNote,
+} from '../shared/ContextControl';
 import PeriodeControl, { PrevisionsError } from '../shared/PeriodeControl';
 import { usePrevisions, type UsePrevisions } from '../shared/usePrevisions';
 import {
@@ -35,6 +42,8 @@ import {
   fmtEurSigned,
   forecastSentence,
   hasEnveloppe,
+  realiseDepuisRef,
+  referenceLabel,
   rowTone,
   sansEnveloppeSentence,
   useSort,
@@ -47,8 +56,9 @@ type SortKey = 'ct' | 'budget' | 'atterrissage_plan' | 'atterrissage_tendance' |
 /**
  * Chiffres clés d'une portée : écarts face à l'enveloppe (DECISIONS n° 20) ; sans enveloppe, atterrissages seuls.
  * Atterrissage sécurisé = consommé + plan de charge restant + provisions sécurisées (DECISIONS n° 23).
+ * Dessous : le réalisé daté depuis la date de référence, suivi hors atterrissage (DECISIONS n° 31).
  */
-function ScopeMetrics({ p, annee }: { p: PrevisionCT; annee: number }) {
+function ScopeMetrics({ p, annee, dateReference }: { p: PrevisionCT; annee: number; dateReference: string }) {
   const withEnv = hasEnveloppe(p);
   const env = withEnv ? p.enveloppe : null;
   const global = p.ct === '';
@@ -59,31 +69,34 @@ function ScopeMetrics({ p, annee }: { p: PrevisionCT; annee: number }) {
   const horsPlan = withEnv ? (p.plan_hors_enveloppe ?? 0) : 0;
   const end = env?.date_fin ?? (withEnv ? p.echeance : '');
   return (
-    <div className="pil-metrics">
-      <Metric
-        label={<span title={`${ATTERRISSAGE_LABEL} = ${ATTERRISSAGE_HELP}`}>{ATTERRISSAGE_LABEL}</span>}
-        value={fmtEur(p.atterrissage_plan)}
-        tone={p.statut === 'depassement' ? 'danger' : undefined}
-        sub={`${withEnv ? `${fmtEurSigned(p.ecart_plan)} ${ref}` : `Sans enveloppe${enAnnee(annee)} : aucun écart`}${
-          secured > 0.5 ? ` · dont ${fmtEurShort(secured)} de provisions sécurisées` : ''
-        }`}
-      />
-      <Metric
-        label="Atterrissage tendance"
-        value={fmtEur(p.atterrissage_tendance)}
-        tone={(p.ecart_tendance ?? 0) > 0 ? 'danger' : undefined}
-        sub={`${withEnv ? `${fmtEurSigned(p.ecart_tendance)} ${global ? 'sur les enveloppes' : 'sur l’enveloppe'}${y} · ` : ''}rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
-      />
-      <Metric
-        label="Reste à faire"
-        value={fmtEur(p.reste_a_faire)}
-        sub={
-          withEnv && end
-            ? `jusqu’à la fin ${global ? 'des enveloppes' : 'de l’enveloppe'}${enAnnee(annee)} (${fmtDate(end)})${horsPlan > 0.5 ? ` · ${fmtEurShort(horsPlan)} planifiés hors enveloppe` : ''}`
-            : `jusqu’au ${fmtDate(p.fin_plan)}`
-        }
-      />
-    </div>
+    <>
+      <div className="pil-metrics">
+        <Metric
+          label={<span title={`${ATTERRISSAGE_LABEL} = ${ATTERRISSAGE_HELP}`}>{ATTERRISSAGE_LABEL}</span>}
+          value={fmtEur(p.atterrissage_plan)}
+          tone={p.statut === 'depassement' ? 'danger' : undefined}
+          sub={`${withEnv ? `${fmtEurSigned(p.ecart_plan)} ${ref}` : `Sans enveloppe${enAnnee(annee)} : aucun écart`}${
+            secured > 0.5 ? ` · dont ${fmtEurShort(secured)} de provisions sécurisées` : ''
+          }`}
+        />
+        <Metric
+          label="Atterrissage tendance"
+          value={fmtEur(p.atterrissage_tendance)}
+          tone={(p.ecart_tendance ?? 0) > 0 ? 'danger' : undefined}
+          sub={`${withEnv ? `${fmtEurSigned(p.ecart_tendance)} ${global ? 'sur les enveloppes' : 'sur l’enveloppe'}${y} · ` : ''}rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
+        />
+        <Metric
+          label="Reste à faire"
+          value={fmtEur(p.reste_a_faire)}
+          sub={
+            withEnv && end
+              ? `jusqu’à la fin ${global ? 'des enveloppes' : 'de l’enveloppe'}${enAnnee(annee)} (${fmtDate(end)})${horsPlan > 0.5 ? ` · ${fmtEurShort(horsPlan)} planifiés hors enveloppe` : ''}`
+              : `jusqu’au ${fmtDate(p.fin_plan)}`
+          }
+        />
+      </div>
+      <RealiseDepuisRefNote p={p} dateReference={dateReference} />
+    </>
   );
 }
 
@@ -109,8 +122,9 @@ function HorsEnveloppeNote({ h, annee }: { h: HorsEnveloppe | null | undefined; 
   if (!h || h.nb_ct <= 0) return null;
   return (
     <p className="pil-note">
-      Hors périmètre{enAnnee(annee)} : {h.nb_ct} CT sans enveloppe, {fmtEurShort(h.consomme)} consommés, atterrissage sécurisé{' '}
-      {fmtEurShort(h.atterrissage_plan)}.{' '}
+      Hors périmètre{enAnnee(annee)} : {h.nb_ct} CT sans enveloppe, {fmtEurShort(h.consomme)} consommés
+      {realiseDepuisRef(h) != null ? ` (+ ${fmtEurShort(h.realise_depuis_reference)} réalisés depuis la reprev, hors atterrissage)` : ''},
+      atterrissage sécurisé {fmtEurShort(h.atterrissage_plan)}.{' '}
       <Link to="/enveloppes" size="sm">
         Voir les CT sans enveloppe
       </Link>
@@ -263,7 +277,7 @@ function Content({
     <div className="pil-content" aria-busy={prev.isPlaceholder || undefined}>
       <PrevisionsError prev={prev} />
       {ct || withEnv ? (
-        <ScopeMetrics p={scope} annee={annee} />
+        <ScopeMetrics p={scope} annee={annee} dateReference={fc.date_reference} />
       ) : (
         <EmptyState
           title={annee > 0 ? `Aucune enveloppe en ${annee}` : 'Aucune enveloppe saisie'}
@@ -280,7 +294,7 @@ function Content({
       {ct ? (
         withEnv ? (
           <ChartCard title={`Trajectoire vers l’enveloppe${en}`} sub={forecastSentence(scope, annee)}>
-            <ForecastChart prevision={scope} asOfWeek={fc.as_of_week} height={320} annee={annee} />
+            <ForecastChart prevision={scope} asOfWeek={fc.as_of_week} dateReference={fc.date_reference} height={320} annee={annee} />
           </ChartCard>
         ) : (
           <SansEnveloppeNote p={scope} annee={annee} horsAnnee={horsAnnee.has(scope.ct)} />
@@ -302,10 +316,10 @@ function Content({
           sub={
             future > 0
               ? `${fmtHours(Math.round(future))} encore planifiées ${annee > 0 ? `en ${annee}` : `jusqu’au ${fmtDate(scope.fin_plan)}`}.`
-              : `Plus aucune charge planifiée${en} après l’arrêté des données.`
+              : `Plus aucune charge planifiée${en} après la date de référence.`
           }
         >
-          <LoadChart series={scope.series} asOfWeek={fc.as_of_week} height={200} />
+          <LoadChart series={scope.series} asOfWeek={fc.as_of_week} dateReference={fc.date_reference} height={200} />
         </ChartCard>
       )}
       {fc.par_ct.length > 0 && (
@@ -324,10 +338,12 @@ function MethodNote({ fc }: { fc: Previsions }) {
   return (
     <>
       <p className="pil-note">
-        Atterrissage sécurisé = réalisé à date + plan de charge restant (chaque semaine selon la version en vigueur) + provisions sécurisées.
+        Atterrissage sécurisé = consommé + plan de charge restant (chaque semaine selon la version en vigueur) + provisions sécurisées.
         Les provisions pour aléas ne sont pas sécurisées : elles restent hors de l’atterrissage, comme les provisions datées hors de la période
-        de l’enveloppe (montrées à part). Tendance = réalisé à date + rythme moyen des 4 dernières semaines (repère, jamais source d’un non
-        consommé). Données arrêtées au {fmtDate(fc.as_of)}.
+        de l’enveloppe (montrées à part). Tendance = consommé + rythme moyen des 4 semaines avant la référence (repère, jamais source d’un non
+        consommé). {referenceLabel(fc)} : tout part de la date d’effet du dernier plan (consommé = réalisé daté avant elle). Le réalisé daté
+        ensuite est suivi (courbe du réel, « Réalisé depuis la reprev ») mais n’entre ni dans le consommé, ni dans le rythme, ni dans
+        l’atterrissage, qui ne bouge qu’avec un nouveau plan.
       </p>
       <p className="pil-note">
         Budget d’un CT = montant de son enveloppe (saisie dans Données › Enveloppes), rien d’autre. Tout le prévisionnel porte sur la période de
@@ -392,9 +408,13 @@ export default function PrevisionsPage() {
           subtitle={
             r && (
               <>
-                {fc
-                  ? `Horizon : ${horizon} · données arrêtées au ${fmtDate(fc.as_of)}`
-                  : 'Atterrissage budgétaire'}{' '}
+                {fc ? (
+                  <>
+                    Horizon : {horizon} · <ReferenceText fc={fc} />
+                  </>
+                ) : (
+                  'Atterrissage budgétaire'
+                )}{' '}
                 <ArchivedTag result={r} /> <UncoveredNote result={r} short />
               </>
             )

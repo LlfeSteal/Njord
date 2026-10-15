@@ -5,7 +5,7 @@
 // Projection = atterrissage sécurisé : plan de charge restant + provisions sécurisées (DECISIONS n° 23).
 // Bulle de chaque semaine : ETP planifiés (`series[].etp`, DECISIONS n° 25).
 // Repère vertical « Référence JJ/MM » à la semaine d'`as_of` (veille de la date d'effet du dernier plan, DECISIONS n° 31) :
-// les projections en partent, le réel continue au-delà jusqu'au dernier réalisé importé (suivi, hors atterrissage).
+// le réel s'y arrête et les projections en partent ; le réalisé daté ensuite n'est pas pris en compte (DECISIONS n° 32).
 import { useId, type CSSProperties, type ReactNode } from 'react';
 import {
   Area,
@@ -25,7 +25,7 @@ import {
 import type { Couverture, PrevisionCT, PrevisionPoint, Previsions } from '../../../api/types';
 import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
 import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
-import { fmtDayMonth, fmtEtp, fmtEurShort, fmtEurSigned, REALISE_DEPUIS_REF_LABEL, useTokenColors, weekShort } from './pilotage';
+import { fmtDayMonth, fmtEtp, fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
 import './pilotage.css';
 
 // ------------------------------------------------------------------ Légende et bulle
@@ -149,9 +149,6 @@ function etpRow(etp: number | null | undefined): { label: string; value: string 
 const referenceMark = (dateReference: string | null | undefined) =>
   dateReference ? `Référence ${fmtDayMonth(dateReference)}` : 'Référence';
 
-/** Mention de bulle d'une semaine après la référence qui porte du réel (DECISIONS n° 31). */
-const AFTER_REF_NOTE = `${REALISE_DEPUIS_REF_LABEL} : suivi, hors atterrissage`;
-
 /** Suite de semaines consécutives non couvertes, en pas d'axe autour de la zone à hachurer. */
 interface UncoveredRun {
   x1: string;
@@ -250,7 +247,7 @@ const usePatternId = () => `pil-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
 // Une question : l'enveloppe sera-t-elle consommée en entier, sans surconsommation ? Axe = période de l'enveloppe
 // (périmètre : union des périodes ; année choisie : la tranche de l'année, DECISIONS n° 24), zone cible
 // [cible_min, enveloppe], ligne d'enveloppe, éventail projection sécurisée ↔ tendance partant de la « Référence »
-// (DECISIONS n° 31), réalisé jusqu'au dernier réalisé importé et point d'arrivée sur la projection sécurisée (plan de charge + provisions sécurisées,
+// (DECISIONS n° 31), réalisé jusqu'à elle (n° 32) et point d'arrivée sur la projection sécurisée (plan de charge + provisions sécurisées,
 // DECISIONS n° 23), glyphé et libellé selon le statut.
 
 const FORECAST_SERIES: ChartSeries[] = [
@@ -501,7 +498,7 @@ export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260
   const tooltipNote = (d: TrajPoint) =>
     d.extension
       ? 'Après la fin du plan : projections seules'
-      : (couvertureNote(d.couverture) ?? (d.week > asOfWeek && d.reel_cumul != null ? AFTER_REF_NOTE : null));
+      : couvertureNote(d.couverture);
   const tooltipExtra = (d: TrajPoint) => [
     ...etpRow(d.etp),
     ...(d.week === last.week ? [{ label: 'Écart à l’enveloppe', value: fmtEurSigned(ecart) }] : []),
@@ -571,7 +568,7 @@ export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260
 
 // ------------------------------------------------------------------ Vue d'ensemble : Σ enveloppes (DECISIONS n° 20)
 // Σ des enveloppes actives chaque semaine (lissée), face à la consommation cumulée du périmètre des enveloppes :
-// réalisé jusqu'au dernier réalisé importé, projection sécurisée (plan de charge + provisions sécurisées, DECISIONS n° 23)
+// réalisé jusqu'à la « Référence » (DECISIONS n° 32), projection sécurisée (plan de charge + provisions sécurisées, DECISIONS n° 23)
 // en pointillé à partir de la « Référence » (DECISIONS n° 31). Année choisie (DECISIONS n° 24) : tranches de l'année, montants au prorata.
 
 const OVERVIEW_SERIES: ChartSeries[] = [
@@ -665,7 +662,6 @@ export function EnveloppesOverviewChart({ previsions, height = 280 }: { previsio
                 series={OVERVIEW_SERIES.filter((s) => s.key !== 'env')}
                 format={(v) => fmtEur(v)}
                 title={(d) => fmtWeek(d.week)}
-                note={(d) => (d.week > previsions.as_of_week && d.reel_cumul != null ? AFTER_REF_NOTE : null)}
                 extra={(d) => [{ label: 'Σ enveloppes actives', value: fmtEur(d.envRaw) }, ...etpRow(d.etp)]}
               />
             }
@@ -709,8 +705,8 @@ const LOAD_SERIES: ChartSeries[] = [
 const LOAD_TOKENS = ['--blue', '--text-secondary', '--separator', '--fill'] as const;
 
 /**
- * Heures par semaine : jusqu'à la référence = réalisé (plein) ; après = plan (piste), avec le réalisé importé depuis la
- * reprev (plein) posé sur sa piste (DECISIONS n° 31) ; repère « Référence » ; ETP planifiés en bulle.
+ * Heures par semaine : jusqu'à la référence = réalisé (plein) ; après = plan (piste), le réalisé daté ensuite n'est pas
+ * pris en compte (DECISIONS n° 32) ; repère « Référence » ; ETP planifiés en bulle.
  */
 export function LoadChart({
   series,
@@ -731,7 +727,7 @@ export function LoadChart({
     week: p.week,
     couverture: p.couverture,
     etp: p.etp,
-    passe: p.week <= asOfWeek ? (p.heures_reel ?? 0) : p.heures_reel,
+    passe: p.week <= asOfWeek ? (p.heures_reel ?? 0) : null,
     avenir: p.week > asOfWeek ? p.heures_plan : null,
   }));
   const hasToday = data.some((p) => p.week === asOfWeek);
@@ -744,19 +740,17 @@ export function LoadChart({
           <CartesianGrid vertical={false} stroke={c['--separator']} />
           {uncoveredAreas(runs, patternId)}
           <XAxis dataKey="week" {...AXIS} tick={tick} tickFormatter={weekShort} minTickGap={16} interval="preserveStartEnd" />
-          {/* Axe jumeau masqué : la piste du plan et le réalisé se superposent dans la même bande (pas côte à côte). */}
-          <XAxis xAxisId="track" dataKey="week" hide />
           <YAxis {...AXIS} width={56} tick={tick} tickFormatter={(v: number) => fmtHours(v)} />
           <RTooltip
             cursor={{ fill: c['--fill'] }}
             wrapperStyle={{ outline: 'none' }}
             isAnimationActive={false}
             content={
-              <ChartTooltip<{ week: string; couverture?: Couverture; etp?: number; passe: number | null }>
+              <ChartTooltip<{ week: string; couverture?: Couverture; etp?: number }>
                 series={LOAD_SERIES}
                 format={fmtHours}
                 title={(d) => fmtWeek(d.week)}
-                note={(d) => couvertureNote(d.couverture) ?? (d.week > asOfWeek && d.passe != null ? AFTER_REF_NOTE : null)}
+                note={(d) => couvertureNote(d.couverture)}
                 extra={(d) => etpRow(d.etp)}
               />
             }
@@ -768,8 +762,8 @@ export function LoadChart({
               label={{ value: referenceMark(dateReference), position: 'top', fill: c['--text-secondary'], fontSize: 11 }}
             />
           )}
-          <Bar dataKey="avenir" xAxisId="track" fill={c['--blue']} fillOpacity={0.3} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
-          <Bar dataKey="passe" fill={c['--blue']} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
+          <Bar dataKey="passe" stackId="h" fill={c['--blue']} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
+          <Bar dataKey="avenir" stackId="h" fill={c['--blue']} fillOpacity={0.3} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
       <ChartLegend series={runs.length > 0 ? [...LOAD_SERIES, UNCOVERED_SERIES] : LOAD_SERIES} />

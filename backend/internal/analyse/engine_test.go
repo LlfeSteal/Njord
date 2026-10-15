@@ -573,8 +573,9 @@ func TestPeriodeParDefautEtFiltre(t *testing.T) {
 			t.Errorf("semaine hors période: %s", r.Semaine)
 		}
 	}
-	// Budget : toute la version (W35 incluse) ; heures : la période.
-	if res.Budget.ParCT[0].HeuresMO != 14 || res.KPIs.TotalReelH != 7 {
+	// Budget : toute la version (W35 incluse) mais avant la date de référence (début du plan, DECISIONS
+	// n° 32 : le 03/10 en est exclu) ; heures des KPI : la période, y compris après la référence.
+	if res.Budget.ParCT[0].HeuresMO != 7 || res.KPIs.TotalReelH != 7 {
 		t.Errorf("budget %v h, kpi %v h", res.Budget.ParCT[0].HeuresMO, res.KPIs.TotalReelH)
 	}
 	// Période explicite.
@@ -652,6 +653,7 @@ func TestBudgetParNature(t *testing.T) {
 		line("CTA", "FRAIS DE MISSION", 400),
 		line("CTA", "Stockage", 50),
 	)
+	refPlan(&in, "2026-09-09") // date de référence après le réalisé du 08/09 (DECISIONS n° 31)
 	prov := mo("CTP", "DURAND Claire Mme", 5, "2026-09-08")
 	prov.TGLibelle = "CTP - Provisions pour aléas"
 	in.Entries = []domain.RealiseEntry{
@@ -663,8 +665,14 @@ func TestBudgetParNature(t *testing.T) {
 		cost("CTA", "PROVISIONS POUR ALEAS", "AUTRES DEPENSES", 70), //
 		cost("CTA", "AUTRES PRESTATIONS", "PRESTATION", 120),        //
 		cost("", "FNP AUTOMATIQUES", "AUTRES DEPENSES", 30),         // sans TG : compté quand même
+		mo("CTA", "DURAND Claire Mme", 4, "2026-09-10"),             // ≥ date de référence : ignoré (DECISIONS n° 32)
 	}
 	res := Run(in, store.DefaultSettings())
+	for _, b := range res.Budget.ParCT {
+		if b.CT == "CTA" && (b.HeuresMO != 10 || b.CoutMOEur != 1000) {
+			t.Errorf("MO de CTA : %v h, %v € (réalisé ≥ date de référence exclu)", b.HeuresMO, b.CoutMOEur)
+		}
+	}
 	want := []struct {
 		nature       string
 		pps, realise float64

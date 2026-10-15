@@ -123,16 +123,22 @@ func (r *run) budget(prev domain.Previsions) (domain.Budget, domain.Alertes) {
 
 	al := domain.Alertes{CTRisque: []domain.AlerteCT{}, DeriveProvision: []domain.DeriveProvision{}}
 	var g domain.BudgetGlobal
+	ref := prev.DateReference
 	for i := range r.entries {
 		e := &r.entries[i]
 		ct := strings.TrimSpace(e.TG)
-		natReel[realiseNature(natCT[ct] || (ct != "" && isProvisionCT(r.ctLibelle[ct])), e)] += e.TotalEur
+		en := r.enr[i]
+		// Réalisé daté ≥ date de référence (DECISIONS n° 32) : hors natures et MO du CT,
+		// comme du consommé ; il reste suivi par la dérive de provision (imputations).
+		avant := ref == "" || en.ISOWeek == "" || e.DateDepense[:10] < ref
+		if avant {
+			natReel[realiseNature(natCT[ct] || (ct != "" && isProvisionCT(r.ctLibelle[ct])), e)] += e.TotalEur
+		}
 		if ct == "" {
 			continue
 		}
-		en := r.enr[i]
 		b := get(ct)
-		if en.MO {
+		if en.MO && avant {
 			b.HeuresMO += en.Heures
 			b.CoutMOEur += e.TotalEur
 		}

@@ -623,8 +623,6 @@ export interface PrevisionCT {
   plan_hors_enveloppe: number;
   /** € réalisés datés hors de la période (exclus du consommé). */
   consomme_hors_enveloppe: number;
-  /** € réalisés datés à partir de date_reference (DECISIONS n° 31) : affichés, hors consommé, rythme et atterrissage. */
-  realise_depuis_reference: number;
   series: PrevisionPoint[];
 }
 
@@ -632,7 +630,6 @@ export interface PrevisionCT {
 export interface HorsEnveloppe {
   nb_ct: number;
   consomme: number;
-  realise_depuis_reference: number;
   atterrissage_plan: number;
   atterrissage_tendance: number;
 }
@@ -661,13 +658,11 @@ export interface Previsions {
   annee: number;
   /** Années proposées : année de date_reference → année de la fin d'enveloppe la plus tardive. */
   annees: number[];
-  /** Date d'effet de la dernière version de la timeline : base de tous les calculs (DECISIONS n° 31). */
+  /** Date d'effet de la dernière version de la timeline : base de tous les calculs (DECISIONS n° 31) ; le réalisé daté ensuite est ignoré (n° 32). */
   date_reference: string;
   /** Veille de date_reference : consommé = réalisé ≤ as_of, projections au-delà. */
   as_of: string;
   as_of_week: string;
-  /** Dernière date de dépense du réalisé importé ('' si aucune). */
-  dernier_realise: string;
   global: PrevisionCT;
   par_ct: PrevisionCT[];
   enveloppes: EnveloppesSynthese;

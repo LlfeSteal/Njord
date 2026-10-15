@@ -25,7 +25,6 @@ import ContextControl, {
   AnalyseGate,
   ArchivedTag,
   NoProvisionNote,
-  RealiseDepuisRefNote,
   ReferenceText,
   UncoveredNote,
 } from '../shared/ContextControl';
@@ -42,7 +41,6 @@ import {
   fmtEurSigned,
   forecastSentence,
   hasEnveloppe,
-  realiseDepuisRef,
   referenceLabel,
   rowTone,
   sansEnveloppeSentence,
@@ -56,9 +54,8 @@ type SortKey = 'ct' | 'budget' | 'atterrissage_plan' | 'atterrissage_tendance' |
 /**
  * Chiffres clés d'une portée : écarts face à l'enveloppe (DECISIONS n° 20) ; sans enveloppe, atterrissages seuls.
  * Atterrissage sécurisé = consommé + plan de charge restant + provisions sécurisées (DECISIONS n° 23).
- * Dessous : le réalisé daté depuis la date de référence, suivi hors atterrissage (DECISIONS n° 31).
  */
-function ScopeMetrics({ p, annee, dateReference }: { p: PrevisionCT; annee: number; dateReference: string }) {
+function ScopeMetrics({ p, annee }: { p: PrevisionCT; annee: number }) {
   const withEnv = hasEnveloppe(p);
   const env = withEnv ? p.enveloppe : null;
   const global = p.ct === '';
@@ -69,34 +66,31 @@ function ScopeMetrics({ p, annee, dateReference }: { p: PrevisionCT; annee: numb
   const horsPlan = withEnv ? (p.plan_hors_enveloppe ?? 0) : 0;
   const end = env?.date_fin ?? (withEnv ? p.echeance : '');
   return (
-    <>
-      <div className="pil-metrics">
-        <Metric
-          label={<span title={`${ATTERRISSAGE_LABEL} = ${ATTERRISSAGE_HELP}`}>{ATTERRISSAGE_LABEL}</span>}
-          value={fmtEur(p.atterrissage_plan)}
-          tone={p.statut === 'depassement' ? 'danger' : undefined}
-          sub={`${withEnv ? `${fmtEurSigned(p.ecart_plan)} ${ref}` : `Sans enveloppe${enAnnee(annee)} : aucun écart`}${
-            secured > 0.5 ? ` · dont ${fmtEurShort(secured)} de provisions sécurisées` : ''
-          }`}
-        />
-        <Metric
-          label="Atterrissage tendance"
-          value={fmtEur(p.atterrissage_tendance)}
-          tone={(p.ecart_tendance ?? 0) > 0 ? 'danger' : undefined}
-          sub={`${withEnv ? `${fmtEurSigned(p.ecart_tendance)} ${global ? 'sur les enveloppes' : 'sur l’enveloppe'}${y} · ` : ''}rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
-        />
-        <Metric
-          label="Reste à faire"
-          value={fmtEur(p.reste_a_faire)}
-          sub={
-            withEnv && end
-              ? `jusqu’à la fin ${global ? 'des enveloppes' : 'de l’enveloppe'}${enAnnee(annee)} (${fmtDate(end)})${horsPlan > 0.5 ? ` · ${fmtEurShort(horsPlan)} planifiés hors enveloppe` : ''}`
-              : `jusqu’au ${fmtDate(p.fin_plan)}`
-          }
-        />
-      </div>
-      <RealiseDepuisRefNote p={p} dateReference={dateReference} />
-    </>
+    <div className="pil-metrics">
+      <Metric
+        label={<span title={`${ATTERRISSAGE_LABEL} = ${ATTERRISSAGE_HELP}`}>{ATTERRISSAGE_LABEL}</span>}
+        value={fmtEur(p.atterrissage_plan)}
+        tone={p.statut === 'depassement' ? 'danger' : undefined}
+        sub={`${withEnv ? `${fmtEurSigned(p.ecart_plan)} ${ref}` : `Sans enveloppe${enAnnee(annee)} : aucun écart`}${
+          secured > 0.5 ? ` · dont ${fmtEurShort(secured)} de provisions sécurisées` : ''
+        }`}
+      />
+      <Metric
+        label="Atterrissage tendance"
+        value={fmtEur(p.atterrissage_tendance)}
+        tone={(p.ecart_tendance ?? 0) > 0 ? 'danger' : undefined}
+        sub={`${withEnv ? `${fmtEurSigned(p.ecart_tendance)} ${global ? 'sur les enveloppes' : 'sur l’enveloppe'}${y} · ` : ''}rythme ${fmtEur(p.rythme_hebdo)} / sem.`}
+      />
+      <Metric
+        label="Reste à faire"
+        value={fmtEur(p.reste_a_faire)}
+        sub={
+          withEnv && end
+            ? `jusqu’à la fin ${global ? 'des enveloppes' : 'de l’enveloppe'}${enAnnee(annee)} (${fmtDate(end)})${horsPlan > 0.5 ? ` · ${fmtEurShort(horsPlan)} planifiés hors enveloppe` : ''}`
+            : `jusqu’au ${fmtDate(p.fin_plan)}`
+        }
+      />
+    </div>
   );
 }
 
@@ -122,8 +116,7 @@ function HorsEnveloppeNote({ h, annee }: { h: HorsEnveloppe | null | undefined; 
   if (!h || h.nb_ct <= 0) return null;
   return (
     <p className="pil-note">
-      Hors périmètre{enAnnee(annee)} : {h.nb_ct} CT sans enveloppe, {fmtEurShort(h.consomme)} consommés
-      {realiseDepuisRef(h) != null ? ` (+ ${fmtEurShort(h.realise_depuis_reference)} réalisés depuis la reprev, hors atterrissage)` : ''},
+      Hors périmètre{enAnnee(annee)} : {h.nb_ct} CT sans enveloppe, {fmtEurShort(h.consomme)} consommés,
       atterrissage sécurisé {fmtEurShort(h.atterrissage_plan)}.{' '}
       <Link to="/enveloppes" size="sm">
         Voir les CT sans enveloppe
@@ -277,7 +270,7 @@ function Content({
     <div className="pil-content" aria-busy={prev.isPlaceholder || undefined}>
       <PrevisionsError prev={prev} />
       {ct || withEnv ? (
-        <ScopeMetrics p={scope} annee={annee} dateReference={fc.date_reference} />
+        <ScopeMetrics p={scope} annee={annee} />
       ) : (
         <EmptyState
           title={annee > 0 ? `Aucune enveloppe en ${annee}` : 'Aucune enveloppe saisie'}
@@ -342,8 +335,8 @@ function MethodNote({ fc }: { fc: Previsions }) {
         Les provisions pour aléas ne sont pas sécurisées : elles restent hors de l’atterrissage, comme les provisions datées hors de la période
         de l’enveloppe (montrées à part). Tendance = consommé + rythme moyen des 4 semaines avant la référence (repère, jamais source d’un non
         consommé). {referenceLabel(fc)} : tout part de la date d’effet du dernier plan (consommé = réalisé daté avant elle). Le réalisé daté
-        ensuite est suivi (courbe du réel, « Réalisé depuis la reprev ») mais n’entre ni dans le consommé, ni dans le rythme, ni dans
-        l’atterrissage, qui ne bouge qu’avec un nouveau plan.
+        ensuite n’est pas pris en compte (ni courbe, ni consommé, ni rythme) : l’atterrissage ne bouge qu’avec un nouveau plan ; ce
+        réalisé se suit dans les écarts d’imputation.
       </p>
       <p className="pil-note">
         Budget d’un CT = montant de son enveloppe (saisie dans Données › Enveloppes), rien d’autre. Tout le prévisionnel porte sur la période de

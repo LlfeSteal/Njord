@@ -31,7 +31,7 @@ import type { AnalyseResult, PrevisionCT, PrevisionStatut, Previsions } from '..
 import { fmtDate, fmtEur, fmtHours, fmtPct, fmtPeriod } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse, type UseAnalyse } from '../shared/context';
-import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, RealiseDepuisRefNote, ReferenceText } from '../shared/ContextControl';
+import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, ReferenceText } from '../shared/ContextControl';
 import EcheanceMetric from '../shared/EcheanceMetric';
 import PeriodeControl, { AllYearsNote, PrevisionsError } from '../shared/PeriodeControl';
 import { usePrevisions } from '../shared/usePrevisions';
@@ -47,9 +47,6 @@ import {
   enveloppesOf,
   fmtDayMonth,
   hasEnveloppe,
-  REALISE_DEPUIS_REF_LABEL,
-  realiseDepuisRef,
-  realiseDepuisRefHint,
   rowGlyph,
   rowReason,
   rowTone,
@@ -133,55 +130,51 @@ function BudgetMetrics({ result, fc }: { result: AnalyseResult; fc: Previsions |
   const secured = `Reste sécurisé ${fmtPct(pctSecurise)}${alert ? ` (aléas ${fmtPct(pctAleas)} : au-delà du seuil)` : ''}`;
   const securedTitle = `Part du reste à dépenser sécurisée : (plan de charge restant + provisions sécurisées) ÷ (+ provisions pour aléas)${en}`;
   return (
-    <>
-      <div className="pil-metrics">
+    <div className="pil-metrics">
+      <Metric
+        label={`Enveloppes${annee > 0 ? ` ${annee}` : ''}`}
+        value={total != null ? fmtEur(total) : '—'}
+        sub={
+          nbEnv > 0
+            ? `${nbEnv} CT avec enveloppe${en}${nbHors > 0 ? ` · ${nbHors} sans enveloppe` : ''}`
+            : fc
+              ? `Aucune enveloppe ${en ? en.trim() : 'saisie'}`
+              : 'Prévisions non disponibles'
+        }
+      />
+      <Metric
+        label="Consommé"
+        value={fmtEur(consomme)}
+        glyph={e && alert ? { kind: 'warning', tone: 'warning' } : undefined}
+        sub={
+          <>
+            {pct != null ? `${fmtPct(pct)} des enveloppes${en}` : 'Aucune enveloppe'}
+            {e && (
+              <>
+                {' · '}
+                <span title={securedTitle}>{secured}</span>
+              </>
+            )}
+          </>
+        }
+      >
+        {pct != null && <ProgressBar value={pct} tone={pct > 100 ? 'danger' : 'accent'} label={`Enveloppes consommées : ${fmtPct(pct)}`} />}
+      </Metric>
+      {e ? (
+        <EcheanceMetric e={e} />
+      ) : (
         <Metric
-          label={`Enveloppes${annee > 0 ? ` ${annee}` : ''}`}
-          value={total != null ? fmtEur(total) : '—'}
+          label="Reste sécurisé"
+          value={fmtPct(pctSecurise)}
+          glyph={alert ? { kind: 'warning', tone: 'warning' } : undefined}
           sub={
-            nbEnv > 0
-              ? `${nbEnv} CT avec enveloppe${en}${nbHors > 0 ? ` · ${nbHors} sans enveloppe` : ''}`
-              : fc
-                ? `Aucune enveloppe ${en ? en.trim() : 'saisie'}`
-                : 'Prévisions non disponibles'
+            <span title={securedTitle}>
+              {alert ? `Provisions pour aléas ${fmtPct(pctAleas)} : au-delà du seuil` : `Provisions pour aléas ${fmtPct(pctAleas)}`}
+            </span>
           }
         />
-        <Metric
-          label="Consommé"
-          value={fmtEur(consomme)}
-          glyph={e && alert ? { kind: 'warning', tone: 'warning' } : undefined}
-          sub={
-            <>
-              {pct != null ? `${fmtPct(pct)} des enveloppes${en}` : 'Aucune enveloppe'}
-              {e && (
-                <>
-                  {' · '}
-                  <span title={securedTitle}>{secured}</span>
-                </>
-              )}
-            </>
-          }
-        >
-          {pct != null && <ProgressBar value={pct} tone={pct > 100 ? 'danger' : 'accent'} label={`Enveloppes consommées : ${fmtPct(pct)}`} />}
-        </Metric>
-        {e ? (
-          <EcheanceMetric e={e} />
-        ) : (
-          <Metric
-            label="Reste sécurisé"
-            value={fmtPct(pctSecurise)}
-            glyph={alert ? { kind: 'warning', tone: 'warning' } : undefined}
-            sub={
-              <span title={securedTitle}>
-                {alert ? `Provisions pour aléas ${fmtPct(pctAleas)} : au-delà du seuil` : `Provisions pour aléas ${fmtPct(pctAleas)}`}
-              </span>
-            }
-          />
-        )}
-      </div>
-      {/* Réalisé daté depuis la date de référence : suivi, hors consommé et atterrissage (DECISIONS n° 31). */}
-      <RealiseDepuisRefNote p={glob} dateReference={fc?.date_reference} />
-    </>
+      )}
+    </div>
   );
 }
 
@@ -411,19 +404,6 @@ function EcheanceSection({ e }: { e: Echeance }) {
   );
 }
 
-/** Ligne « Réalisé depuis la reprev » d'un CT (DECISIONS n° 31), seulement si ≠ 0 : suivi, hors consommé et atterrissage. */
-function realiseDepuisRefItems(p: PrevisionCT | undefined, dateReference: string | undefined) {
-  const v = realiseDepuisRef(p);
-  if (v == null) return [];
-  return [
-    {
-      label: <span title={realiseDepuisRefHint(dateReference)}>{REALISE_DEPUIS_REF_LABEL}</span>,
-      value: fmtEur(v),
-      numeric: true,
-    },
-  ];
-}
-
 /** Lignes des provisions d'un CT (DECISIONS n° 23) : sécurisées (dans l'atterrissage), aléas, hors enveloppe. */
 function provisionItems(p: PrevisionCT | undefined, row: CtRow) {
   // Prévision sans le détail (serveur antérieur) : total des provisions seul.
@@ -442,7 +422,7 @@ function provisionItems(p: PrevisionCT | undefined, row: CtRow) {
  * (réalisé, plan et provisions hors enveloppe), provisions sécurisées (dans l'atterrissage) et pour aléas.
  * Année choisie (DECISIONS n° 24) : tranche de l'année.
  */
-function EnveloppeSection({ row, annee, dateReference }: { row: CtRow; annee: number; dateReference: string | undefined }) {
+function EnveloppeSection({ row, annee }: { row: CtRow; annee: number }) {
   const env = row.enveloppe!;
   const p = row.p;
   const horsReel = p?.consomme_hors_enveloppe ?? 0;
@@ -459,7 +439,6 @@ function EnveloppeSection({ row, annee, dateReference }: { row: CtRow; annee: nu
             value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—',
             numeric: true,
           },
-          ...realiseDepuisRefItems(p, dateReference),
           ...(horsReel > 0.5 ? [{ label: 'Réalisé hors enveloppe', value: fmtEur(horsReel), numeric: true }] : []),
           ...(horsPlan > 0.5 ? [{ label: 'Plan hors enveloppe', value: fmtEur(horsPlan), numeric: true }] : []),
           ...provisionItems(p, row),
@@ -480,7 +459,6 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
   const glyph = rowGlyph(row.statut, row.risque, row.sousConso);
   const q = encodeURIComponent(row.ct);
   const withEnv = row.budget != null;
-  const dateRef = fc?.date_reference;
   return (
     <Inspector
       opened
@@ -504,13 +482,12 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
       }
     >
       {withEnv && row.enveloppe ? (
-        <EnveloppeSection row={row} annee={annee} dateReference={dateRef} />
+        <EnveloppeSection row={row} annee={annee} />
       ) : row.horsAnnee ? (
         <InspectorSection title={`Pas d’enveloppe en ${row.horsAnnee} — aucun budget`}>
           <KeyValue
             items={[
               { label: `Consommé en ${row.horsAnnee}`, value: p ? fmtEur(p.consomme) : '—', numeric: true },
-              ...realiseDepuisRefItems(p, dateRef),
             ]}
           />
           <p className="pil-note pil-inspector-note">
@@ -525,7 +502,6 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
           <KeyValue
             items={[
               { label: 'Consommé', value: p ? fmtEur(p.consomme) : '—', numeric: true },
-              ...realiseDepuisRefItems(p, dateRef),
               ...provisionItems(p, row),
             ]}
           />

@@ -2,7 +2,7 @@
 // « Plan démo × Réalisé démo · S36 → S40 ▾ » ouvrant un popover (versions plan / réalisé / provisions, semaines, inactifs).
 // CONTRAT FIGÉ (props) — implémentation : agent Pilotage A. Utilisé en lecture par Pilotage B.
 // Exporte aussi AnalyseGate (états chargement / vide / erreur communs), ArchivedTag, UncoveredNote, NoProvisionNote,
-// ReferenceText et RealiseDepuisRefNote (date de référence, DECISIONS n° 31).
+// et ReferenceText (date de référence, DECISIONS n° 31).
 // Le plan choisi désigne la timeline connue à la date de cette version (DECISIONS n° 13).
 import { useMemo, type ReactNode } from 'react';
 import { Button, EmptyState, Group, Link, Popover, Select, SkeletonRows, Spinner, Stack, Switch, Tag, type Option } from '../../../ui';
@@ -10,12 +10,10 @@ import { IconChevronDown } from '../../../ui/Icons';
 import { ApiError } from '../../../api/client';
 import type { AnalyseResult, Previsions, Version } from '../../../api/types';
 import ErrorAlert from '../../../components/ErrorAlert';
-import { fmtDate, fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
+import { fmtDate, fmtHours, fmtWeek } from '../../../lib/format';
 import type { UseAnalyse } from './context';
 import {
   heuresNonCouvertes,
-  REALISE_DEPUIS_REF_LABEL,
-  realiseDepuisRef,
   referenceLabel,
   REFERENCE_HELP,
   uncoveredSentence,
@@ -288,28 +286,8 @@ export function NoProvisionNote({ result }: { result: AnalyseResult | undefined 
  * Libellé de la date de référence (DECISIONS n° 31) pour un sous-titre de barre d'outils : dates courtes (JJ/MM),
  * libellé complet et définition en bulle. Rien sans prévisions.
  */
-export function ReferenceText({ fc }: { fc: Pick<Previsions, 'date_reference' | 'dernier_realise' | 'as_of'> | null | undefined }) {
+export function ReferenceText({ fc }: { fc: Pick<Previsions, 'date_reference' | 'as_of'> | null | undefined }) {
   const text = referenceLabel(fc, true);
   if (!text) return null;
   return <span title={`${referenceLabel(fc)}. ${REFERENCE_HELP}.`}>{text}</span>;
-}
-
-/**
- * « Réalisé depuis la reprev : 12 345 € » sous les chiffres clés (DECISIONS n° 31) : réalisé daté à partir de la date
- * de référence, montré pour le suivi mais hors consommé, rythme et atterrissage. Rien sous 0,5 €.
- */
-export function RealiseDepuisRefNote({
-  p,
-  dateReference,
-}: {
-  p: { realise_depuis_reference?: number | null } | null | undefined;
-  dateReference: string | null | undefined;
-}) {
-  const v = realiseDepuisRef(p);
-  if (v == null) return null;
-  return (
-    <p className="pil-note">
-      {REALISE_DEPUIS_REF_LABEL} : {fmtEur(v)} (daté à partir du {fmtDate(dateReference)} : suivi, hors atterrissage).
-    </p>
-  );
 }

@@ -448,8 +448,8 @@ func TestPrevisionsSansRealise(t *testing.T) {
 	s := store.DefaultSettings()
 	pv := Run(in, s).Previsions
 	// Sans réalisé, la date de référence reste la date d'effet du plan (DECISIONS n° 31).
-	if pv.DateReference != "2026-09-07" || pv.AsOf != "2026-09-06" || pv.AsOfWeek != "2026-W36" || pv.DernierRealise != "" {
-		t.Fatalf("référence = %q, as_of = %q / %q, dernier réalisé %q", pv.DateReference, pv.AsOf, pv.AsOfWeek, pv.DernierRealise)
+	if pv.DateReference != "2026-09-07" || pv.AsOf != "2026-09-06" || pv.AsOfWeek != "2026-W36" {
+		t.Fatalf("référence = %q, as_of = %q / %q", pv.DateReference, pv.AsOf, pv.AsOfWeek)
 	}
 	gl := pv.Global
 	if gl.Consomme != 0 || gl.ResteAFaire != 2000 || gl.AtterrissagePlan != 2000 || gl.AtterrissageTendance != 0 ||
@@ -891,8 +891,8 @@ func TestPrevisionsEnveloppes(t *testing.T) {
 	in, s := enveloppesScenario()
 	res := Run(in, s)
 	pv := res.Previsions
-	if pv.DateReference != "2026-10-05" || pv.AsOf != "2026-10-04" || pv.AsOfWeek != "2026-W40" || pv.DernierRealise != "2026-10-01" {
-		t.Fatalf("référence %q, as_of = %q / %q, dernier réalisé %q", pv.DateReference, pv.AsOf, pv.AsOfWeek, pv.DernierRealise)
+	if pv.DateReference != "2026-10-05" || pv.AsOf != "2026-10-04" || pv.AsOfWeek != "2026-W40" {
+		t.Fatalf("référence %q, as_of = %q / %q", pv.DateReference, pv.AsOf, pv.AsOfWeek)
 	}
 	for _, p := range append(pv.ParCT, pv.Global) {
 		checkInvariants(t, p, pv.AsOf)

@@ -182,8 +182,8 @@ func TestHandlerAnalyse(t *testing.T) {
 	// Classification prévisionnelle (DECISIONS n° 23) : date de référence = date d'effet du
 	// plan (07/09, son début : DECISIONS n° 31), tout le plan (10 000 €) reste à faire et est
 	// sécurisé ; aucune provision → aucun aléa, aucun CT à risque (le TYPE du réalisé n'y entre plus).
-	if res.Previsions.DateReference != "2026-09-07" || res.Previsions.DernierRealise != "2026-09-10" {
-		t.Errorf("référence %q, dernier réalisé %q", res.Previsions.DateReference, res.Previsions.DernierRealise)
+	if res.Previsions.DateReference != "2026-09-07" {
+		t.Errorf("référence %q", res.Previsions.DateReference)
 	}
 	if len(res.Alertes.DeriveProvision) != 2 || len(res.Alertes.CTRisque) != 0 || res.Alertes.AlerteGlobale {
 		t.Errorf("alertes: %+v", res.Alertes)

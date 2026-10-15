@@ -315,7 +315,8 @@ func TestRunTimeline(t *testing.T) {
 	for _, pt := range p1.Series {
 		cov[pt.Week] = pt.Couverture
 	}
-	if cov["2026-W36"] != domain.CouvertureAucune || cov["2026-W38"] != domain.CouvertureTotale || cov["2026-W45"] != domain.CouvertureAucune {
+	// W45 (réalisé seul, après la date de référence) : hors de l'axe des prévisions (DECISIONS n° 32).
+	if _, w45 := cov["2026-W45"]; cov["2026-W36"] != domain.CouvertureAucune || cov["2026-W38"] != domain.CouvertureTotale || w45 {
 		t.Errorf("couverture des prévisions : %v", cov)
 	}
 

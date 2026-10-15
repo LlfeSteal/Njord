@@ -145,11 +145,11 @@ func TestAnomaliesDemo(t *testing.T) {
 		for _, p := range res.Previsions.ParCT {
 			ctPPS += p.PPS
 		}
-		// Réalisé = consommé + réalisé depuis la date de référence (DECISIONS n° 31 : plan
-		// de la démo en effet à son début, presque tout le réalisé lui est postérieur).
+		// Réalisé des natures = consommé : les deux ignorent le réalisé daté à partir de la
+		// date de référence (DECISIONS n° 32).
 		he := res.Previsions.HorsEnveloppe
-		if math.Abs(pps-ctPPS) > 0.05 || math.Abs(reel-he.Consomme-he.RealiseDepuisReference) > 0.05 {
-			t.Errorf("Σ natures PPS %.2f / réalisé %.2f, prévisions %.2f / %.2f + %.2f", pps, reel, ctPPS, he.Consomme, he.RealiseDepuisReference)
+		if math.Abs(pps-ctPPS) > 0.05 || math.Abs(reel-he.Consomme) > 0.05 {
+			t.Errorf("Σ natures PPS %.2f / réalisé %.2f, prévisions %.2f / consommé %.2f", pps, reel, ctPPS, he.Consomme)
 		}
 		t.Logf("par nature : %+v", pn)
 	}

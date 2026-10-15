@@ -21,17 +21,15 @@ import (
 // Date de référence (DECISIONS n° 31) : D = date d'effet de la dernière version
 // de la timeline (Timeline.DateReference : plus grande date_effet des fenêtres
 // non vides) ; sans fenêtre : lendemain du dernier réalisé, à défaut la date du
-// jour (Input.Now). as_of = D − 1 ; dernier_realise = dernière date de dépense.
+// jour (Input.Now). as_of = D − 1.
 // Un segment de la timeline appartient à une seule fenêtre : il est entièrement
 // avant D ou entièrement à partir de D (au jour près ; dates invalides : à partir
-// de D s'il appartient à la version de D). Le réalisé daté ≥ D (dans la période,
-// ou la tranche) va au « réalisé depuis la référence » : affiché (montant et
-// courbe du réel jusqu'à la semaine du dernier réalisé), mais hors consommé,
-// rythme et atterrissages — l'atterrissage est la photo de la reprev. Courbes :
-// au point de la semaine d'as_of, réel = réel ≤ as_of (départ commun des
-// projections) ; le réalisé ≥ D et le plan ≥ D de cette semaine sont cumulés au
-// point suivant (au plus tard le dernier de l'axe pour le plan ; sans point
-// suivant, ce réalisé n'est pas tracé).
+// de D s'il appartient à la version de D). Le réalisé daté ≥ D est ignoré
+// (DECISIONS n° 32) : ni consommé, ni rythme, ni atterrissage, ni courbe ou
+// heures réelles — l'atterrissage est la photo de la reprev. Courbes : le réel
+// s'arrête à la semaine d'as_of (réel ≤ as_of, départ commun des projections) ;
+// le plan ≥ D de cette semaine est cumulé au point suivant (au plus tard le
+// dernier de l'axe).
 //
 // Budget = enveloppe du fichier, rien d'autre (DECISIONS n° 20) : le PPS est
 // informatif (ni budget, ni série de budget).
@@ -50,9 +48,8 @@ import (
 // exercice propre au CT sur sa période [D, E] (ici D = début de l'enveloppe) (semaines ISO WD et WE incluses
 // entières) :
 //   - consommé = € datés dans [D, E] et ≤ as_of + écritures sans date ; les €
-//     datés hors période vont au réalisé hors enveloppe (exclus du consommé, du
-//     rythme et des séries ; les heures réelles restent comptées), ceux de la
-//     période datés ≥ date de référence au réalisé depuis la référence ;
+//     datés ≤ as_of hors période vont au réalisé hors enveloppe (exclus du
+//     consommé, du rythme et des séries ; les heures réelles restent comptées) ;
 //   - prévu des semaines < WD ou > WE (+ PPS hors série) = plan hors
 //     enveloppe : ni reste à faire, ni série ;
 //   - reste à faire = prévu daté ≥ date de référence des semaines [WD, WE] ;
@@ -143,11 +140,9 @@ type fcBucket struct {
 	prevu           map[string]float64 // dépense prévue par semaine (tous les segments)
 	prevuFutur      map[string]float64 // dépense prévue des segments datés ≥ date de référence (DECISIONS n° 31)
 	reel            map[string]float64 // € datés ≤ as_of de la période (de la tranche en année N), par semaine
-	reelRef         map[string]float64 // € datés ≥ date de référence de la période (de la tranche), par semaine
-	realiseRef      float64            // Σ reelRef : réalisé depuis la référence (hors consommé)
 	rythme4         float64            // € de toute la période datés dans [D − 28 j, D − 1] (rythme, indépendant de l'année)
 	hplan           map[string]float64
-	hreel           map[string]float64
+	hreel           map[string]float64 // heures MO réelles datées ≤ as_of
 	etp             map[string]float64 // ETP planifiés par semaine (DECISIONS n° 25)
 	fin             string             // max date_fin (YYYY-MM-DD)
 	// Enveloppe (DECISIONS n° 19) : période [wd, we] en semaines ISO ; nil = sans budget.
@@ -168,7 +163,7 @@ type fcBucket struct {
 }
 
 func newFcBucket() *fcBucket {
-	return &fcBucket{prevu: map[string]float64{}, prevuFutur: map[string]float64{}, reel: map[string]float64{}, reelRef: map[string]float64{},
+	return &fcBucket{prevu: map[string]float64{}, prevuFutur: map[string]float64{}, reel: map[string]float64{},
 		hplan: map[string]float64{}, hreel: map[string]float64{}, etp: map[string]float64{},
 		provWeek: map[string]float64{}, ratio: 1}
 }
@@ -276,15 +271,13 @@ type fcCalc struct {
 	// Enveloppe (DECISIONS n° 19).
 	env                 *domain.Enveloppe
 	planHors, consoHors float64
-	realiseRef          float64 // réalisé depuis la date de référence (DECISIONS n° 31)
 }
 
 // fcAxis is the weekly axis of a forecast and the as_of landmarks.
 type fcAxis struct {
 	weeks    []string
 	idx      map[string]int
-	asIdx    int    // index de la semaine d'as_of (-1 : avant l'axe ou sans date de référence ; dernier : après l'axe)
-	reelIdx  int    // dernier point du réel : max(asIdx, semaine du dernier réalisé) (DECISIONS n° 31)
+	asIdx    int    // index de la semaine d'as_of, dernier point du réel (-1 : avant l'axe ou sans date de référence ; dernier : après l'axe)
 	asOfWeek string // semaine ISO d'as_of
 	fromWeek string // départ des semaines restantes (année N : max(as_of, semaine précédant N))
 	finMax   string // année N : borne de l'horizon des CT sans enveloppe (dernier jour de N)
@@ -304,11 +297,11 @@ func (ax fcAxis) index(w string) int {
 // previsions computes the landing forecast (SPEC_analyse §7.7), « Tout ».
 func (r *run) previsions() domain.Previsions { return r.previsionsFor(0) }
 
-// fcReference returns the reference date D (DECISIONS n° 31) and the last
-// réalisé expense date : D = date d'effet de la dernière fenêtre non vide de la
-// timeline ; sans fenêtre, lendemain du dernier réalisé, à défaut date du jour
-// (Input.Now) ; "" si rien de tout cela.
-func (r *run) fcReference() (ref, dernier string) {
+// fcReference returns the reference date D (DECISIONS n° 31) : date d'effet de
+// la dernière fenêtre non vide de la timeline ; sans fenêtre, lendemain du
+// dernier réalisé, à défaut date du jour (Input.Now) ; "" si rien de tout cela.
+func (r *run) fcReference() (ref string) {
+	dernier := ""
 	for i := range r.entries {
 		if r.enr[i].ISOWeek == "" {
 			continue
@@ -325,7 +318,7 @@ func (r *run) fcReference() (ref, dernier string) {
 	case !r.in.Now.IsZero():
 		ref = r.in.Now.Format(time.DateOnly)
 	}
-	return ref, dernier
+	return ref
 }
 
 // previsionsFor computes the forecast of the ISO year annee (DECISIONS n° 24) ;
@@ -333,7 +326,7 @@ func (r *run) fcReference() (ref, dernier string) {
 func (r *run) previsionsFor(annee int) domain.Previsions {
 	y := newFcYear(annee)
 	// Date de référence (DECISIONS n° 31) : as_of = veille de D.
-	ref, dernier := r.fcReference()
+	ref := r.fcReference()
 	asOf := dayBefore(ref)
 	asOfWeek := WeekOfDate(asOf)
 	refVersion := r.tl.VersionAt(ref) // version de D : segments aux dates invalides comptés à partir de D
@@ -435,10 +428,10 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		}
 	}
 
-	// Réalisé : consommé brut (€ datés ≤ as_of), heures MO (toutes dates), rythme
-	// (€ de toute la période datés dans [D − 28 j, D − 1], indépendant de l'année).
-	// Avec enveloppe, les € datés hors période sont mis à part (heures comptées) ;
-	// ceux datés ≥ D vont au réalisé depuis la référence (DECISIONS n° 31).
+	// Réalisé : consommé brut (€ datés ≤ as_of), heures MO, rythme (€ de toute la
+	// période datés dans [D − 28 j, D − 1], indépendant de l'année). Avec
+	// enveloppe, les € datés hors période sont mis à part (heures comptées). Le
+	// réalisé daté ≥ D est ignoré (DECISIONS n° 32).
 	r4 := addDays(ref, -28)
 	for i := range r.entries {
 		e := &r.entries[i]
@@ -456,7 +449,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		if ref != "" && d >= r4 && d < ref && (b.full == nil || (d >= b.full.DateDebut && d <= b.full.DateFin)) {
 			b.rythme4 += e.TotalEur
 		}
-		if !y.week(w) {
+		if !y.week(w) || (ref != "" && d >= ref) {
 			continue
 		}
 		b.active = true
@@ -464,11 +457,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		extend(w)
 		if b.env != nil && (d < b.env.DateDebut || d > b.env.DateFin) {
 			b.consoHors += e.TotalEur
-			continue
-		}
-		if ref != "" && d >= ref {
-			b.realiseRef += e.TotalEur
-			b.reelRef[w] += e.TotalEur
 			continue
 		}
 		b.consomme += e.TotalEur
@@ -530,7 +518,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		}
 	}
 
-	ax := fcAxis{idx: map[string]int{}, asIdx: -1, reelIdx: -1, asOfWeek: asOfWeek, fromWeek: asOfWeek}
+	ax := fcAxis{idx: map[string]int{}, asIdx: -1, asOfWeek: asOfWeek, fromWeek: asOfWeek}
 	var cov []domain.Couverture
 	from, to := axisMin, axisMax
 	if y.active {
@@ -557,13 +545,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		return -1
 	}
 	ax.asIdx = at(asOfWeek) // après l'axe (année passée) : tout est réalisé
-	// Le réel court jusqu'à la semaine du dernier réalisé (DECISIONS n° 31).
-	// Le réel ≥ D de la semaine d'as_of est cumulé au point suivant : il doit
-	// rester tracé même si le dernier réalisé tombe dans cette semaine.
-	ax.reelIdx = max(ax.asIdx, at(WeekOfDate(dernier)))
-	if ref != "" && dernier >= ref && ax.asIdx >= 0 && ax.asIdx+1 < n {
-		ax.reelIdx = max(ax.reelIdx, ax.asIdx+1)
-	}
 
 	cts := make([]string, 0, len(buckets))
 	for ct, b := range buckets {
@@ -578,7 +559,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 	g := fcCalc{budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n), etp: make([]float64, n)}
 	out := domain.Previsions{Annees: r.fcAnnees(ref, buckets), DateReference: ref, AsOf: asOf, AsOfWeek: asOfWeek,
-		DernierRealise: dernier, ParCT: []domain.PrevisionCT{}}
+		ParCT: []domain.PrevisionCT{}}
 	if y.active {
 		out.Annee = annee
 	}
@@ -590,7 +571,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 			h := &out.HorsEnveloppe
 			h.NbCT++
 			h.Consomme += c.consomme
-			h.RealiseDepuisReference += c.realiseRef
 			h.AtterrissagePlan += c.atterPlan
 			h.AtterrissageTendance += c.atterTend
 			continue
@@ -604,7 +584,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		}
 		g.planHors += c.planHors
 		g.consoHors += c.consoHors
-		g.realiseRef += c.realiseRef
 		g.pps += c.pps
 		g.provisions += c.provisions
 		g.provSec += c.provSec
@@ -630,7 +609,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 	}
 	h := &out.HorsEnveloppe
 	h.Consomme, h.AtterrissagePlan, h.AtterrissageTendance = round2(h.Consomme), round2(h.AtterrissagePlan), round2(h.AtterrissageTendance)
-	h.RealiseDepuisReference = round2(h.RealiseDepuisReference)
 
 	// Séries du global sur l'union des périodes [min WD, max WE] ; vides sans enveloppe.
 	lo, hi := 0, -1
@@ -771,7 +749,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 		provSec: b.provSec, provAleas: b.provAleas, provHors: b.provHors,
 		budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n), etp: make([]float64, n),
-		env: b.env, consoHors: b.consoHors, realiseRef: b.realiseRef}
+		env: b.env, consoHors: b.consoHors}
 	if b.env != nil {
 		c.budgeted, c.budget, c.echeance, c.planHors = true, b.env.Montant, b.env.DateFin, b.ppsHorsSerie
 	}
@@ -827,25 +805,17 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 		}
 	}
 
-	// Réalisé ≥ D (DECISIONS n° 31) : cumulé dans sa semaine, celui de la semaine
-	// d'as_of au point suivant (sans point suivant : non tracé).
-	apres := make([]float64, n)
-	for w, v := range b.reelRef {
-		if i := max(ax.index(w), asIdx+1); i < n {
-			apres[i] += v
-		}
-	}
 	budgetCum, reelCum := 0.0, b.undated
 	base := b.undated // cumul réel à as_of (point de départ des projections)
 	for i, w := range axis {
 		if b.inPeriod(w) {
 			budgetCum += b.prevu[w]
 		}
-		reelCum += b.reel[w] + apres[i]
+		reelCum += b.reel[w]
 		c.budgetCum[i] = budgetCum
 		c.hp[i] = b.hplan[w]
 		c.etp[i] = b.etp[w]
-		if i <= ax.reelIdx {
+		if i <= asIdx {
 			c.reelCum[i] = reelCum
 			c.hr[i] = b.hreel[w]
 		}
@@ -962,8 +932,7 @@ func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
 }
 
 // fcBuild rounds the figures and builds the weekly points of axis[lo..hi] :
-// réel jusqu'à reelIdx (semaine du dernier réalisé, DECISIONS n° 31),
-// projections à partir de la semaine d'as_of.
+// réel jusqu'à la semaine d'as_of (DECISIONS n° 32), projections à partir d'elle.
 func (r *run) fcBuild(ct, libelle string, c fcCalc, ax fcAxis, cov []domain.Couverture, lo, hi int) domain.PrevisionCT {
 	axis, asIdx := ax.weeks, ax.asIdx
 	p := domain.PrevisionCT{
@@ -985,7 +954,6 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, ax fcAxis, cov []domain.Couv
 		Series:                  make([]domain.PrevisionPoint, 0, max(0, hi-lo+1)),
 		PlanHorsEnveloppe:       round2(c.planHors),
 		ConsommeHorsEnveloppe:   round2(c.consoHors),
-		RealiseDepuisReference:  round2(c.realiseRef),
 	}
 	if c.env != nil {
 		e := *c.env
@@ -1001,7 +969,7 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, ax fcAxis, cov []domain.Couv
 		if m, err := WeekMonday(w); err == nil {
 			pt.Debut = m.Format(time.DateOnly)
 		}
-		if i <= ax.reelIdx {
+		if i <= asIdx {
 			pt.ReelCumul = fcPtr(c.reelCum[i])
 			pt.HeuresReel = fcPtr(c.hr[i])
 		}

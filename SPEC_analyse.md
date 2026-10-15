@@ -259,7 +259,7 @@ Cartes affichées en tête d'écran :
 
 Ajout 2026-10-05 (contrôle de gestion). Horizon = tout le plan, indépendant de la période d'analyse.
 
-- **Date de référence** D = date d'effet de la dernière version du plan de charge (timeline) ; `as_of` = D − 1 (amendé le 2026-10-14, DECISIONS n° 31 : avant, dernière date de dépense du réalisé). Le réalisé daté à partir de D est affiché à part (« réalisé depuis la reprev ») et n'entre ni dans le consommé, ni dans le rythme, ni dans l'atterrissage.
+- **Date de référence** D = date d'effet de la dernière version du plan de charge (timeline) ; `as_of` = D − 1 (amendé le 2026-10-14, DECISIONS n° 31 : avant, dernière date de dépense du réalisé). Le réalisé daté à partir de D est ignoré (amendé le 2026-10-15, DECISIONS n° 32) : ni consommé, ni rythme, ni atterrissage, ni courbe ou heures réelles au-delà de la semaine d'`as_of` ; il se suit dans les écarts d'imputation.
 - Budget d'un CT = Σ PPS des lignes du plan ; dépense prévue hebdomadaire = PPS réparti au prorata des heures (jours ouvrés, §4).
 - Consommé = Σ TOTAL EN € brut (MO comprise) jusqu'à `as_of`.
 - **Atterrissage plan** = consommé + reste à faire du plan (segments datés à partir de D).

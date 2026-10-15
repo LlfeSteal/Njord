@@ -644,7 +644,8 @@ func TestHandlerPrevisionsAnnee(t *testing.T) {
 	}
 	pv := decode[domain.Previsions](t, w)
 	p := findCT(t, pv, "Y99F90001")
-	if pv.Annee != 2027 || p.Enveloppe == nil || p.Enveloppe.DateDebut != "2027-01-04" || p.Enveloppe.Montant != 17800 || fv(pv.Global.Budget) != 17800 {
+	// L'enveloppe 2026-07 → 2027-06 se termine en 2027 : prise entière (DECISIONS n° 35).
+	if pv.Annee != 2027 || p.Enveloppe == nil || p.Enveloppe.DateDebut != "2026-07-01" || p.Enveloppe.Montant != 36500 || fv(pv.Global.Budget) != 36500 {
 		t.Errorf("2027 : %+v / %+v", pv.Global, p.Enveloppe)
 	}
 	// Lecture seule : pas de dernier rendu sauvegardé.

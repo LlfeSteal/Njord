@@ -1,5 +1,5 @@
 // Chiffre clé « Non consommé prévu » (DECISIONS n° 17, 20, 21, 23) : l'enveloppe non consommée à sa fin est perdue.
-// Page Budget, sur le périmètre des CT avec enveloppe (chacun à sa propre échéance, montants sommés CT par CT) ;
+// Page Budget, sur le périmètre des CT avec enveloppe (chacun à sa propre échéance, solde net : DECISIONS n° 34) ;
 // année choisie (DECISIONS n° 24) : tranches de l'année, échéance = fin de la tranche.
 import { Metric } from '../../../ui';
 import { fmtEur } from '../../../lib/format';

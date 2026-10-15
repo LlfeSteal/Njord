@@ -28,7 +28,7 @@ import {
 import { IconDownload } from '../../../ui/Icons';
 import { analyseApi } from '../../../api/client';
 import type { AnalyseResult, PrevisionCT, PrevisionStatut, Previsions } from '../../../api/types';
-import { fmtDate, fmtEur, fmtHours, fmtPct, fmtPeriod } from '../../../lib/format';
+import { fmtDate, fmtEur, fmtPct, fmtPeriod } from '../../../lib/format';
 import { ForecastChart } from '../shared/charts';
 import { useAnalyse, type UseAnalyse } from '../shared/context';
 import ContextControl, { AnalyseGate, ArchivedTag, NoProvisionNote, ReferenceText } from '../shared/ContextControl';
@@ -269,7 +269,7 @@ function BudgetTable({
             </td>
             <td data-align="right">{fmtEur(r.atterrissage)}</td>
             <td data-align="right">
-              <Reste value={r.reste} over={r.resteOver} warn={r.sousConso} title={resteTitle(r.echeance)} />
+              <Reste value={r.reste} over={r.resteOver} warn={r.sousConso} title={resteTitle(r.echeance)} poursuite={r.p?.poursuite} />
             </td>
           </tr>
         ))}
@@ -287,7 +287,7 @@ function BudgetTable({
               <Consumption pct={tConso != null && tBudget ? (tConso / tBudget) * 100 : null} />
             </td>
             <td data-align="right">{fmtEur(sumOf(envRows, 'atterrissage'))}</td>
-            <td data-align="right" title="Somme des CT avec enveloppe, chacun à la fin de son enveloppe : non consommé CT par CT, sans compensation avec les dépassements (DECISIONS n° 20, 21)">
+            <td data-align="right" title="Solde net des CT avec enveloppe, chacun à la fin de son enveloppe : les dépassements sont financés par les non consommés (enveloppes fongibles, DECISIONS n° 34)">
               {global?.complete ? (
                 <Reste
                   value={global.e.nonConsomme > 0.5 ? global.e.nonConsomme : global.e.depassement}
@@ -356,101 +356,97 @@ function Classification({ row, annee }: { row: CtRow; annee: number }) {
             value: fmtEur(p.v),
             numeric: true,
           })),
-          { label: '% sécurité', value: fmtPct(split.pct), numeric: true },
         ]}
       />
     </InspectorSection>
   );
-}
-
-/** Fin de l'enveloppe d'un CT (DECISIONS n° 19, 20) : projections, enveloppe perdue ou dépassée, rythme. */
-function EcheanceSection({ e }: { e: Echeance }) {
-  const unspent = e.nonConsomme > 0.5;
-  return (
-    <InspectorSection title={`Fin de l’enveloppe${enAnnee(e.annee)} · ${fmtDayMonth(e.date)}`}>
-      <KeyValue
-        items={[
-          { label: 'Projection sécurisée', value: fmtEur(e.projPlan), numeric: true },
-          e.depassement > 0.5
-            ? {
-                label: 'Dépassement prévu',
-                value: (
-                  <span className="pil-signed" data-tone="danger">
-                    +{fmtEur(e.depassement)}
-                  </span>
-                ),
-                numeric: true,
-              }
-            : {
-                label: 'Non consommé',
-                value: (
-                  <span className="pil-signed" data-tone={e.sousConso ? 'warning' : undefined}>
-                    {fmtEur(e.nonConsomme)}
-                    {e.budget > 0 && unspent ? ` · ${fmtPct(Math.round((e.nonConsomme / e.budget) * 100))}` : ''}
-                  </span>
-                ),
-                numeric: true,
-              },
-          {
-            label: 'Rythme nécessaire',
-            value: e.semaines > 0 ? `${fmtEur(e.rythmeNecessaire)} / sem.` : 'Échéance atteinte',
-            numeric: true,
-          },
-          { label: 'Rythme actuel', value: `${fmtEur(e.rythmeActuel)} / sem.`, numeric: true },
-          { label: 'Projection tendance (repère)', value: fmtEur(e.projTendance), numeric: true },
-        ]}
-      />
-    </InspectorSection>
-  );
-}
-
-/** Lignes des provisions d'un CT (DECISIONS n° 23) : sécurisées (dans l'atterrissage), aléas, hors enveloppe. */
-function provisionItems(p: PrevisionCT | undefined, row: CtRow) {
-  // Prévision sans le détail (serveur antérieur) : total des provisions seul.
-  if (!p || (p.provisions_securisees == null && p.provisions_aleas == null))
-    return [{ label: 'Provisions', value: fmtEur(row.provisions), numeric: true }];
-  const hors = p.provisions_hors_enveloppe ?? 0;
-  return [
-    { label: 'Provisions sécurisées (dans l’atterrissage)', value: fmtEur(p.provisions_securisees ?? 0), numeric: true },
-    { label: 'Provisions pour aléas (non sécurisées)', value: fmtEur(p.provisions_aleas ?? 0), numeric: true },
-    ...(hors > 0.5 ? [{ label: 'Provisions hors enveloppe', value: fmtEur(hors), numeric: true }] : []),
-  ];
 }
 
 /**
- * Enveloppe d'un CT (DECISIONS n° 19, 20, 23) : période, montant, zone cible, consommé de la période, ce qui en sort
- * (réalisé, plan et provisions hors enveloppe), provisions sécurisées (dans l'atterrissage) et pour aléas.
+ * Fin de l'enveloppe d'un CT (DECISIONS n° 19, 20, 33) : projection sécurisée, enveloppe perdue ou dépassée, rythme
+ * nécessaire face au rythme prévu par le plan de charge.
+ */
+function EcheanceSection({ e }: { e: Echeance }) {
+  const unspent = e.nonConsomme > 0.5;
+  const over = e.depassement > 0.5;
+  // Année N, enveloppe qui continue après N (DECISIONS n° 35) : rien n'est perdu sur l'année, pas de rythme à tenir ;
+  // seul un dépassement de la tranche s'affiche.
+  const continues = e.poursuite !== '';
+  const ecart = over
+    ? {
+        label: 'Dépassement prévu',
+        value: (
+          <span className="pil-signed" data-tone="danger">
+            +{fmtEur(e.depassement)}
+          </span>
+        ),
+        numeric: true,
+      }
+    : continues
+      ? { label: 'Se poursuit', value: `jusqu’au ${fmtDate(e.poursuite)}`, numeric: true }
+      : {
+          label: 'Non consommé',
+          value: (
+            <span className="pil-signed" data-tone={e.sousConso ? 'warning' : undefined}>
+              {fmtEur(e.nonConsomme)}
+              {e.budget > 0 && unspent ? ` · ${fmtPct(Math.round((e.nonConsomme / e.budget) * 100))}` : ''}
+            </span>
+          ),
+          numeric: true,
+        };
+  const rythmes = continues
+    ? []
+    : [
+        {
+          label: 'Rythme nécessaire',
+          value: e.semaines > 0 ? `${fmtEur(e.rythmeNecessaire)} / sem.` : 'Échéance atteinte',
+          numeric: true,
+        },
+        {
+          label: <span title="Plan de charge restant ÷ semaines restantes jusqu’à la fin de l’enveloppe">Rythme actuel (PDC)</span>,
+          value: e.semaines > 0 ? `${fmtEur(e.rythmePdc)} / sem.` : 'Échéance atteinte',
+          numeric: true,
+        },
+      ];
+  return (
+    <InspectorSection title={`Fin de l’enveloppe${enAnnee(e.annee)} · ${fmtDayMonth(e.date)}`}>
+      <KeyValue items={[{ label: 'Projection sécurisée', value: fmtEur(e.projPlan), numeric: true }, ecart, ...rythmes]} />
+    </InspectorSection>
+  );
+}
+
+/**
+ * Enveloppe d'un CT (DECISIONS n° 19, 20, 33) : période, montant, consommé de la période et plan de charge restant.
  * Année choisie (DECISIONS n° 24) : tranche de l'année.
  */
 function EnveloppeSection({ row, annee }: { row: CtRow; annee: number }) {
   const env = row.enveloppe!;
   const p = row.p;
-  const horsReel = p?.consomme_hors_enveloppe ?? 0;
-  const horsPlan = p?.plan_hors_enveloppe ?? 0;
   return (
     <InspectorSection title={annee > 0 ? `Enveloppe en ${annee}` : 'Enveloppe'}>
       <KeyValue
         items={[
           { label: 'Période', value: fmtPeriod(env.date_debut, env.date_fin), numeric: true },
           { label: 'Montant', value: fmtEur(env.montant), numeric: true },
-          ...(p?.cible_min != null ? [{ label: 'Zone cible', value: `${fmtEur(p.cible_min)} → ${fmtEur(env.montant)}`, numeric: true }] : []),
           {
-            label: 'Consommé dans la période',
+            label: 'Consommé',
             value: p ? `${fmtEur(p.consomme)} · ${fmtPct(row.pct != null ? Math.round(row.pct) : null)}` : '—',
             numeric: true,
           },
-          ...(horsReel > 0.5 ? [{ label: 'Réalisé hors enveloppe', value: fmtEur(horsReel), numeric: true }] : []),
-          ...(horsPlan > 0.5 ? [{ label: 'Plan hors enveloppe', value: fmtEur(horsPlan), numeric: true }] : []),
-          ...provisionItems(p, row),
+          { label: 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
         ]}
       />
-      <p className="pil-note pil-inspector-note">
-        <Link to={`/enveloppes?ct=${encodeURIComponent(row.ct)}`} size="sm">
-          Voir l’enveloppe
-        </Link>
-      </p>
     </InspectorSection>
   );
+}
+
+/** CT sans budget (sans enveloppe, ou hors de l'année choisie) : consommé, reste à faire, projection sécurisée. */
+function sansBudgetItems(p: PrevisionCT | undefined, consommeLabel: string) {
+  return [
+    { label: consommeLabel, value: p ? fmtEur(p.consomme) : '—', numeric: true },
+    { label: 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
+    { label: 'Projection sécurisée', value: p ? fmtEur(p.atterrissage_plan) : '—', numeric: true },
+  ];
 }
 
 function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; onClose: () => void }) {
@@ -485,11 +481,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         <EnveloppeSection row={row} annee={annee} />
       ) : row.horsAnnee ? (
         <InspectorSection title={`Pas d’enveloppe en ${row.horsAnnee} — aucun budget`}>
-          <KeyValue
-            items={[
-              { label: `Consommé en ${row.horsAnnee}`, value: p ? fmtEur(p.consomme) : '—', numeric: true },
-            ]}
-          />
+          <KeyValue items={sansBudgetItems(p, `Consommé en ${row.horsAnnee}`)} />
           <p className="pil-note pil-inspector-note">
             L’enveloppe de ce CT ne recoupe pas {row.horsAnnee} —{' '}
             <Link to={`/enveloppes?ct=${q}`} size="sm">
@@ -499,12 +491,7 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         </InspectorSection>
       ) : (
         <InspectorSection title="Sans enveloppe — aucun budget">
-          <KeyValue
-            items={[
-              { label: 'Consommé', value: p ? fmtEur(p.consomme) : '—', numeric: true },
-              ...provisionItems(p, row),
-            ]}
-          />
+          <KeyValue items={sansBudgetItems(p, 'Consommé')} />
           <p className="pil-note pil-inspector-note">
             Sans enveloppe —{' '}
             <Link to={`/enveloppes?ct=${q}`} size="sm">
@@ -513,21 +500,6 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
           </p>
         </InspectorSection>
       )}
-      <InspectorSection title={`Atterrissage${enAnnee(annee)}`}>
-        <KeyValue
-          items={[
-            { label: withEnv ? 'Reste à faire (période)' : 'Reste à faire', value: p ? fmtEur(p.reste_a_faire) : '—', numeric: true },
-            {
-              label: <span title={`${ATTERRISSAGE_LABEL} = ${ATTERRISSAGE_HELP}`}>{ATTERRISSAGE_LABEL}</span>,
-              value: p ? fmtEur(p.atterrissage_plan) : '—',
-              numeric: true,
-            },
-            { label: 'Tendance', value: p ? fmtEur(p.atterrissage_tendance) : '—', numeric: true },
-            { label: 'Rythme hebdo', value: p ? `${fmtEur(p.rythme_hebdo)} / sem.` : '—', numeric: true },
-            { label: 'Fin du plan', value: p ? fmtDate(p.fin_plan) : '—', numeric: true },
-          ]}
-        />
-      </InspectorSection>
       {row.echeance && <EcheanceSection e={row.echeance} />}
       {p && fc && withEnv && p.series.length > 0 && (
         <InspectorSection title="Trajectoire vers l’enveloppe">
@@ -535,23 +507,6 @@ function CtInspector({ row, fc, onClose }: { row: CtRow; fc: Previsions | null; 
         </InspectorSection>
       )}
       <Classification row={row} annee={annee} />
-      {row.b && (
-        <InspectorSection
-          title={
-            <>
-              Main-d’œuvre
-              <AllYearsNote annee={annee} />
-            </>
-          }
-        >
-          <KeyValue
-            items={[
-              { label: 'Heures MO', value: fmtHours(row.b.heures_mo), numeric: true },
-              { label: 'Coût MO (info)', value: fmtEur(row.b.cout_mo_eur), numeric: true },
-            ]}
-          />
-        </InspectorSection>
-      )}
     </Inspector>
   );
 }

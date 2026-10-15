@@ -23,7 +23,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { Couverture, PrevisionCT, PrevisionPoint, Previsions } from '../../../api/types';
-import { fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
+import { fmtDate, fmtEur, fmtHours, fmtWeek } from '../../../lib/format';
 import { StatusGlyph, type GlyphKind, type StatusTone } from '../../../ui';
 import { fmtDayMonth, fmtEtp, fmtEurShort, fmtEurSigned, useTokenColors, weekShort } from './pilotage';
 import './pilotage.css';
@@ -361,14 +361,18 @@ function trajectoryOf(p: PrevisionCT): TrajPoint[] {
   return pts;
 }
 
-/** Statut du point d'arrivée : au-dessus de l'enveloppe, sous la zone cible, vigilance (dans la zone) ou dans la cible. */
-type LandingKind = 'over' | 'under' | 'vigilance' | 'in';
+/**
+ * Statut du point d'arrivée : au-dessus de l'enveloppe, sous la zone cible, vigilance (dans la zone), dans la cible, ou
+ * enveloppe qui se poursuit après l'année choisie (DECISIONS n° 35 : ni cible ni perte sur l'année).
+ */
+type LandingKind = 'over' | 'under' | 'vigilance' | 'in' | 'continue';
 
 const LANDING_GLYPH: Record<LandingKind, { kind: GlyphKind; tone: StatusTone }> = {
   over: { kind: 'danger', tone: 'danger' },
   under: { kind: 'attention', tone: 'attention' },
   vigilance: { kind: 'warning', tone: 'warning' },
   in: { kind: 'success', tone: 'success' },
+  continue: { kind: 'ring', tone: 'neutral' },
 };
 
 /** Taille du glyphe du point d'arrivée (px) et rayon de son anneau couleur carte (2 px autour). */
@@ -420,7 +424,9 @@ export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260
   const kind: LandingKind =
     prevision.statut === 'depassement'
       ? 'over'
-      : prevision.sous_consommation
+      : prevision.poursuite
+        ? 'continue'
+        : prevision.sous_consommation
         ? 'under'
         : prevision.statut === 'vigilance'
           ? 'vigilance'
@@ -434,7 +440,9 @@ export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260
         : fmtEurShort(landing)
     : kind === 'over'
       ? `+${fmtEurShort(ecart)} de dépassement`
-      : kind === 'under'
+      : kind === 'continue'
+        ? `${fmtEurShort(landing)} · se poursuit jusqu’au ${fmtDate(prevision.poursuite)}`
+        : kind === 'under'
         ? `${fmtEurShort(nonConso)} non consommés (plan de charge + provisions sécurisées)`
         : kind === 'vigilance'
           ? `${fmtEurShort(landing)} · dans la cible, vigilance`
@@ -442,7 +450,9 @@ export function ForecastChart({ prevision, asOfWeek, dateReference, height = 260
   const landingWords =
     kind === 'over'
       ? 'Au-dessus de l’enveloppe'
-      : kind === 'under'
+      : kind === 'continue'
+        ? 'L’enveloppe se poursuit'
+        : kind === 'under'
         ? 'Sous la zone cible'
         : kind === 'vigilance'
           ? 'Vigilance'

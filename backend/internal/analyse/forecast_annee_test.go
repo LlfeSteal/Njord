@@ -188,8 +188,12 @@ func TestPrevisionsAnnee(t *testing.T) {
 		t.Errorf("Y tout = %+v", y)
 	}
 
-	// 2026 : tranche 01/07/2026 → 03/01/2027 (dimanche de 2026-W53), 187 j ÷ 365.
+	// 2026 : tranche 01/07/2026 → 03/01/2027 (dimanche de 2026-W53), 187 j ÷ 365 ; l'enveloppe se
+	// poursuit en 2027 (DECISIONS n° 35) : jamais de non consommé en 2026, le dépassement reste suivi.
 	y26 := findCT(t, p26, "Y")
+	if y26.Poursuite != "2027-06-30" || fv(y26.NonConsomme) != 0 || y26.SousConsommation {
+		t.Errorf("Y 2026 poursuite %q, non consommé %v, sous-consommation %v", y26.Poursuite, fv(y26.NonConsomme), y26.SousConsommation)
+	}
 	if y26.Enveloppe == nil || *y26.Enveloppe != (domain.Enveloppe{DateDebut: "2026-07-01", DateFin: "2027-01-03", Montant: 18700}) ||
 		fv(y26.Budget) != 18700 || y26.Echeance != "2027-01-03" {
 		t.Fatalf("Y 2026 enveloppe = %+v", y26.Enveloppe)
@@ -206,29 +210,26 @@ func TestPrevisionsAnnee(t *testing.T) {
 		t.Errorf("Y 2026 séries : %d points, %+v … %+v", n, y26.Series[0], y26.Series[n-1])
 	}
 
-	// 2027 : tranche 04/01/2027 → 30/06/2027, 178 j ÷ 365.
+	// 2027 : l'enveloppe se termine en 2027 (DECISIONS n° 35) : prise entière, jugée à terminaison,
+	// mêmes chiffres que « Tout » ; séries sur les semaines de 2027, cumulées depuis le début de l'enveloppe.
 	y27 := findCT(t, p27, "Y")
-	if y27.Enveloppe == nil || *y27.Enveloppe != (domain.Enveloppe{DateDebut: "2027-01-04", DateFin: "2027-06-30", Montant: 17800}) {
-		t.Fatalf("Y 2027 enveloppe = %+v", y27.Enveloppe)
+	if y27.Enveloppe == nil || *y27.Enveloppe != (domain.Enveloppe{DateDebut: "2026-07-01", DateFin: "2027-06-30", Montant: 36500}) ||
+		y27.Poursuite != "" {
+		t.Fatalf("Y 2027 enveloppe = %+v, poursuite %q", y27.Enveloppe, y27.Poursuite)
 	}
-	if y27.Consomme != 178 || y27.ConsommeHorsEnveloppe != 0 || y27.PPS != 27000 || y27.ResteAFaire != 25000 || y27.PlanHorsEnveloppe != 2000 ||
-		y27.ProvisionsSecurisees != 2480 || y27.ProvisionsHorsEnveloppe != 400 || y27.ProvisionsAleas != 0 || y27.AtterrissagePlan != 27658 ||
-		y27.SemainesEcheance != 26 || y27.RythmeHebdo != 1000 || y27.AtterrissageTendance != 26178 {
-		t.Errorf("Y 2027 = %+v", y27)
+	if fv(y27.Budget) != fv(y.Budget) || y27.Consomme != y.Consomme || y27.ResteAFaire != y.ResteAFaire ||
+		y27.ProvisionsSecurisees != y.ProvisionsSecurisees || y27.AtterrissagePlan != y.AtterrissagePlan ||
+		fv(y27.EcartPlan) != fv(y.EcartPlan) || fv(y27.NonConsomme) != fv(y.NonConsomme) || fs(y27.Statut) != fs(y.Statut) {
+		t.Errorf("Y 2027 ≠ tout : %+v", y27)
 	}
-	first := y27.Series[0]
-	if len(y27.Series) != 52 || first.Week != "2027-W01" || first.BudgetCumul != 1000 || first.ReelCumul != nil || fv(first.PlanCumul) != 1178 {
-		t.Errorf("Y 2027 premier point = %+v (%d points)", first, len(y27.Series))
+	if len(y27.Series) != 52 || y27.Series[0].Week != "2027-W01" || y27.Series[0].ReelCumul != nil {
+		t.Errorf("Y 2027 séries : %d points, %+v", len(y27.Series), y27.Series[0])
 	}
-	if pt := fcPoint(t, y27, "2027-W09"); fv(pt.PlanCumul) != 178+9000+700 {
-		t.Errorf("Y 2027-W09 = %v", fv(pt.PlanCumul))
-	}
-
-	// Les tranches recomposent l'enveloppe : montants, consommé, reste, provisions sécurisées.
-	if !near(y26.Enveloppe.Montant+y27.Enveloppe.Montant, 36500, 0.02) || !near(y26.Consomme+y27.Consomme, y.Consomme, 0.02) ||
-		!near(y26.ResteAFaire+y27.ResteAFaire, y.ResteAFaire, 0.02) ||
-		!near(y26.ProvisionsSecurisees+y27.ProvisionsSecurisees, y.ProvisionsSecurisees, 0.02) {
-		t.Errorf("tranches ≠ enveloppe : %v + %v", y26.Enveloppe.Montant, y27.Enveloppe.Montant)
+	for _, w := range []string{"2027-W01", "2027-W09", "2027-W26"} {
+		a, b := fcPoint(t, y27, w), fcPoint(t, y, w)
+		if a.BudgetCumul != b.BudgetCumul || fv(a.PlanCumul) != fv(b.PlanCumul) {
+			t.Errorf("Y %s : 2027 budget %v plan %v, tout %v / %v", w, a.BudgetCumul, fv(a.PlanCumul), b.BudgetCumul, fv(b.PlanCumul))
+		}
 	}
 
 	// Z : 2026 entière (prorata 1) ; hors de 2027. O (plan 2025) hors des deux années.
@@ -263,12 +264,17 @@ func TestPrevisionsAnnee(t *testing.T) {
 		t.Errorf("N tout = %+v", n)
 	}
 
-	// Global : périmètre des tranches de l'année.
+	// Global : 2026 = tranche de Y (qui se poursuit) + Z ; 2027 = Y entière (DECISIONS n° 35).
 	g26, g27 := p26.Global, p27.Global
-	if fv(g26.Budget) != 23700 || g26.Echeance != "2027-01-03" || len(g26.Series) != 53 || fv(g27.Budget) != 17800 ||
+	if fv(g26.Budget) != 23700 || g26.Echeance != "2027-01-03" || len(g26.Series) != 53 || fv(g27.Budget) != 36500 ||
 		g27.Echeance != "2027-06-30" || len(g27.Series) != 26 || g27.Series[25].Week != "2027-W26" ||
-		fv(g27.Series[25].PlanCumul) != 27658 || p27.Enveloppes.NbConfigures != 1 || p27.Enveloppes.Montant != 17800 {
+		fv(g27.Series[25].PlanCumul) != 46715 || p27.Enveloppes.NbConfigures != 1 || p27.Enveloppes.Montant != 36500 {
 		t.Errorf("global 2026 %+v / 2027 %+v", g26, g27)
+	}
+	// Écart à terminaison 2026 : celui de Z (se termine en 2026) + le seul dépassement de la tranche de Y.
+	if want := round2(fv(z26.EcartPlan) + max(0, fv(y26.EcartPlan))); fv(g26.EcartPlan) != want || p26.Enveloppes.Ecart != want ||
+		p26.Enveloppes.NbPoursuite != 1 || p26.Enveloppes.MontantPoursuite != 18700 || p27.Enveloppes.NbPoursuite != 0 {
+		t.Errorf("écart à terminaison 2026 %v (attendu %v), synthèse %+v", fv(g26.EcartPlan), want, p26.Enveloppes)
 	}
 
 	// Les anomalies, KPI et natures ne dépendent pas de l'année : AnalyseResult reste « Tout ».
@@ -371,5 +377,51 @@ func TestPrevisionsETP(t *testing.T) {
 	s.SemainesVerrouillees = nil
 	if pt := fcPoint(t, findCT(t, Run(in, s).Previsions, "E"), "2026-W51"); pt.ETP != 1.2 {
 		t.Errorf("E W51 non verrouillée : ETP %v", pt.ETP)
+	}
+}
+
+// TestPrevisionsAnneeTerminaison: en année N, l'écart est évalué à la fin de
+// l'enveloppe (DECISIONS n° 35). P (2026-07 → 2027-06) se poursuit en 2027 : sa
+// tranche 2026 sous-consommée n'est ni non consommée ni en sous-consommation, et
+// ne pèse pas sur l'écart du global. B (2025-10 → 2026-03) se termine en 2026 :
+// prise entière, consommé 2025 compris, séries de 2026 parties du cumul de 2025.
+func TestPrevisionsAnneeTerminaison(t *testing.T) {
+	s := store.DefaultSettings()
+	s.JoursFeries, s.SemainesVerrouillees = nil, nil
+	in := baseInput()
+	onePlan(&in, fcLine("P", 0, 10000, "2026-10-05", "2026-10-30", "FRAIS"))
+	refPlan(&in, "2026-10-01")
+	in.Enveloppes = map[string]domain.Enveloppe{
+		"P": fcEnv("2026-07-01", "2027-06-30", 100000),
+		"B": fcEnv("2025-10-01", "2026-03-31", 10000),
+	}
+	in.Entries = []domain.RealiseEntry{fcEntry("B", 3000, "2025-11-12"), fcEntry("B", 2000, "2026-02-10")}
+	pv := RunPrevisions(in, s, 2026)
+	checkSynthese(t, pv)
+	for _, p := range append(pv.ParCT, pv.Global) {
+		checkInvariants(t, p, pv.AsOf)
+		checkBudget(t, p, s)
+	}
+
+	p := findCT(t, pv, "P")
+	if p.Poursuite != "2027-06-30" || fv(p.NonConsomme) != 0 || p.SousConsommation || fv(p.EcartPlan) >= 0 ||
+		fs(p.Statut) != domain.PrevisionOK {
+		t.Errorf("P 2026 = poursuite %q, non consommé %v, sous-conso %v, écart %v", p.Poursuite, fv(p.NonConsomme), p.SousConsommation, fv(p.EcartPlan))
+	}
+
+	b := findCT(t, pv, "B")
+	if b.Poursuite != "" || b.Enveloppe == nil || *b.Enveloppe != (domain.Enveloppe{DateDebut: "2025-10-01", DateFin: "2026-03-31", Montant: 10000}) ||
+		b.Consomme != 5000 || fv(b.NonConsomme) != 5000 || fv(b.EcartPlan) != -5000 {
+		t.Errorf("B 2026 = %+v", b)
+	}
+	if w1 := fcPoint(t, b, "2026-W01"); fv(w1.ReelCumul) != 3000 {
+		t.Errorf("B 2026-W01 réel %v, attendu 3 000 (cumul 2025)", fv(w1.ReelCumul))
+	}
+
+	// Écart à terminaison : B seul (− 5 000) ; P n'y porterait que son dépassement.
+	g := pv.Global
+	if fv(g.EcartPlan) != -5000 || fv(g.NonConsomme) != 5000 || pv.Enveloppes.Ecart != -5000 ||
+		pv.Enveloppes.NonConsomme != 5000 || pv.Enveloppes.NbPoursuite != 1 || g.Consomme != 5000 {
+		t.Errorf("global 2026 : écart %v, non consommé %v, synthèse %+v", fv(g.EcartPlan), fv(g.NonConsomme), pv.Enveloppes)
 	}
 }

@@ -31,7 +31,8 @@ export function usePrevisions(): UsePrevisions {
   const { selection, setSelection, params, ready, result } = useAnalyse();
   const tout = result.data?.previsions;
   const annees = tout?.annees ?? [];
-  const stored = selection.annee ?? 0;
+  // Sans choix mémorisé : année (ISO) de la date de référence si elle est proposée, sinon Tout (DECISIONS n° 35).
+  const stored = selection.annee ?? isoYear(tout?.date_reference);
   const annee = stored > 0 && annees.includes(stored) ? stored : 0;
 
   const year = useQuery({
@@ -43,7 +44,7 @@ export function usePrevisions(): UsePrevisions {
     placeholderData: (prev) => prev ?? tout,
   });
 
-  const setAnnee = useCallback((n: number) => setSelection({ annee: n > 0 ? n : undefined }), [setSelection]);
+  const setAnnee = useCallback((n: number) => setSelection({ annee: n > 0 ? n : 0 }), [setSelection]);
 
   if (annee === 0)
     return {
@@ -66,4 +67,13 @@ export function usePrevisions(): UsePrevisions {
     annees,
     setAnnee,
   };
+}
+
+/** Année ISO d'une date "YYYY-MM-DD" (celle de sa semaine ISO, comme les années proposées) ; 0 si illisible. */
+function isoYear(d: string | null | undefined): number {
+  const m = d ? /^(\d{4})-(\d{2})-(\d{2})/.exec(d) : null;
+  if (!m) return 0;
+  const t = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  t.setUTCDate(t.getUTCDate() + 3 - ((t.getUTCDay() + 6) % 7)); // jeudi de la semaine ISO
+  return t.getUTCFullYear();
 }

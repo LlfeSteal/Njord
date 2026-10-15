@@ -208,7 +208,7 @@ function CtTable({
               <td data-align="right">{fmtEur(p.atterrissage_tendance)}</td>
               <td data-align="right">{withEnv ? <Signed value={p.ecart_plan} /> : '—'}</td>
               <td data-align="right">
-                {withEnv && p.non_consomme != null ? <Reste value={p.non_consomme} over={false} warn={p.sous_consommation} /> : '—'}
+                {withEnv && p.non_consomme != null ? <Reste value={p.non_consomme} over={false} warn={p.sous_consommation} poursuite={p.poursuite} /> : '—'}
               </td>
             </tr>
           );

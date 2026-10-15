@@ -657,10 +657,14 @@ type PrevisionCT struct {
 	// seuil_sous_conso_eur), plancher 0 ; null sans budget.
 	CibleMin *float64 `json:"cible_min"`
 	// Enveloppe (DECISIONS n° 19) : tout le prévisionnel porte sur [date_debut, date_fin].
-	Enveloppe             *Enveloppe       `json:"enveloppe"`               // nil = CT sans enveloppe (global : toujours nil)
-	PlanHorsEnveloppe     float64          `json:"plan_hors_enveloppe"`     // PPS prévu hors des semaines de la période (+ PPS hors série)
-	ConsommeHorsEnveloppe float64          `json:"consomme_hors_enveloppe"` // € réalisés datés hors de la période (exclus du consommé)
-	Series                []PrevisionPoint `json:"series"`
+	Enveloppe             *Enveloppe `json:"enveloppe"`               // nil = CT sans enveloppe (global : toujours nil)
+	PlanHorsEnveloppe     float64    `json:"plan_hors_enveloppe"`     // PPS prévu hors des semaines de la période (+ PPS hors série)
+	ConsommeHorsEnveloppe float64    `json:"consomme_hors_enveloppe"` // € réalisés datés hors de la période (exclus du consommé)
+	// DECISIONS n° 35 : année N, enveloppe qui continue après N = date_fin de l'enveloppe
+	// entière ("" sinon) ; tranche de N sans non consommé ni sous-consommation, le
+	// dépassement de la tranche reste suivi.
+	Poursuite string           `json:"poursuite"`
+	Series    []PrevisionPoint `json:"series"`
 }
 
 // PrevisionStatut: depassement si atterrissage plan > budget ; vigilance si
@@ -706,12 +710,14 @@ type EnveloppesSynthese struct {
 	NbConfigures       int     `json:"nb_configures"`        // dont CT avec enveloppe
 	Montant            float64 `json:"montant"`              // Σ montants des enveloppes
 	Atterrissage       float64 `json:"atterrissage"`         // Σ atterrissage_plan (sécurisé) des CT configurés
-	Ecart              float64 `json:"ecart"`                // atterrissage − montant (net : les CT se compensent)
+	Ecart              float64 `json:"ecart"`                // écart net à terminaison (DECISIONS n° 34, 35) : Σ (atterrissage − montant) des CT qui se terminent, + dépassements des CT qui se poursuivent
 	Depassement        float64 `json:"depassement"`          // Σ ecart_plan des CT au statut depassement (DECISIONS n° 22) : depassement > 0 ⇔ NbDepassement > 0
 	NbDepassement      int     `json:"nb_depassement"`       // CT configurés au statut depassement
 	NonConsomme        float64 `json:"non_consomme"`         // Σ non_consomme des CT configurés, CT par CT sans compensation (DECISIONS n° 21)
 	NbSousConsommation int     `json:"nb_sous_consommation"` // CT configurés en sous_consommation
 	PlanHorsEnveloppe  float64 `json:"plan_hors_enveloppe"`  // Σ plan_hors_enveloppe des CT configurés
+	NbPoursuite        int     `json:"nb_poursuite"`         // année N : CT dont l'enveloppe continue après N (DECISIONS n° 35)
+	MontantPoursuite   float64 `json:"montant_poursuite"`    // Σ montants des tranches de N de ces CT
 }
 
 // ---------------------------------------------------------------------------

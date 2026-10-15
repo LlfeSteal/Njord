@@ -199,16 +199,17 @@ func TestPrevisionsReferenceAnnee(t *testing.T) {
 	}
 	p26, p27 := RunPrevisions(in, s, 2026), RunPrevisions(in, s, 2027)
 	y, y26, y27 := findCT(t, tout, "Y"), findCT(t, p26, "Y"), findCT(t, p27, "Y")
-	// 2026 : reste = jeudi-vendredi de W40 + W41..W53 ; 13 semaines restantes.
-	if y26.Consomme != 1000 || y26.ResteAFaire != 13400 || y26.SemainesRestantes != 13 || y26.RythmeHebdo != 250 {
+	// 2026 : reste = jeudi-vendredi de W40 + W41..W53 ; 13 semaines restantes ; l'enveloppe se poursuit
+	// en 2027 (DECISIONS n° 35).
+	if y26.Consomme != 1000 || y26.ResteAFaire != 13400 || y26.SemainesRestantes != 13 || y26.RythmeHebdo != 250 ||
+		y26.Poursuite != "2027-06-30" || fv(y26.NonConsomme) != 0 || y26.SousConsommation {
 		t.Errorf("Y 2026 = %+v", y26)
 	}
-	// 2027 : semaines restantes depuis le début de N (26), reste W01..W25.
-	if y27.Consomme != 0 || y27.ResteAFaire != 25000 || y27.SemainesRestantes != 26 || y27.RythmeHebdo != 250 {
+	// 2027 : l'enveloppe se termine en 2027, prise entière (DECISIONS n° 35) : consommé et reste de toute
+	// la période ; semaines restantes depuis le début de N (26).
+	if y27.Consomme != y.Consomme || y27.ResteAFaire != y.ResteAFaire || y27.SemainesRestantes != 26 || y27.RythmeHebdo != 250 ||
+		y27.Poursuite != "" || y.Consomme != 1000 || y.ResteAFaire != 38400 {
 		t.Errorf("Y 2027 = %+v", y27)
-	}
-	if !near(y26.ResteAFaire+y27.ResteAFaire, y.ResteAFaire, 0.02) || y.Consomme != 1000 {
-		t.Errorf("tranches ≠ tout : %v + %v ≠ %v", y26.ResteAFaire, y27.ResteAFaire, y.ResteAFaire)
 	}
 	// 2027 : as_of avant l'année, aucun réel (tout le réalisé de 2027 est ≥ D).
 	for _, pt := range y27.Series {
@@ -216,7 +217,8 @@ func TestPrevisionsReferenceAnnee(t *testing.T) {
 			t.Errorf("Y 2027 %s : réel %v", pt.Week, fv(pt.ReelCumul))
 		}
 	}
-	if w1 := fcPoint(t, y27, "2027-W01"); fv(w1.PlanCumul) != 1000 {
+	// Plan en W01 = consommé 2026 (1 000) + plan ≥ D de 2026 (13 400) + W01 (1 000).
+	if w1 := fcPoint(t, y27, "2027-W01"); fv(w1.PlanCumul) != 15400 {
 		t.Errorf("Y 2027 W01 plan %v", fv(w1.PlanCumul))
 	}
 	// 2026 : W40 = consommé, puis plus de réel ; plan ≥ D de W40 cumulé en W41.
@@ -226,7 +228,7 @@ func TestPrevisionsReferenceAnnee(t *testing.T) {
 		t.Errorf("Y 2026 séries : W40 %v/%v, W41 %v/%v, W53 %v/%v", fv(w40.ReelCumul), fv(w40.PlanCumul), fv(w41.ReelCumul),
 			fv(w41.PlanCumul), fv(w53.ReelCumul), fv(w53.PlanCumul))
 	}
-	if p26.Global.Consomme != 1000 || p27.Global.Consomme != 0 {
+	if p26.Global.Consomme != 1000 || p27.Global.Consomme != 1000 {
 		t.Errorf("global : %v / %v", p26.Global.Consomme, p27.Global.Consomme)
 	}
 }

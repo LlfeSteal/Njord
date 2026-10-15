@@ -71,14 +71,16 @@ import (
 // l'enveloppe (comme heures_plan).
 //
 // Global = périmètre des CT avec enveloppe, chacun sur son budget et son
-// horizon : sommes, puis mêmes formules (statut, écarts, seuils) sur les sommes,
-// sauf le non consommé = Σ des CT, sans compensation avec les dépassements (n° 21) ;
-// séries sur l'union des périodes. Les CT sans enveloppe sont résumés à part
+// horizon : sommes, puis mêmes formules (statut, écarts, seuils, non consommé)
+// sur les sommes. Les enveloppes sont fongibles (DECISIONS n° 34) : le non
+// consommé du global est le solde net, sous-consommations et dépassements des CT
+// se compensent ; séries sur l'union des périodes. Les CT sans enveloppe sont résumés à part
 // (Previsions.HorsEnveloppe).
 //
 // Synthèse des enveloppes (Previsions.Enveloppes) : dépassement = Σ ecart_plan
 // des seuls CT en statut dépassement (DECISIONS n° 22), d'où dépassement > 0 ⇔
-// nb_depassement > 0 ; non consommé = Σ des CT, sans compensation.
+// nb_depassement > 0 ; non consommé = Σ des CT, sans compensation : lecture
+// brute, détail du solde net du global (DECISIONS n° 34).
 //
 // Filtre d'année (DECISIONS n° 24, previsionsFor(N)) : année N = semaines ISO
 // d'année ISO N, du lundi de N-W01 au dimanche de sa dernière semaine. Une
@@ -98,6 +100,13 @@ import (
 // date, faute de prorata, n'appartiennent à aucune année), horizon borné à la
 // fin de N ; un tel CT sans rien dans N et une enveloppe sans tranche sortent
 // de par_ct. Séries sur les semaines de N, cumulées depuis 0.
+//
+// Écart à terminaison (DECISIONS n° 35) : en année N, une enveloppe qui se
+// termine en N et a commencé avant est prise entière (bucket au filtre élargi
+// à son début, séries de N parties du cumul antérieur) ; une enveloppe qui
+// continue après N garde sa tranche, sans non consommé ni sous-consommation
+// (poursuite), son dépassement restant suivi. L'écart du global ne compte que
+// les CT qui se terminent, plus le dépassement de ceux qui se poursuivent.
 
 // fcTolerance absorbe les arrondis dans la comparaison atterrissage / budget.
 const fcTolerance = 0.5
@@ -131,6 +140,15 @@ func (y fcYear) week(w string) bool { return !y.active || (w >= y.wLo && w <= y.
 // date: la date d (YYYY-MM-DD) appartient à l'année.
 func (y fcYear) date(d string) bool { return !y.active || (d >= y.dLo && d <= y.dHi) }
 
+// from widens the year back to the ISO week w (enveloppe commencée avant N qui
+// se termine en N, prise entière : DECISIONS n° 35).
+func (y fcYear) from(w string) fcYear {
+	if m, err := WeekMonday(w); err == nil && w < y.wLo {
+		y.wLo, y.dLo = w, m.Format(time.DateOnly)
+	}
+	return y
+}
+
 // fcBucket accumulates the raw (unrounded) figures of one CT.
 type fcBucket struct {
 	pps, provisions float64
@@ -160,6 +178,12 @@ type fcBucket struct {
 	provUndated                  float64            // sécurisées comptées sans date
 	// Année N : skip = enveloppe sans tranche ; active = le CT a quelque chose dans N.
 	skip, active bool
+	// Année N (DECISIONS n° 35) : yr = filtre des montants du CT (l'année, ou du début
+	// de l'enveloppe à la fin de N pour une enveloppe commencée avant N qui se termine
+	// en N, prise entière) ; poursuite = date_fin d'une enveloppe qui continue après N
+	// (tranche de N, jamais de sous-consommation en N).
+	yr        fcYear
+	poursuite string
 }
 
 func newFcBucket() *fcBucket {
@@ -267,10 +291,13 @@ type fcCalc struct {
 	budgeted bool
 	budget   float64
 	echeance string  // fin de l'enveloppe (global : la plus tardive)
-	nc       float64 // non consommé (global : Σ des CT, sans compensation)
+	nc       float64 // non consommé (global : solde net, DECISIONS n° 34)
 	// Enveloppe (DECISIONS n° 19).
 	env                 *domain.Enveloppe
 	planHors, consoHors float64
+	poursuite           string // DECISIONS n° 35 : enveloppe qui continue après N (pas de non consommé en N)
+	// ecartNet : écart à terminaison du global (DECISIONS n° 34, 35) ; nil = atterPlan − budget.
+	ecartNet *float64
 }
 
 // fcAxis is the weekly axis of a forecast and the as_of landmarks.
@@ -338,18 +365,33 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 			if e, ok := r.fcEnveloppe(ct); ok {
 				full := e
 				b.full = &full
-				if !y.active {
+				wd, we := WeekOfDate(e.DateDebut), WeekOfDate(e.DateFin)
+				switch {
+				case !y.active:
 					b.env = &e
-				} else if s, ratio, ok := fcSlice(e, y); ok {
-					b.env, b.ratio = &s, ratio
-				} else {
-					b.skip, b.ratio = true, 0
+				case we >= y.wLo && we <= y.wHi && wd < y.wLo:
+					// Se termine en N, commencée avant : enveloppe entière, montants
+					// comptés depuis son début (DECISIONS n° 35).
+					b.env = &e
+					b.yr = y.from(wd)
+				default:
+					if s, ratio, ok := fcSlice(e, y); ok {
+						b.env, b.ratio = &s, ratio
+						if we > y.wHi {
+							b.poursuite = e.DateFin // continue après N (DECISIONS n° 35)
+						}
+					} else {
+						b.skip, b.ratio = true, 0
+					}
 				}
 				if b.env != nil {
 					b.wd, b.we = WeekOfDate(b.env.DateDebut), WeekOfDate(b.env.DateFin)
 				}
 			} else if y.active {
 				b.ratio = 0 // sans enveloppe, rien ne permet de rattacher un montant sans date à l'année
+			}
+			if b.yr == (fcYear{}) {
+				b.yr = y
 			}
 			buckets[ct] = b
 		}
@@ -394,7 +436,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 			b.ppsHorsSerie += l.PPS // hors série : n'appartient à aucune année
 		}
 		for w, v := range spread {
-			if !y.week(w) {
+			if !b.yr.week(w) {
 				continue
 			}
 			if y.active {
@@ -413,7 +455,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		if l.ChargeTotale != 0 {
 			if hours, ok := r.cal.Distribute(l.DateDebut, l.DateFin, l.ChargeTotale); ok {
 				for w, h := range hours {
-					if y.week(w) {
+					if b.yr.week(w) {
 						b.hplan[w] += h
 						b.active = true
 					}
@@ -421,7 +463,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 			}
 		}
 		for w, v := range r.fcETP(l, jo) {
-			if y.week(w) {
+			if b.yr.week(w) {
 				b.etp[w] += v
 				b.active = true
 			}
@@ -449,7 +491,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		if ref != "" && d >= r4 && d < ref && (b.full == nil || (d >= b.full.DateDebut && d <= b.full.DateFin)) {
 			b.rythme4 += e.TotalEur
 		}
-		if !y.week(w) || (ref != "" && d >= ref) {
+		if !b.yr.week(w) || (ref != "" && d >= ref) {
 			continue
 		}
 		b.active = true
@@ -476,7 +518,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 			if b.ratio == 0 {
 				continue
 			}
-		case !y.date(d):
+		case !b.yr.date(d):
 			continue
 		}
 		b.active = true
@@ -556,6 +598,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 	}
 	sort.Strings(cts)
 
+	ecartNet := 0.0 // écart à terminaison du global (DECISIONS n° 35)
 	g := fcCalc{budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n), etp: make([]float64, n)}
 	out := domain.Previsions{Annees: r.fcAnnees(ref, buckets), DateReference: ref, AsOf: asOf, AsOfWeek: asOfWeek,
@@ -578,7 +621,6 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		// Global = périmètre des enveloppes, chaque CT sur son budget et son horizon.
 		g.budgeted = true
 		g.budget += c.budget
-		g.nc += round2(c.nc) // Σ des montants affichés par CT : global = synthèse au centime (n° 21)
 		if c.echeance > g.echeance {
 			g.echeance = c.echeance
 		}
@@ -593,6 +635,7 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 		g.reste += c.reste
 		g.atterPlan += c.atterPlan
 		g.atterTend += c.atterTend
+		ecartNet += fcEcartTerminaison(c.atterPlan-c.budget, c.poursuite)
 		g.rythme += c.rythme
 		if c.fin > g.fin {
 			g.fin = c.fin
@@ -613,6 +656,10 @@ func (r *run) previsionsFor(annee int) domain.Previsions {
 	// Séries du global sur l'union des périodes [min WD, max WE] ; vides sans enveloppe.
 	lo, hi := 0, -1
 	if g.budgeted {
+		// Solde net à terminaison (enveloppes fongibles, DECISIONS n° 34) : en année N, les
+		// CT qui se poursuivent n'y portent que leur dépassement (n° 35).
+		g.ecartNet = &ecartNet
+		g.nc = math.Max(0, -ecartNet)
 		g.sr = fcRemaining(ax.weeks, ax.fromWeek, g.echeance)
 		lo, hi = n, -1
 		for i, w := range ax.weeks {
@@ -749,7 +796,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 		provSec: b.provSec, provAleas: b.provAleas, provHors: b.provHors,
 		budgetCum: make([]float64, n), reelCum: make([]float64, n), planCum: make([]float64, n),
 		tendCum: make([]float64, n), hp: make([]float64, n), hr: make([]float64, n), etp: make([]float64, n),
-		env: b.env, consoHors: b.consoHors}
+		env: b.env, consoHors: b.consoHors, poursuite: b.poursuite}
 	if b.env != nil {
 		c.budgeted, c.budget, c.echeance, c.planHors = true, b.env.Montant, b.env.DateFin, b.ppsHorsSerie
 	}
@@ -775,7 +822,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 	}
 	c.atterPlan = c.consomme + c.reste + c.provSec
 	c.atterTend = c.consomme + c.rythme*float64(c.sr)
-	if c.budgeted {
+	if c.budgeted && c.poursuite == "" { // continue après N : rien n'est perdu en N (DECISIONS n° 35)
 		c.nc = fcNonConsomme(c.budget, c.atterPlan)
 	}
 
@@ -805,8 +852,28 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 		}
 	}
 
-	budgetCum, reelCum := 0.0, b.undated
-	base := b.undated // cumul réel à as_of (point de départ des projections)
+	// Enveloppe commencée avant l'axe (année N, prise entière : DECISIONS n° 35) :
+	// les cumuls partent de ce qui précède le premier point de l'axe.
+	budgetCum, reelCum, futurAvant := 0.0, b.undated, 0.0
+	if n > 0 {
+		for w, v := range b.reel {
+			if w < axis[0] {
+				reelCum += v
+			}
+		}
+		for w, v := range b.prevu {
+			if w < axis[0] && b.inPeriod(w) {
+				budgetCum += v
+			}
+		}
+		for w, v := range b.prevuFutur {
+			if w < axis[0] && b.inPeriod(w) {
+				futurAvant += v // plan ≥ D antérieur à l'axe (as_of avant l'axe)
+			}
+		}
+	}
+	base := reelCum + futurAvant // cumul à as_of (point de départ de la projection plan)
+	tendBase := reelCum          // départ de la tendance (réel seul)
 	for i, w := range axis {
 		if b.inPeriod(w) {
 			budgetCum += b.prevu[w]
@@ -820,7 +887,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 			c.hr[i] = b.hreel[w]
 		}
 		if i == asIdx {
-			base = reelCum
+			base, tendBase = reelCum, reelCum
 		}
 	}
 	plan := base
@@ -831,7 +898,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 		case i == asIdx:
 			// add[asIdx] ≠ 0 seulement si as_of est la dernière semaine de l'axe.
 			plan = base + add[i]
-			c.planCum[i], c.tendCum[i] = plan, base
+			c.planCum[i], c.tendCum[i] = plan, tendBase
 		default:
 			if b.inPeriod(w) {
 				plan += b.prevuFutur[w]
@@ -842,7 +909,7 @@ func (r *run) fcCompute(b *fcBucket, ax fcAxis) fcCalc {
 			if k > c.sr {
 				k = c.sr
 			}
-			c.tendCum[i] = base + c.rythme*float64(k)
+			c.tendCum[i] = tendBase + c.rythme*float64(k)
 		}
 	}
 	return c
@@ -871,6 +938,16 @@ func fcRemaining(axis []string, asOfWeek, fin string) int {
 		return 0
 	}
 	return int(z.Sub(a).Hours()/24/7+0.5) + extra
+}
+
+// fcEcartTerminaison: contribution d'un CT à l'écart à terminaison (DECISIONS
+// n° 34, 35) : son écart, ou, si son enveloppe se poursuit après l'année N, son
+// seul dépassement (ce qui n'est pas consommé en N peut l'être en N+1).
+func fcEcartTerminaison(ecart float64, poursuite string) float64 {
+	if poursuite != "" {
+		return math.Max(0, ecart)
+	}
+	return ecart
 }
 
 // fcNonConsomme: part du budget que le plan de charge ne consommera pas =
@@ -910,6 +987,11 @@ func fcPtr(v float64) *float64 {
 // plan (n° 21), seuils % et €, zone cible.
 func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
 	statut := fcStatut(c)
+	ecart := c.atterPlan - c.budget
+	if c.ecartNet != nil { // global : écart à terminaison (DECISIONS n° 35)
+		ecart = *c.ecartNet
+		statut = fcStatut(fcCalc{budget: c.budget, atterPlan: c.budget + ecart, atterTend: c.atterTend})
+	}
 	necessaire := 0.0
 	if c.sr > 0 {
 		necessaire = math.Max(0, (c.budget-c.consomme)/float64(c.sr))
@@ -917,7 +999,7 @@ func fcBudget(p *domain.PrevisionCT, c fcCalc, s domain.Settings) {
 	p.BudgetSource = "enveloppe"
 	p.Budget = fcPtr(c.budget)
 	p.PctConsomme = pct(c.consomme, c.budget)
-	p.EcartPlan = fcPtr(c.atterPlan - c.budget)
+	p.EcartPlan = fcPtr(ecart)
 	p.EcartTendance = fcPtr(c.atterTend - c.budget)
 	p.Statut = &statut
 	p.Echeance = c.echeance
@@ -954,6 +1036,7 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, ax fcAxis, cov []domain.Couv
 		Series:                  make([]domain.PrevisionPoint, 0, max(0, hi-lo+1)),
 		PlanHorsEnveloppe:       round2(c.planHors),
 		ConsommeHorsEnveloppe:   round2(c.consoHors),
+		Poursuite:               c.poursuite,
 	}
 	if c.env != nil {
 		e := *c.env
@@ -983,16 +1066,23 @@ func (r *run) fcBuild(ct, libelle string, c fcCalc, ax fcAxis, cov []domain.Couv
 }
 
 // fcSynthese: lecture brute des CT configurés de par_ct (DECISIONS n° 19),
-// sans compensation entre CT pour le dépassement et le non consommé. Le
+// sans compensation entre CT pour le dépassement et le non consommé ; ecart =
+// solde net (celui du global, DECISIONS n° 34). Le
 // dépassement ne somme que les CT en statut dépassement (n° 22) : un résidu
 // d'arrondi (≤ fcTolerance) reste lisible sur sa ligne mais n'est pas agrégé.
 func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
 	out := domain.EnveloppesSynthese{NbCT: len(par)}
+	ecart := 0.0
 	for _, p := range par {
 		if p.Enveloppe == nil {
 			continue
 		}
 		out.NbConfigures++
+		ecart += fcEcartTerminaison(p.AtterrissagePlan-p.Enveloppe.Montant, p.Poursuite)
+		if p.Poursuite != "" {
+			out.NbPoursuite++
+			out.MontantPoursuite += p.Enveloppe.Montant
+		}
 		out.Montant += p.Enveloppe.Montant
 		out.Atterrissage += p.AtterrissagePlan
 		out.NonConsomme += *p.NonConsomme
@@ -1005,7 +1095,8 @@ func fcSynthese(par []domain.PrevisionCT) domain.EnveloppesSynthese {
 			out.NbSousConsommation++
 		}
 	}
-	out.Ecart = round2(out.Atterrissage - out.Montant)
+	out.Ecart = round2(ecart)
+	out.MontantPoursuite = round2(out.MontantPoursuite)
 	out.Montant, out.Atterrissage = round2(out.Montant), round2(out.Atterrissage)
 	out.Depassement, out.NonConsomme = round2(out.Depassement), round2(out.NonConsomme)
 	out.PlanHorsEnveloppe = round2(out.PlanHorsEnveloppe)

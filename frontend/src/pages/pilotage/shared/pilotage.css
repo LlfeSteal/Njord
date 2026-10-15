@@ -230,6 +230,9 @@
 .pil-signed[data-tone='warning'] {
   color: var(--warning);
 }
+.pil-signed[data-tone='neutral'] {
+  color: var(--text-secondary);
+}
 .pil-signed[data-tone='success'] {
   color: var(--success);
 }

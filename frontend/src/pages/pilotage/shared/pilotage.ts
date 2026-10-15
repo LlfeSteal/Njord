@@ -235,10 +235,15 @@ export interface Echeance {
   /** Dépassement de l'enveloppe par l'atterrissage sécurisé (`ecart_plan`, DECISIONS n° 21), 0 sinon. */
   depassement: number;
   rythmeNecessaire: number;
+  /** Rythme réalisé des 4 semaines avant la date de référence (`rythme_hebdo`). */
   rythmeActuel: number;
+  /** Rythme prévu par le plan de charge : reste à faire ÷ semaines restantes (DECISIONS n° 33), 0 sans semaine. */
+  rythmePdc: number;
   semaines: number;
   /** Au-delà des seuils de sous-consommation (Réglages). */
   sousConso: boolean;
+  /** Année N : fin de l'enveloppe entière quand elle continue après N (DECISIONS n° 35), '' sinon. */
+  poursuite: string;
   /**
    * Année du filtre (DECISIONS n° 24), 0 = Tout. Avec une année, l'enveloppe est la tranche de l'année et l'échéance
    * la fin de cette tranche : les mots disent « l'enveloppe en 2027 ».
@@ -253,6 +258,7 @@ export function echeanceOf(p: PrevisionCT | null | undefined, annee = 0): Echean
   const projPlan = p.projection_plan_echeance ?? 0;
   const projTendance = p.projection_tendance_echeance ?? 0;
   const nonConsomme = Math.max(0, p.non_consomme ?? 0);
+  const semaines = p.semaines_echeance ?? 0;
   return {
     kind: p.enveloppe ? 'enveloppe' : 'perimetre',
     enveloppe: p.enveloppe ?? null,
@@ -261,13 +267,14 @@ export function echeanceOf(p: PrevisionCT | null | undefined, annee = 0): Echean
     projPlan,
     projTendance,
     nonConsomme,
-    // Plan seul (DECISIONS n° 21). Un CT n'a jamais les deux ; le périmètre peut (non consommé sommé CT par CT, écart net) :
-    // la lecture reste alors « non consommé », comme la ligne de total du tableau.
+    // Plan seul (DECISIONS n° 21). Ni un CT ni le périmètre (solde net, enveloppes fongibles, n° 34) n'ont les deux.
     depassement: nonConsomme > 0.5 ? 0 : Math.max(0, p.ecart_plan ?? projPlan - budget),
     rythmeNecessaire: p.rythme_necessaire ?? 0,
     rythmeActuel: p.rythme_hebdo ?? 0,
-    semaines: p.semaines_echeance ?? 0,
+    rythmePdc: semaines > 0 ? p.reste_a_faire / semaines : 0,
+    semaines,
     sousConso: p.sous_consommation ?? false,
+    poursuite: p.poursuite ?? '',
     annee: annee > 0 ? annee : 0,
   };
 }
@@ -348,7 +355,10 @@ export function enveloppesOf(fc: Previsions | null | undefined): EnveloppesSynth
     non_consomme: 0,
     nb_sous_consommation: 0,
     plan_hors_enveloppe: 0,
+    nb_poursuite: 0,
+    montant_poursuite: 0,
   };
+  let ecart = 0;
   for (const p of fc.par_ct) {
     if (!p.enveloppe) continue;
     s.nb_configures += 1;
@@ -362,8 +372,15 @@ export function enveloppesOf(fc: Previsions | null | undefined): EnveloppesSynth
     s.non_consomme += Math.max(0, p.non_consomme ?? 0);
     if (p.sous_consommation) s.nb_sous_consommation += 1;
     s.plan_hors_enveloppe += p.plan_hors_enveloppe ?? 0;
+    // Écart à terminaison (DECISIONS n° 35) : une enveloppe qui se poursuit n'y porte que son dépassement.
+    const e = p.atterrissage_plan - p.enveloppe.montant;
+    ecart += p.poursuite ? Math.max(0, e) : e;
+    if (p.poursuite) {
+      s.nb_poursuite = (s.nb_poursuite ?? 0) + 1;
+      s.montant_poursuite = (s.montant_poursuite ?? 0) + p.enveloppe.montant;
+    }
   }
-  s.ecart = s.atterrissage - s.montant;
+  s.ecart = ecart;
   return s;
 }
 

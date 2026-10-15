@@ -17,6 +17,7 @@ import {
   enAnnee,
   enveloppesOf,
   fmtEurShort,
+  fmtEurSigned,
   forecastSentence,
   graviteGlyph,
   hasEnveloppe,
@@ -32,17 +33,17 @@ function expectedPct(p: PrevisionCT, asOfWeek: string): number | undefined {
 }
 
 /**
- * Chiffres clés (DECISIONS n° 20) : consommé sur Σ enveloppes, enveloppes à risque d'être perdues, dépassement
- * (lecture brute, sans compensation entre CT). Sans aucune enveloppe : état vide vers la saisie des enveloppes
- * (DECISIONS n° 27). Année choisie : tranches de l'année (DECISIONS n° 24).
+ * Chiffres clés (DECISIONS n° 20, 34) : consommé sur Σ enveloppes, puis estimation écart à terminaison.
+ * Enveloppes fongibles (DECISIONS n° 34) : l'écart est le solde net signé du périmètre (Σ atterrissages −
+ * Σ enveloppes), la lecture brute CT par CT (`previsions.enveloppes`) est le détail en sous-titre. Sans aucune
+ * enveloppe : état vide vers la saisie des enveloppes (DECISIONS n° 27). Année choisie : tranches de l'année (n° 24).
  */
 function KeyFigures({ fc }: { fc: Previsions | null }) {
   if (!fc)
     return (
       <div className="pil-metrics">
         <Metric label="Consommé" value="—" sub="Prévisions non disponibles" />
-        <Metric label="À risque d’être perdus" value="—" />
-        <Metric label="Dépassement" value="—" />
+        <Metric label="Estimation écart à terminaison" value="—" />
       </div>
     );
   const g = fc.global;
@@ -65,8 +66,10 @@ function KeyFigures({ fc }: { fc: Previsions | null }) {
   const pct = g.pct_consomme ?? (budget ? (g.consomme / budget) * 100 : 0);
   const hors = fc.hors_enveloppe;
   const nbHors = hors?.nb_ct ?? env.nb_ct - env.nb_configures;
-  const risk = env.non_consomme > 0.5;
-  const over = env.depassement > 0.5;
+  // Solde net (DECISIONS n° 34) : < 0 = sous-consommation, > 0 = surconsommation.
+  const ecart = env.ecart;
+  const under = ecart < -0.5;
+  const over = ecart > 0.5;
   return (
     <>
       <div className="pil-metrics">
@@ -83,20 +86,19 @@ function KeyFigures({ fc }: { fc: Previsions | null }) {
           />
         </Metric>
         <Metric
-          label="À risque d’être perdus"
-          value={fmtEur(env.non_consomme)}
-          tone={risk ? 'warning' : undefined}
-          glyph={risk ? SOUS_CONSO_GLYPH : undefined}
-          sub={`${env.nb_sous_consommation} CT sous la zone cible${en}`}
-        />
-        <Metric
-          label="Dépassement"
-          value={fmtEur(env.depassement)}
-          tone={over ? 'danger' : undefined}
-          glyph={over ? { kind: 'danger', tone: 'danger' } : undefined}
-          sub={`${env.nb_depassement} CT au-dessus de leur enveloppe${en}`}
+          label="Estimation écart à terminaison"
+          value={fmtEurSigned(Math.abs(ecart) > 0.5 ? ecart : 0)}
+          tone={over ? 'danger' : under ? 'warning' : undefined}
+          glyph={over ? { kind: 'danger', tone: 'danger' } : under ? SOUS_CONSO_GLYPH : undefined}
+          sub={`Sous-consommation : ${fmtEurShort(env.non_consomme)} · Surconsommation : ${fmtEurShort(env.depassement)}${en}`}
         />
       </div>
+      {anneeOf(fc) > 0 && (env.nb_poursuite ?? 0) > 0 && (
+        <p className="pil-note">
+          {env.nb_poursuite} CT se poursuivent après {anneeOf(fc)} : rien n’est perdu sur l’année, seul leur dépassement entre
+          dans l’écart.
+        </p>
+      )}
       {nbHors > 0 && (
         <p className="pil-note">
           <Link to="/enveloppes" size="sm">

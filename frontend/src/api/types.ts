@@ -623,6 +623,11 @@ export interface PrevisionCT {
   plan_hors_enveloppe: number;
   /** € réalisés datés hors de la période (exclus du consommé). */
   consomme_hors_enveloppe: number;
+  /**
+   * Année N (DECISIONS n° 35) : date de fin de l'enveloppe entière quand elle continue après N ('' sinon) ; la tranche
+   * de N n'a alors ni non consommé ni sous-consommation, son dépassement reste suivi.
+   */
+  poursuite?: string;
   series: PrevisionPoint[];
 }
 
@@ -642,15 +647,21 @@ export interface EnveloppesSynthese {
   montant: number;
   /** Σ atterrissage_plan des CT configurés. */
   atterrissage: number;
-  /** atterrissage − montant (net : les CT se compensent). */
+  /**
+   * Écart net à terminaison (DECISIONS n° 34, 35) : Σ (atterrissage − montant) des CT dont l'enveloppe se termine, plus le
+   * seul dépassement des CT qui se poursuivent après l'année N ; les CT se compensent (enveloppes fongibles).
+   */
   ecart: number;
   /** Σ ecart_plan des CT au statut `depassement` (DECISIONS n° 22) : depassement > 0 ⇔ nb_depassement > 0. */
   depassement: number;
   nb_depassement: number;
-  /** Σ non_consomme des CT configurés, CT par CT sans compensation (DECISIONS n° 21). */
+  /** Σ non_consomme des CT configurés, CT par CT sans compensation : lecture brute, détail du solde net (DECISIONS n° 21, 34). */
   non_consomme: number;
   nb_sous_consommation: number;
   plan_hors_enveloppe: number;
+  /** Année N : CT dont l'enveloppe continue après N (DECISIONS n° 35), et Σ des montants de leurs tranches de N. */
+  nb_poursuite?: number;
+  montant_poursuite?: number;
 }
 
 export interface Previsions {

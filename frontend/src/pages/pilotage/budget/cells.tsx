@@ -1,7 +1,7 @@
 // Cellules partagées des tableaux par CT (Budget, Prévisions) : une ligne, sans retour.
 import { ProgressBar, StatusGlyph } from '../../../ui';
 import type { Enveloppe } from '../../../api/types';
-import { fmtEur, fmtPct, fmtPeriod } from '../../../lib/format';
+import { fmtDate, fmtEur, fmtPct, fmtPeriod } from '../../../lib/format';
 import { fmtEurSigned, rowGlyph, rowReason } from '../shared/pilotage';
 import type { CtRow } from './model';
 import './budget.css';
@@ -52,8 +52,27 @@ export function BudgetCell({ b }: { b: { enveloppe: Enveloppe | null; budget: nu
  * « Reste à l'échéance » : non consommé (orange au-delà des seuils de sous-consommation) ou dépassement « + » en rouge.
  * Le signe porte l'information sans la couleur ; `title` explique le calcul (enveloppe − atterrissage sécurisé).
  */
-export function Reste({ value, over, warn, title }: { value: number | null; over: boolean; warn: boolean; title?: string }) {
+export function Reste({
+  value,
+  over,
+  warn,
+  title,
+  poursuite,
+}: {
+  value: number | null;
+  over: boolean;
+  warn: boolean;
+  title?: string;
+  /** Année N : l'enveloppe continue après N (DECISIONS n° 35) ; rien n'est perdu en N, seul un dépassement s'affiche. */
+  poursuite?: string;
+}) {
   if (value == null) return <>—</>;
+  if (poursuite && !over)
+    return (
+      <span className="pil-signed" data-tone="neutral" title={`L’enveloppe se poursuit jusqu’au ${fmtDate(poursuite)} : rien n’est perdu sur cette année`}>
+        Se poursuit
+      </span>
+    );
   if (over)
     return (
       <span className="pil-signed" data-tone="danger" title={title}>

@@ -19,8 +19,9 @@ export interface AnalyseSelection {
   to?: string;
   inactifs: boolean;
   /**
-   * Filtre d'année des vues temporelles (Vue d'ensemble, Budget, Prévisions ; DECISIONS n° 24) : 0 / absent = Tout.
-   * Mémorisé avec le reste de la sélection mais hors des paramètres de /analyse (servi par /analyse/previsions).
+   * Filtre d'année des vues temporelles (Vue d'ensemble, Budget, Prévisions ; DECISIONS n° 24) : 0 = Tout ; absent =
+   * année de la date de référence (DECISIONS n° 35). Mémorisé avec le reste de la sélection mais hors des paramètres de
+   * /analyse (servi par /analyse/previsions).
    */
   annee?: number;
 }
@@ -40,7 +41,7 @@ function read(): AnalyseSelection {
       from: v.from || undefined,
       to: v.to || undefined,
       inactifs: !!v.inactifs,
-      annee: typeof v.annee === 'number' && Number.isInteger(v.annee) && v.annee > 0 ? v.annee : undefined,
+      annee: typeof v.annee === 'number' && Number.isInteger(v.annee) && v.annee >= 0 ? v.annee : undefined,
     };
   } catch {
     return EMPTY;

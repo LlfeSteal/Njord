@@ -38,14 +38,14 @@ function partsOf(g: PrevisionCT): Part[] {
     {
       key: 'securisees',
       label: 'Provisions sécurisées',
-      hint: 'dans l’atterrissage',
+      hint: 'autres provisions',
       token: '--budget-prov-secured',
       eur: Math.max(0, g.provisions_securisees ?? 0),
     },
     {
       key: 'aleas',
       label: 'Provisions à risque',
-      hint: 'provisions pour aléas, hors atterrissage',
+      hint: 'provisions pour aléas',
       token: '--budget-prov-risk',
       eur: Math.max(0, g.provisions_aleas ?? 0),
     },
